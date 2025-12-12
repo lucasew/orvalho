@@ -21,7 +21,7 @@ we can assume the user isn't a threat to its own device. It should work in the s
   - Actor for a web server: reacts to the fetch event and respond with a Response, like a Service Worker.
   - Actor for a generic worker: takes arbitrary events and can respond back to those events.
   - Actor that interacts with a database: essentially exposes a repository pattern.
-- Platform expose native actors in the bus if the actor is authorized, using preferentially standardized web APIs
+- Platform expose native actors in the bus if the actor is authorized, using [preferentially standardized web APIs](https://wintertc.org/).
   - Native actor that runs compute using something like WebGPU: setup inferences for specific models.
   - Native bridge actor: connects one actor to another actor running in other machines.
   - Native actor that interacts with specific devices like cameras, mics, USB, ...
