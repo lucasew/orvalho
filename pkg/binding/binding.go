@@ -2,6 +2,8 @@ package binding
 
 import (
     "github.com/lucasew/orvalho/pkg/device"
+    gpuDevice "github.com/lucasew/orvalho/pkg/device/gpu"
+    cameraDevice "github.com/lucasew/orvalho/pkg/device/camera"
     "modernc.org/quickjs"
 )
 
@@ -36,8 +38,7 @@ func InjectDevices(vm *quickjs.VM, devices []device.Device) error {
     err = vm.RegisterFunc("_go_device_dispatch", func(id string, workgroups int) {
         for _, d := range devices {
             if d.ID() == id {
-               // Type assertion/interface check
-               if gpu, ok := d.(interface{ Dispatch(int) error }); ok {
+               if gpu, ok := d.(gpuDevice.Device); ok {
                    gpu.Dispatch(workgroups)
                }
             }
@@ -48,8 +49,9 @@ func InjectDevices(vm *quickjs.VM, devices []device.Device) error {
     err = vm.RegisterFunc("_go_device_capture", func(id string) int {
         for _, d := range devices {
             if d.ID() == id {
-               if cam, ok := d.(interface{ Capture() int }); ok {
-                   return cam.Capture()
+               if cam, ok := d.(cameraDevice.Device); ok {
+                   id, _ := cam.Capture()
+                   return id
                }
             }
         }

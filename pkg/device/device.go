@@ -1,18 +1,27 @@
 package device
 
-// DeviceType identifies the type of hardware (GPU, Camera, etc)
+// DeviceType identifies the type of hardware
 type DeviceType string
 
 const (
     DeviceTypeGPU    DeviceType = "gpu"
     DeviceTypeCamera DeviceType = "camera"
+    DeviceTypeAudio  DeviceType = "audio"
 )
 
-// Device represents a hardware capability
+// Device is the base interface for all hardware capabilities
 type Device interface {
     ID() string
     Type() DeviceType
-    // Close releases resources
+    DriverName() string
+    Close() error
+}
+
+// Driver orchestrates discovery and lifecycle of devices
+type Driver interface {
+    Name() string
+    Initialize() error
+    Discover() ([]Device, error)
     Close() error
 }
 

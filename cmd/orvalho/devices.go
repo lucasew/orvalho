@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
     "github.com/lucasew/orvalho/pkg/platform"
-    "github.com/lucasew/orvalho/pkg/gpu"
-    "github.com/lucasew/orvalho/pkg/camera"
+    "github.com/lucasew/orvalho/pkg/device/gpu/wgpu"
+    "github.com/lucasew/orvalho/pkg/device/camera/v4l2"
 )
 
 func init() {
@@ -20,12 +20,12 @@ var devicesCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
         p := platform.NewPlatform()
 
-        // Register Discoverers
-        p.RegisterDiscoverer(&gpu.Discoverer{})
-        p.RegisterDiscoverer(&camera.Discoverer{})
+        // Register Drivers
+        p.RegisterDriver(&wgpu.Driver{})
+        p.RegisterDriver(&v4l2.Driver{})
 
-        if err := p.Scan(); err != nil {
-            fmt.Fprintf(os.Stderr, "Error scanning devices: %v\n", err)
+        if err := p.Initialize(); err != nil {
+            fmt.Fprintf(os.Stderr, "Error initializing platform: %v\n", err)
             os.Exit(1)
         }
 

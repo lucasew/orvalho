@@ -6,9 +6,9 @@ import (
     "github.com/lucasew/orvalho/pkg/platform"
     "github.com/lucasew/orvalho/pkg/policy"
 
-    // Auto-register discoverers
-    "github.com/lucasew/orvalho/pkg/gpu"
-    "github.com/lucasew/orvalho/pkg/camera"
+    // Auto-register drivers
+    "github.com/lucasew/orvalho/pkg/device/gpu/wgpu"
+    "github.com/lucasew/orvalho/pkg/device/camera/v4l2"
 )
 
 type Runtime struct {
@@ -18,9 +18,9 @@ type Runtime struct {
 func NewRuntime() *Runtime {
     p := platform.NewPlatform()
 
-    // Register Discoverers
-    p.RegisterDiscoverer(&gpu.Discoverer{})
-    p.RegisterDiscoverer(&camera.Discoverer{})
+    // Register Drivers
+    p.RegisterDriver(&wgpu.Driver{})
+    p.RegisterDriver(&v4l2.Driver{})
 
     return &Runtime{
         Platform: p,
@@ -28,7 +28,7 @@ func NewRuntime() *Runtime {
 }
 
 func (r *Runtime) Initialize() error {
-    return r.Platform.Scan()
+    return r.Platform.Initialize()
 }
 
 func (r *Runtime) SpawnActor(id string, manifest policy.Manifest) (*actor.Actor, error) {
