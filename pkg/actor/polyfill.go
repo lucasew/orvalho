@@ -1,4 +1,4 @@
-package runtime
+package actor
 
 const Polyfills = `
 (function() {

@@ -1,4 +1,4 @@
-package runtime
+package actor
 
 import (
 	"context"
@@ -6,19 +6,16 @@ import (
 	"sync"
 
 	"modernc.org/quickjs"
-	"github.com/lucasew/orvalho/internal/capability"
-    "github.com/lucasew/orvalho/internal/gpu"
-    "github.com/lucasew/orvalho/internal/camera"
-    "github.com/lucasew/orvalho/internal/registry"
+	"github.com/lucasew/orvalho/pkg/device"
 )
 
 type ActorId string
 
 // Actor represents a running actor instance.
 type Actor struct {
-	Id           ActorId
+	Id           string
 	vm           *quickjs.VM
-	capabilities capability.CapabilitySet
+    devices      []device.Device
 
 	eventChan chan Event
 	closeChan chan struct{}
@@ -43,31 +40,20 @@ func (e EvalEvent) Process(a *Actor) error {
     return err
 }
 
-func NewActor(id ActorId, caps capability.CapabilitySet) (*Actor, error) {
+func NewActor(id string, devices []device.Device) (*Actor, error) {
 	vm, err := quickjs.NewVM()
 	if err != nil {
 		return nil, err
 	}
 
-    // Set memory limit
-    if caps.MaxMemoryBytes > 0 {
-        vm.SetMemoryLimit(uintptr(caps.MaxMemoryBytes))
-    }
-
 	actor := &Actor{
 		Id:           id,
 		vm:           vm,
-		capabilities: caps,
+        devices:      devices,
 		eventChan:    make(chan Event, 100),
 		closeChan:    make(chan struct{}),
 		timers:       make(map[int]interface{}),
         nextTimerId:  1,
-	}
-
-	// Inject capabilities
-	if err := actor.injectEnv(); err != nil {
-		vm.Close()
-		return nil, err
 	}
 
 	return actor, nil
@@ -119,7 +105,7 @@ func (a *Actor) Send(evt Event) error {
     }
 }
 
-func (a *Actor) injectEnv() error {
+func (a *Actor) InitEnv(bindFunc func(*quickjs.VM, []device.Device) error) error {
     // Inject Polyfills
     fmt.Println("Injecting polyfills...")
     _, err := a.vm.Eval(Polyfills, quickjs.EvalGlobal)
@@ -133,25 +119,17 @@ func (a *Actor) injectEnv() error {
         return fmt.Errorf("failed to register bridge: %w", err)
     }
 
-    // Inject GPU
-    if err := gpu.InjectGPU(a.vm, a.capabilities); err != nil {
-        return fmt.Errorf("failed to inject GPU: %w", err)
+    // Apply bindings
+    if err := bindFunc(a.vm, a.devices); err != nil {
+        return err
     }
-
-    // Inject Camera
-    if err := camera.InjectCamera(a.vm, a.capabilities); err != nil {
-        return fmt.Errorf("failed to inject Camera: %w", err)
-    }
-
-    // Register Actor in Registry
-    registry.GlobalRegistry.Register(a)
 
     return nil
 }
 
 // Implement Registry Interface
 func (a *Actor) GetId() string {
-    return string(a.Id)
+    return a.Id
 }
 
 func (a *Actor) SendMessage(msg any) error {

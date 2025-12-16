@@ -3,7 +3,6 @@ module github.com/lucasew/orvalho
 go 1.24.3
 
 require (
-	github.com/ebitengine/purego v0.9.1
 	github.com/spf13/cobra v1.10.2
 	modernc.org/quickjs v0.17.0
 )
