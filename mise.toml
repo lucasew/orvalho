@@ -1,0 +1,8 @@
+[tools]
+go = "1.25.5"
+
+[tasks.test]
+run = "go test ./..."
+
+[tasks.ci]
+depends = ["test"]
