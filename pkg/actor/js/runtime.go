@@ -105,15 +105,30 @@ func (r *Runtime) Tick(ctx context.Context) (bool, error) {
 	default:
 	}
 
+	// Setup context monitoring for interruption
+	r.vm.ClearInterrupt()
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			r.vm.Interrupt(ctx.Err())
+		case <-done:
+		}
+	}()
+
 	// Lazy initialization
 	if !r.initialized {
 		r.initialized = true
 		_, err := r.vm.RunString(r.script)
 		if err != nil {
+			// If interrupted by context, return context error
+			if ctx.Err() != nil {
+				return false, ctx.Err()
+			}
 			return false, err
 		}
-		// Goja automatically runs pending jobs (promises) after RunString?
-		// Yes, based on experiment.
 
 		// If timers were set, return true.
 		if len(r.timers) > 0 {
@@ -141,6 +156,10 @@ func (r *Runtime) Tick(ctx context.Context) (bool, error) {
 		// Execute callback
 		_, err := t.callback(goja.Undefined(), t.args...)
 		if err != nil {
+			// If interrupted by context, return context error
+			if ctx.Err() != nil {
+				return false, ctx.Err()
+			}
 			return false, err
 		}
 
