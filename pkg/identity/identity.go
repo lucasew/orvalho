@@ -34,15 +34,35 @@ func DeriveIdentities(mnemonic, passphrase string) (*Identity, error) {
 	seed := bip39.NewSeed(mnemonic, passphrase)
 
 	// 2. Derive SSH Key
+	sshPem, sshPub, err := deriveSSHKey(seed)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. Derive Age Key
+	ageIdentity, err := deriveAgeKey(seed)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Identity{
+		SSHPrivateKeyPEM: sshPem,
+		SSHPublicKey:     sshPub,
+		AgeIdentity:      ageIdentity,
+		AgeRecipient:     ageIdentity.Recipient().String(),
+	}, nil
+}
+
+func deriveSSHKey(seed []byte) (string, string, error) {
 	// Path: m / 44' / 59356' / 0' / 0'
 	sshKey, err := derivation.DeriveForPath(SSHPathBase, seed)
 	if err != nil {
-		return nil, fmt.Errorf("failed to derive SSH key: %w", err)
+		return "", "", fmt.Errorf("failed to derive SSH key: %w", err)
 	}
 
 	// The derived key is the seed for Ed25519
 	if len(sshKey.Key) != 32 {
-		return nil, fmt.Errorf("derived SSH key length is %d, expected 32", len(sshKey.Key))
+		return "", "", fmt.Errorf("derived SSH key length is %d, expected 32", len(sshKey.Key))
 	}
 	sshPrivKey := ed25519.NewKeyFromSeed(sshKey.Key)
 	sshPubKey := sshPrivKey.Public().(ed25519.PublicKey)
@@ -50,18 +70,21 @@ func DeriveIdentities(mnemonic, passphrase string) (*Identity, error) {
 	// Convert to SSH Public Key format
 	sshPub, err := ssh.NewPublicKey(sshPubKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create SSH public key: %w", err)
+		return "", "", fmt.Errorf("failed to create SSH public key: %w", err)
 	}
 	sshAuthorizedKey := string(ssh.MarshalAuthorizedKey(sshPub))
 
 	// Convert to PEM format (OpenSSH)
 	pemBlock, err := ssh.MarshalPrivateKey(sshPrivKey, "")
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal SSH private key: %w", err)
+		return "", "", fmt.Errorf("failed to marshal SSH private key: %w", err)
 	}
 	sshPemBytes := pem.EncodeToMemory(pemBlock)
 
-	// 3. Derive Age Key
+	return string(sshPemBytes), strings.TrimSpace(sshAuthorizedKey), nil
+}
+
+func deriveAgeKey(seed []byte) (*age.X25519Identity, error) {
 	// Path: m / 44' / 59356' / 1' / 0'
 	ageKey, err := derivation.DeriveForPath(AgePathBase, seed)
 	if err != nil {
@@ -73,11 +96,6 @@ func DeriveIdentities(mnemonic, passphrase string) (*Identity, error) {
 	}
 
 	// Encode to Bech32 with HRP "AGE-SECRET-KEY-" to use age.ParseX25519Identity
-	// Note: age uses "age-secret-key-" as HRP, and capitalizes it in output usually, but bech32 library might handle it.
-	// age docs say "AGE-SECRET-KEY-1..." but bech32 is case-insensitive (usually upper in QR, lower in text, but age uses upper for secret keys).
-	// Let's use lower case HRP "age-secret-key-" and convert to upper if needed, or let Parse handle it.
-	// age.ParseX25519Identity expects the string representation.
-
 	// Convert bytes to 5-bit groups
 	converted, err := bech32.ConvertBits(ageKey.Key, 8, 5, true)
 	if err != nil {
@@ -89,12 +107,7 @@ func DeriveIdentities(mnemonic, passphrase string) (*Identity, error) {
 		return nil, fmt.Errorf("failed to encode bech32: %w", err)
 	}
 
-	// age expects uppercase HRP for secret keys?
-	// The example shows "AGE-SECRET-KEY-1...".
-	// bech32.Encode returns lowercase usually.
-	// Let's Convert to upper case just in case, or let Parse handle it.
-	// ParseX25519Identity implementation likely handles it.
-	// However, standard Age secret keys are uppercase.
+	// age expects uppercase HRP for secret keys.
 	encoded = strings.ToUpper(encoded)
 
 	ageIdentity, err := age.ParseX25519Identity(encoded)
@@ -102,10 +115,5 @@ func DeriveIdentities(mnemonic, passphrase string) (*Identity, error) {
 		return nil, fmt.Errorf("failed to parse generated Age identity: %w", err)
 	}
 
-	return &Identity{
-		SSHPrivateKeyPEM: string(sshPemBytes),
-		SSHPublicKey:     strings.TrimSpace(sshAuthorizedKey),
-		AgeIdentity:      ageIdentity,
-		AgeRecipient:     ageIdentity.Recipient().String(),
-	}, nil
+	return ageIdentity, nil
 }
