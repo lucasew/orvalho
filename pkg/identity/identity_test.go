@@ -10,17 +10,17 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func TestDeriveIdentities(t *testing.T) {
+func TestDerive(t *testing.T) {
 	mnemonic := "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
 	passphrase := "testpassphrase"
 
 	// 1. Determinism
-	id1, err := DeriveIdentities(mnemonic, passphrase)
+	id1, err := Derive(mnemonic, passphrase)
 	if err != nil {
 		t.Fatalf("First derivation failed: %v", err)
 	}
 
-	id2, err := DeriveIdentities(mnemonic, passphrase)
+	id2, err := Derive(mnemonic, passphrase)
 	if err != nil {
 		t.Fatalf("Second derivation failed: %v", err)
 	}
@@ -59,9 +59,9 @@ func TestDeriveIdentities(t *testing.T) {
 	}
 
 	// 2. SSH Functionality (Sign/Verify)
-	signer, err := ssh.ParsePrivateKey([]byte(id1.SSHPrivateKeyPEM))
-	if err != nil {
-		t.Fatalf("Failed to parse SSH private key: %v", err)
+	signer, kErr := ssh.ParsePrivateKey([]byte(id1.SSHPrivateKeyPEM))
+	if kErr != nil {
+		t.Fatalf("Failed to parse SSH private key: %v", kErr)
 	}
 
 	data := []byte("Hello, SSH!")
