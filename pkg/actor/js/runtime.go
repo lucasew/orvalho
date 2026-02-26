@@ -141,9 +141,23 @@ func (r *Runtime) Tick(ctx context.Context) (bool, error) {
 	// Process timers
 	now := time.Now()
 	executed := 0
+	const maxOpsPerTick = 1000
 
 	// We check the heap.
 	for len(r.timerQueue) > 0 {
+		// Enforce fairness limit
+		if executed >= maxOpsPerTick {
+			// Yield execution but signal more work is pending
+			return true, nil
+		}
+
+		// Check context cancellation periodically during batch processing
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		default:
+		}
+
 		t := r.timerQueue[0]
 		if !now.After(t.deadline) && !now.Equal(t.deadline) {
 			break
