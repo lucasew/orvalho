@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"orvalho/pkg/actor"
+	"orvalho/pkg/observability"
 
 	"github.com/dop251/goja"
 )
@@ -127,6 +128,7 @@ func (r *Runtime) Tick(ctx context.Context) (bool, error) {
 			if ctx.Err() != nil {
 				return false, ctx.Err()
 			}
+			observability.ReportError(err, "timer callback failed")
 			return false, err
 		}
 
