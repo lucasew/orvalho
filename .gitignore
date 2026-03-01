@@ -1,0 +1,13 @@
+# Binaries
+orvalho
+
+# Environment / Tools
+.mise
+.mise/
+
+# Testing artifacts
+cover.out
+
+# IDEs / Editors
+.vscode/
+.idea/
