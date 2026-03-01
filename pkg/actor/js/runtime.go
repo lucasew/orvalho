@@ -245,8 +245,8 @@ func (r *Runtime) scheduleTimer(call goja.FunctionCall, repeating bool) goja.Val
 		// Intervals shouldn't be 0 ideally to avoid tight loops, but JS allows it (clamped to 4ms usually).
 		// We'll trust the delay for now.
 		if t.interval < time.Millisecond {
-             // Maybe clamp to 1ms to avoid infinite tight loop in Tick?
-             // But let's respect user input for now.
+			// Maybe clamp to 1ms to avoid infinite tight loop in Tick?
+			// But let's respect user input for now.
 		}
 	}
 
