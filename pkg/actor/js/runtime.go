@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"orvalho/pkg/actor"
+	"orvalho/pkg/observability"
 
 	"github.com/dop251/goja"
 )
@@ -127,6 +128,7 @@ func (r *Runtime) Tick(ctx context.Context) (bool, error) {
 			if ctx.Err() != nil {
 				return false, ctx.Err()
 			}
+			observability.ReportError(err, "timer callback failed")
 			return false, err
 		}
 
@@ -243,8 +245,8 @@ func (r *Runtime) scheduleTimer(call goja.FunctionCall, repeating bool) goja.Val
 		// Intervals shouldn't be 0 ideally to avoid tight loops, but JS allows it (clamped to 4ms usually).
 		// We'll trust the delay for now.
 		if t.interval < time.Millisecond {
-             // Maybe clamp to 1ms to avoid infinite tight loop in Tick?
-             // But let's respect user input for now.
+			// Maybe clamp to 1ms to avoid infinite tight loop in Tick?
+			// But let's respect user input for now.
 		}
 	}
 
