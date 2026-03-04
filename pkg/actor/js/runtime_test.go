@@ -296,3 +296,49 @@ func TestContextTimeout(t *testing.T) {
 		t.Fatal("Test timed out, Tick did not return after context cancellation")
 	}
 }
+
+func TestFairnessLimit(t *testing.T) {
+	// Test that Tick yields execution after processing a reasonable number of timers,
+	// preventing an actor from monopolizing the thread (DoS/Fairness).
+	script := `
+		var counter = 0;
+		for (var i = 0; i < 5000; i++) {
+			setTimeout(function(){
+				counter++;
+			}, 0);
+		}
+	`
+	r := New(script)
+
+	// Initialize and schedule timers
+	if _, err := r.Tick(context.Background()); err != nil {
+		t.Fatalf("Init Tick failed: %v", err)
+	}
+
+	// Ensure timers are due
+	time.Sleep(100 * time.Millisecond)
+
+	// Run Tick with ample time.
+	// Without limits, it should process all 5000 timers.
+	// With limits (e.g., 1000), it should process fewer and return true.
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	more, err := r.Tick(ctx)
+	if err != nil {
+		t.Fatalf("Tick failed: %v", err)
+	}
+
+	val := r.vm.Get("counter")
+	count := val.ToInteger()
+	t.Logf("Processed %d timers", count)
+
+	// We expect limits to be applied.
+	// If it processed all 5000, then fairness is violated.
+	if count >= 5000 {
+		t.Error("Tick processed all timers without yielding. Expected partial processing for fairness.")
+	}
+	if !more {
+		t.Error("Tick should return true (more work) if it yielded execution")
+	}
+}

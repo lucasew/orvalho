@@ -1,0 +1,1 @@
+- 2026-02-26: Resource Exhaustion: Loops processing unbounded queues (timers/messages) must have execution limits to prevent actor starvation.
