@@ -1,0 +1,1 @@
+- 2026-03-21: Ensure error returns are checked and handled appropriately, even in tests.

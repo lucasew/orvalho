@@ -151,7 +151,10 @@ func TestClearTimeout(t *testing.T) {
 	}
 
 	time.Sleep(20 * time.Millisecond)
-	r.Tick(ctx)
+	_, err = r.Tick(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	val := r.vm.Get("ran")
 	if val.ToBoolean() {
@@ -173,7 +176,10 @@ func TestClearInterval(t *testing.T) {
 	ctx := context.Background()
 
 	// Init
-	r.Tick(ctx)
+	_, err := r.Tick(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Run until cleared
 	for i := 0; i < 10; i++ {
@@ -230,10 +236,13 @@ func TestPromiseHandling(t *testing.T) {
 		}, 10);
 	`
 	r2 := New(script2)
-	r2.Tick(ctx) // init
+	_, err = r2.Tick(ctx) // init
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	time.Sleep(20 * time.Millisecond)
-	more, err = r2.Tick(ctx) // run timer
+	_, err = r2.Tick(ctx) // run timer
 	if err != nil {
 		t.Fatal(err)
 	}
