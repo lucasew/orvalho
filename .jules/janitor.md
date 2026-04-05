@@ -1,0 +1,1 @@
+- 2023-10-25: Always check errors returned by `goja.Runtime.Set` during API injection and fix ineffectual assignments in tests to prevent runtime panics and maintain lint hygiene.
