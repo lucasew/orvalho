@@ -81,10 +81,18 @@ func New(script string) *Runtime {
 }
 
 func (r *Runtime) initAPI() {
-	r.vm.Set("setTimeout", r.setTimeout)
-	r.vm.Set("clearTimeout", r.clearTimeout)
-	r.vm.Set("setInterval", r.setInterval)
-	r.vm.Set("clearInterval", r.clearInterval)
+	if err := r.vm.Set("setTimeout", r.setTimeout); err != nil {
+		panic(err)
+	}
+	if err := r.vm.Set("clearTimeout", r.clearTimeout); err != nil {
+		panic(err)
+	}
+	if err := r.vm.Set("setInterval", r.setInterval); err != nil {
+		panic(err)
+	}
+	if err := r.vm.Set("clearInterval", r.clearInterval); err != nil {
+		panic(err)
+	}
 
 	// Ensure console is available (basic polyfill if needed, though goja usually doesn't have it by default)
 	// User didn't ask for console, but it's useful for debugging.
@@ -242,10 +250,6 @@ func (r *Runtime) scheduleTimer(call goja.FunctionCall, repeating bool) goja.Val
 		t.interval = delay
 		// Intervals shouldn't be 0 ideally to avoid tight loops, but JS allows it (clamped to 4ms usually).
 		// We'll trust the delay for now.
-		if t.interval < time.Millisecond {
-             // Maybe clamp to 1ms to avoid infinite tight loop in Tick?
-             // But let's respect user input for now.
-		}
 	}
 
 	r.nextTimerID++

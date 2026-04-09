@@ -1,0 +1,1 @@
+- 2025-02-14: Explicitly handle goja vm.Set error returns (or panics if setup fails) instead of ignoring them.
