@@ -1,0 +1,1 @@
+- 2026-06-05: [High] Resource exhaustion via unbounded timer processing in actor runtime. Spot by looking for missing execution limits or batch limits in looping background operations.
