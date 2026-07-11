@@ -85,12 +85,6 @@ func (r *Runtime) initAPI() {
 	r.vm.Set("clearTimeout", r.clearTimeout)
 	r.vm.Set("setInterval", r.setInterval)
 	r.vm.Set("clearInterval", r.clearInterval)
-
-	// Ensure console is available (basic polyfill if needed, though goja usually doesn't have it by default)
-	// User didn't ask for console, but it's useful for debugging.
-	// The prompt says "Web API polyfills (timers, fetch, console) are injected...".
-	// But requirements say "You must implement setTimeout...".
-	// It doesn't strictly say implement console, but I'll skip it unless needed to avoid clutter.
 }
 
 // Tick executes one step of the actor's logic.
@@ -213,8 +207,6 @@ func (r *Runtime) clearInterval(call goja.FunctionCall) goja.Value {
 func (r *Runtime) scheduleTimer(call goja.FunctionCall, repeating bool) goja.Value {
 	fn, ok := goja.AssertFunction(call.Argument(0))
 	if !ok {
-		// Not a function, do nothing or panic? Browsers usually throw or ignore.
-		// For simplicity return undefined.
 		return goja.Undefined()
 	}
 
@@ -240,12 +232,6 @@ func (r *Runtime) scheduleTimer(call goja.FunctionCall, repeating bool) goja.Val
 	}
 	if repeating {
 		t.interval = delay
-		// Intervals shouldn't be 0 ideally to avoid tight loops, but JS allows it (clamped to 4ms usually).
-		// We'll trust the delay for now.
-		if t.interval < time.Millisecond {
-             // Maybe clamp to 1ms to avoid infinite tight loop in Tick?
-             // But let's respect user input for now.
-		}
 	}
 
 	r.nextTimerID++
