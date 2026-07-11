@@ -85,12 +85,6 @@ func (r *Runtime) initAPI() {
 	r.vm.Set("clearTimeout", r.clearTimeout)
 	r.vm.Set("setInterval", r.setInterval)
 	r.vm.Set("clearInterval", r.clearInterval)
-
-	// Ensure console is available (basic polyfill if needed, though goja usually doesn't have it by default)
-	// User didn't ask for console, but it's useful for debugging.
-	// The prompt says "Web API polyfills (timers, fetch, console) are injected...".
-	// But requirements say "You must implement setTimeout...".
-	// It doesn't strictly say implement console, but I'll skip it unless needed to avoid clutter.
 }
 
 // Tick executes one step of the actor's logic.
