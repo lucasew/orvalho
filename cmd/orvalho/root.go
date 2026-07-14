@@ -12,11 +12,13 @@ import (
 // rootCmd is the base command for the orvalho CLI.
 var rootCmd = &cobra.Command{
 	Use:   "orvalho",
-	Short: "Orvalho mesh manager CLI",
-	Long: `orvalho is the command-line interface for Orvalho.
+	Short: "Orvalho personal mesh runtime",
+	Long: `orvalho is the single product CLI for Orvalho.
 
-Current surface is manager identity only (generate / show). Mesh, package
-signing, and deploy commands are intentionally out of scope here.`,
+All commands use Cobra. Manager and worker are subcommands of this binary
+(not separate entrypoints). Host and package configuration use CUE (see SPEC).
+
+Current surface: identity, manager (skeleton), worker (skeleton).`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
@@ -32,6 +34,8 @@ func Execute() error {
 
 func init() {
 	rootCmd.AddCommand(identityCmd)
+	rootCmd.AddCommand(managerCmd)
+	rootCmd.AddCommand(workerCmd)
 }
 
 // defaultKeyPath returns ORVALHO_MANAGER_KEY when set, else the library default.

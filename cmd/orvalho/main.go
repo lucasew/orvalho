@@ -1,7 +1,6 @@
-// Command orvalho is the Orvalho CLI entrypoint.
+// Command orvalho is the single product CLI entrypoint (Cobra).
 //
-// Current surface is manager identity only (generate / show). Mesh, package
-// signing, and deploy commands are intentionally out of scope here.
+// Manager and worker roles are subcommands of this binary, not separate mains.
 package main
 
 import "os"
