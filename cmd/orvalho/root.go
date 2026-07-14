@@ -3,10 +3,17 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
-	"orvalho/pkg/identity"
+	"orvalho/pkg/cuex"
+	"orvalho/pkg/manager"
+)
+
+var (
+	dataDir    string
+	configPath string
 )
 
 // rootCmd is the base command for the orvalho CLI.
@@ -15,10 +22,9 @@ var rootCmd = &cobra.Command{
 	Short: "Orvalho personal mesh runtime",
 	Long: `orvalho is the single product CLI for Orvalho.
 
-All commands use Cobra. Manager and worker are subcommands of this binary
-(not separate entrypoints). Host and package configuration use CUE (see SPEC).
-
-Current surface: identity, manager (skeleton), worker (skeleton).`,
+All commands use Cobra. Host and package configuration use CUE
+(embedded preludes + orvalho.cue instances). data-dir is always an explicit
+flag when host state is required — there is no implicit discovery path.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
@@ -33,15 +39,40 @@ func Execute() error {
 }
 
 func init() {
+	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", "", "host data directory (required for host commands; always explicit)")
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "host orvalho.cue path (default: <data-dir>/orvalho.cue)")
+
+	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(identityCmd)
 	rootCmd.AddCommand(managerCmd)
 	rootCmd.AddCommand(workerCmd)
+	rootCmd.AddCommand(configCmd)
 }
 
-// defaultKeyPath returns ORVALHO_MANAGER_KEY when set, else the library default.
-func defaultKeyPath() string {
-	if p := os.Getenv("ORVALHO_MANAGER_KEY"); p != "" {
-		return p
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print orvalho version",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("orvalho %s\n", manager.Version)
+	},
+}
+
+// requireDataDir returns an error if --data-dir was not set.
+func requireDataDir() error {
+	if dataDir == "" {
+		return fmt.Errorf("--data-dir is required")
 	}
-	return identity.DefaultKeyFile
+	return nil
+}
+
+// loadHostConfig loads host CUE from --config or <data-dir>/orvalho.cue.
+func loadHostConfig() (*cuex.Config, error) {
+	if err := requireDataDir(); err != nil {
+		return nil, err
+	}
+	path := configPath
+	if path == "" {
+		path = filepath.Join(dataDir, cuex.InstanceFilename)
+	}
+	return cuex.LoadHostFile(path)
 }

@@ -2,19 +2,17 @@
 //
 // An Orvalho package is a zip archive whose deploy unit (see SPEC.md) contains:
 //
-//   - orvalho.json at the archive root (manifest)
+//   - orvalho.cue at the archive root (CUE package instance)
 //   - payload files: JS worker graph, static assets, and other files the
 //     manifest references
 //
-// This library performs zip IO only. It does not sign or verify packages, and
-// does not enforce a full orvalho.json schema. The manifest is exposed as raw
-// JSON bytes (and soft JSON object parsing) so callers can validate later.
+// Manifest validation uses pkg/cuex (embedded package prelude). This package
+// does not sign or verify packages.
 package ovpkg
 
 import (
 	"archive/zip"
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,15 +22,19 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"cuelang.org/go/cue"
+
+	"orvalho/pkg/cuex"
 )
 
-// ManifestName is the fixed path of the package manifest inside the archive.
-const ManifestName = "orvalho.json"
+// ManifestName is the fixed path of the package CUE instance inside the archive.
+const ManifestName = cuex.InstanceFilename // orvalho.cue
 
 // Common errors returned by this package.
 var (
-	// ErrMissingManifest means the archive has no orvalho.json at the root.
-	ErrMissingManifest = errors.New("ovpkg: missing orvalho.json")
+	// ErrMissingManifest means the archive has no orvalho.cue at the root.
+	ErrMissingManifest = errors.New("ovpkg: missing orvalho.cue")
 	// ErrInvalidPath means a file path is not a safe archive-relative path.
 	ErrInvalidPath = errors.New("ovpkg: invalid path")
 	// ErrNotFound means a requested payload path is not in the package.
@@ -41,44 +43,29 @@ var (
 	ErrDuplicatePath = errors.New("ovpkg: duplicate path")
 )
 
-// Package is an in-memory Orvalho zip package: manifest plus payload files.
+// Package is an in-memory Orvalho zip package: CUE manifest plus payload files.
 //
 // Files maps archive paths (slash-separated, no leading slash) to contents.
-// The map does not include ManifestName; use Manifest for the raw JSON.
+// The map does not include ManifestName; use Manifest for raw CUE bytes.
+// Config is the validated unified CUE value (package prelude ⊔ instance).
 type Package struct {
-	// Manifest is the raw contents of orvalho.json.
+	// Manifest is the raw contents of orvalho.cue.
 	Manifest []byte
-	// Files is the payload tree (everything except orvalho.json).
+	// Files is the payload tree (everything except orvalho.cue).
 	Files map[string][]byte
+	// Config is set after successful CUE validation (Open/PackageFrom*).
+	Config *cuex.Config
 }
 
-// ManifestJSON returns the manifest as a soft-parsed JSON value.
-// No schema validation is performed.
-func (p *Package) ManifestJSON() (any, error) {
-	if p == nil || len(p.Manifest) == 0 {
-		return nil, ErrMissingManifest
+// Value returns the validated package CUE value, or an empty value if unset.
+func (p *Package) Value() cue.Value {
+	if p == nil || p.Config == nil {
+		return cue.Value{}
 	}
-	var v any
-	if err := json.Unmarshal(p.Manifest, &v); err != nil {
-		return nil, fmt.Errorf("ovpkg: invalid orvalho.json: %w", err)
-	}
-	return v, nil
-}
-
-// UnmarshalManifest decodes the raw manifest into dest (no schema validation).
-func (p *Package) UnmarshalManifest(dest any) error {
-	if p == nil || len(p.Manifest) == 0 {
-		return ErrMissingManifest
-	}
-	if err := json.Unmarshal(p.Manifest, dest); err != nil {
-		return fmt.Errorf("ovpkg: invalid orvalho.json: %w", err)
-	}
-	return nil
+	return p.Config.Value
 }
 
 // Get returns the contents of path from the payload, or ErrNotFound.
-// Path is normalized with forward slashes. ManifestName is not looked up here;
-// use Manifest for the manifest bytes.
 func (p *Package) Get(name string) ([]byte, error) {
 	if p == nil {
 		return nil, ErrNotFound
@@ -86,14 +73,6 @@ func (p *Package) Get(name string) ([]byte, error) {
 	clean, err := cleanArchivePath(name)
 	if err != nil {
 		return nil, err
-	}
-	if clean == ManifestName {
-		if len(p.Manifest) == 0 {
-			return nil, ErrMissingManifest
-		}
-		out := make([]byte, len(p.Manifest))
-		copy(out, p.Manifest)
-		return out, nil
 	}
 	data, ok := p.Files[clean]
 	if !ok {
@@ -146,7 +125,6 @@ func OpenFile(path string) (*Package, error) {
 		return nil, err
 	}
 	defer f.Close()
-
 	st, err := f.Stat()
 	if err != nil {
 		return nil, err
@@ -155,21 +133,15 @@ func OpenFile(path string) (*Package, error) {
 }
 
 func openZipReader(zr *zip.Reader) (*Package, error) {
-	pkg := &Package{
-		Files: make(map[string][]byte),
-	}
-
+	pkg := &Package{Files: make(map[string][]byte)}
 	for _, zf := range zr.File {
-		// Skip directory entries.
 		if strings.HasSuffix(zf.Name, "/") || zf.FileInfo().IsDir() {
 			continue
 		}
-
 		name, err := cleanArchivePath(zf.Name)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %q", err, zf.Name)
 		}
-
 		rc, err := zf.Open()
 		if err != nil {
 			return nil, fmt.Errorf("ovpkg: open %s: %w", name, err)
@@ -179,7 +151,6 @@ func openZipReader(zr *zip.Reader) (*Package, error) {
 		if err != nil {
 			return nil, fmt.Errorf("ovpkg: read %s: %w", name, err)
 		}
-
 		if name == ManifestName {
 			if pkg.Manifest != nil {
 				return nil, fmt.Errorf("%w: %s", ErrDuplicatePath, ManifestName)
@@ -187,38 +158,29 @@ func openZipReader(zr *zip.Reader) (*Package, error) {
 			pkg.Manifest = data
 			continue
 		}
-
 		if _, exists := pkg.Files[name]; exists {
 			return nil, fmt.Errorf("%w: %s", ErrDuplicatePath, name)
 		}
 		pkg.Files[name] = data
 	}
-
 	if len(pkg.Manifest) == 0 {
 		return nil, ErrMissingManifest
 	}
-	// Soft-check: manifest must be valid JSON (object or value). Schema is optional.
-	if !json.Valid(pkg.Manifest) {
-		return nil, fmt.Errorf("ovpkg: orvalho.json is not valid JSON")
+	cfg, err := cuex.LoadPackage(pkg.Manifest, ManifestName)
+	if err != nil {
+		return nil, fmt.Errorf("ovpkg: validate manifest: %w", err)
 	}
+	pkg.Config = cfg
 	return pkg, nil
 }
 
 // WriteOptions controls how a package is written to a zip.
 type WriteOptions struct {
-	// CompressionMethod is the zip compression method for file entries.
-	// Defaults to zip.Deflate when zero-value would be ambiguous; use
-	// StoreCompression or DeflateCompression constants below.
-	// If unset (0) and not explicitly Store, Deflate is used.
-	// Callers who want store must set Store: true.
 	Store bool
 }
 
 // Write writes an Orvalho package to w as a zip archive.
-//
-// manifest must be the raw orvalho.json bytes (valid JSON). files is the
-// payload map; keys are archive-relative paths. ManifestName must not appear
-// in files (it is written from manifest).
+// manifest must be orvalho.cue bytes that validate against the package prelude.
 func Write(w io.Writer, manifest []byte, files map[string][]byte) error {
 	return WriteWithOptions(w, manifest, files, WriteOptions{})
 }
@@ -228,8 +190,8 @@ func WriteWithOptions(w io.Writer, manifest []byte, files map[string][]byte, opt
 	if len(manifest) == 0 {
 		return ErrMissingManifest
 	}
-	if !json.Valid(manifest) {
-		return fmt.Errorf("ovpkg: orvalho.json is not valid JSON")
+	if _, err := cuex.LoadPackage(manifest, ManifestName); err != nil {
+		return fmt.Errorf("ovpkg: validate manifest: %w", err)
 	}
 
 	zw := zip.NewWriter(w)
@@ -237,13 +199,11 @@ func WriteWithOptions(w io.Writer, manifest []byte, files map[string][]byte, opt
 	if opts.Store {
 		method = zip.Store
 	}
-
 	if err := writeZipFile(zw, ManifestName, manifest, method); err != nil {
 		_ = zw.Close()
 		return err
 	}
 
-	// Deterministic order for reproducible archives.
 	names := make([]string, 0, len(files))
 	for name := range files {
 		names = append(names, name)
@@ -271,7 +231,6 @@ func WriteWithOptions(w io.Writer, manifest []byte, files map[string][]byte, opt
 			return err
 		}
 	}
-
 	if err := zw.Close(); err != nil {
 		return fmt.Errorf("ovpkg: close zip: %w", err)
 	}
@@ -300,10 +259,6 @@ func WriteFile(path string, manifest []byte, files map[string][]byte) error {
 }
 
 // WriteDir builds a package from a directory tree and writes it to w.
-//
-// dir must contain orvalho.json at its root. All regular files under dir are
-// included with paths relative to dir (slash-separated). Symlinks are not followed
-// as separate tree roots; filepath.WalkDir does not follow directory symlinks.
 func WriteDir(w io.Writer, dir string) error {
 	manifest, files, err := ReadDir(dir)
 	if err != nil {
@@ -313,7 +268,6 @@ func WriteDir(w io.Writer, dir string) error {
 }
 
 // ReadDir loads manifest + file map from a package directory (not a zip).
-// Useful for building packages from a workspace layout without writing yet.
 func ReadDir(dir string) (manifest []byte, files map[string][]byte, err error) {
 	st, err := os.Stat(dir)
 	if err != nil {
@@ -331,7 +285,6 @@ func ReadDir(dir string) (manifest []byte, files map[string][]byte, err error) {
 		if d.IsDir() {
 			return nil
 		}
-		// Skip non-regular files (devices, sockets, etc.).
 		info, err := d.Info()
 		if err != nil {
 			return err
@@ -339,23 +292,19 @@ func ReadDir(dir string) (manifest []byte, files map[string][]byte, err error) {
 		if !info.Mode().IsRegular() {
 			return nil
 		}
-
 		rel, err := filepath.Rel(dir, p)
 		if err != nil {
 			return err
 		}
-		// Normalize to archive path (forward slashes).
 		rel = filepath.ToSlash(rel)
 		clean, err := cleanArchivePath(rel)
 		if err != nil {
 			return fmt.Errorf("%w: %q", err, rel)
 		}
-
 		data, err := os.ReadFile(p)
 		if err != nil {
 			return err
 		}
-
 		if clean == ManifestName {
 			if manifest != nil {
 				return fmt.Errorf("%w: %s", ErrDuplicatePath, ManifestName)
@@ -375,8 +324,8 @@ func ReadDir(dir string) (manifest []byte, files map[string][]byte, err error) {
 	if len(manifest) == 0 {
 		return nil, nil, ErrMissingManifest
 	}
-	if !json.Valid(manifest) {
-		return nil, nil, fmt.Errorf("ovpkg: orvalho.json is not valid JSON")
+	if _, err := cuex.LoadPackage(manifest, ManifestName); err != nil {
+		return nil, nil, fmt.Errorf("ovpkg: validate manifest: %w", err)
 	}
 	return manifest, files, nil
 }
@@ -387,7 +336,7 @@ func PackageFromDir(dir string) (*Package, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Package{Manifest: manifest, Files: files}, nil
+	return PackageFromMap(manifest, files)
 }
 
 // PackageFromMap builds a Package from raw manifest bytes and a file map.
@@ -395,8 +344,9 @@ func PackageFromMap(manifest []byte, files map[string][]byte) (*Package, error) 
 	if len(manifest) == 0 {
 		return nil, ErrMissingManifest
 	}
-	if !json.Valid(manifest) {
-		return nil, fmt.Errorf("ovpkg: orvalho.json is not valid JSON")
+	cfg, err := cuex.LoadPackage(manifest, ManifestName)
+	if err != nil {
+		return nil, fmt.Errorf("ovpkg: validate manifest: %w", err)
 	}
 	out := make(map[string][]byte, len(files))
 	for name, data := range files {
@@ -416,16 +366,11 @@ func PackageFromMap(manifest []byte, files map[string][]byte) (*Package, error) 
 	}
 	m := make([]byte, len(manifest))
 	copy(m, manifest)
-	return &Package{Manifest: m, Files: out}, nil
+	return &Package{Manifest: m, Files: out, Config: cfg}, nil
 }
 
 func writeZipFile(zw *zip.Writer, name string, data []byte, method uint16) error {
-	h := &zip.FileHeader{
-		Name:   name,
-		Method: method,
-	}
-	// Set a fixed time for somewhat reproducible zips when desired.
-	// Callers who need strict reproducibility can strip timestamps later.
+	h := &zip.FileHeader{Name: name, Method: method}
 	w, err := zw.CreateHeader(h)
 	if err != nil {
 		return fmt.Errorf("ovpkg: create %s: %w", name, err)
@@ -436,8 +381,6 @@ func writeZipFile(zw *zip.Writer, name string, data []byte, method uint16) error
 	return nil
 }
 
-// cleanArchivePath normalizes a path for use inside an Orvalho zip.
-// Rejects empty paths, absolute paths, drive letters, and ".." segments.
 func cleanArchivePath(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	name = strings.ReplaceAll(name, "\\", "/")
@@ -448,16 +391,13 @@ func cleanArchivePath(name string) (string, error) {
 	if name[0] == '/' || strings.HasPrefix(name, "../") || name == ".." {
 		return "", ErrInvalidPath
 	}
-	// Windows drive / UNC-ish
 	if len(name) >= 2 && name[1] == ':' {
 		return "", ErrInvalidPath
 	}
-	// path.Clean keeps trailing behavior predictable for zip names.
 	clean := path.Clean(name)
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") {
 		return "", ErrInvalidPath
 	}
-	// Reject any remaining ".." segment (e.g. "foo/../../etc/passwd" after unclean).
 	for _, seg := range strings.Split(clean, "/") {
 		if seg == ".." || seg == "" {
 			return "", ErrInvalidPath

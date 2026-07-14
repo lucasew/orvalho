@@ -150,9 +150,10 @@ This proves: identity, pair, sign/install, sandbox, bindings (assets/secrets/con
 
 ## CLI and configuration
 
-- **CLI:** [Cobra](https://github.com/spf13/cobra) for **all** command-line surfaces (manager, worker, identity, pack/deploy, etc.). Prefer a single `orvalho` binary with role/subcommand trees over ad-hoc `flag` parsers. Optional build tags may slim Android worker binaries later without abandoning Cobra structure.
-- **Config:** **CUE** for **all** configuration — host/manager/worker runtime config **and** package manifests inside ovpkg zips. Schema lives in-repo; instances unify with defaults and optional CLI flag overlays. Do not invent parallel JSON/YAML config models for product config.
-- **Package tooling (`ovpkg`):** read/write zip packages whose manifest is CUE; validate via CUE before install/sign.
+- **CLI:** [Cobra](https://github.com/spf13/cobra) for **all** command-line surfaces — no custom argv parsers. Single `orvalho` binary with role/subcommand trees. Root `orvalho version` (not per-role version commands).
+- **Config:** **CUE** for **all** configuration except **secret values**. Host and package instances are both named **`orvalho.cue`**. Embedded preludes (`prelude_common`, `prelude_host`, `prelude_package`) unify with instances (contapila/workspaced style). **No `cue.mod` / CUE module system.** Live model is `cue.Value`; optional struct decode only after validation.
+- **Data dir:** always passed explicitly on the CLI (`--data-dir`). No implicit XDG/home discovery as the product model.
+- **Package tooling (`ovpkg`):** zip with root `orvalho.cue`; validate via package prelude before install/sign.
 
 ## Implementation notes (base)
 

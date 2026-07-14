@@ -8,48 +8,48 @@ Product vision and constraints: [`SPEC.md`](./SPEC.md).
 
 | Path | Role |
 |------|------|
-| [`cmd/orvalho`](./cmd/orvalho) | **Single** product CLI entrypoint ([Cobra](https://github.com/spf13/cobra)) |
-| [`pkg/manager`](./pkg/manager) | Manager library skeleton |
-| [`pkg/worker`](./pkg/worker) | Worker library skeleton |
+| [`cmd/orvalho`](./cmd/orvalho) | **Single** product CLI ([Cobra](https://github.com/spf13/cobra) only) |
+| [`pkg/cuex`](./pkg/cuex) | Embedded CUE preludes + `LoadHost` / `LoadPackage` |
+| [`pkg/ovpkg`](./pkg/ovpkg) | Zip packages with root **`orvalho.cue`** |
 | [`pkg/identity`](./pkg/identity) | Manager key material |
 | [`pkg/actor`](./pkg/actor) | Actor host / goja isolate |
-| [`pkg/manifest`](./pkg/manifest) | Package manifest parse/validate (migrating to CUE — see SPEC) |
-| [`pkg/ovpkg`](./pkg/ovpkg) | Zip package library |
 | [`pkg/ula`](./pkg/ula) | ULA IPv6 actor address allocator |
+| [`pkg/manager`](./pkg/manager) / [`pkg/worker`](./pkg/worker) | Role library skeletons |
 | [`attic/`](./attic) | Prior experimental code — **not** product; do not import |
 
 ### CLI
 
-One binary, role subcommands:
+All parsing is Cobra. **`--data-dir` is always required** for host commands (no implicit path).
 
 ```bash
 go build -o bin/orvalho ./cmd/orvalho
 
-orvalho --help
-orvalho identity generate|show
-orvalho manager version   # skeleton
-orvalho worker version    # skeleton
+orvalho version
+orvalho --data-dir /path/to/data config validate
+orvalho --data-dir /path/to/data config show
+orvalho --data-dir /path/to/data identity generate
+orvalho --data-dir /path/to/data identity show
 ```
 
-Config is **CUE** for host and package manifests (SPEC). Do not add parallel non-Cobra entrypoints.
+### Configuration (CUE)
 
-Manager runs on the owner's primary machine (Linux first). Worker runs on spare phones (Android) or Linux for development.
+- **No** JSON/YAML config as source of truth; **no** cue.mod.
+- Embedded preludes: `prelude_common.cue`, `prelude_host.cue`, `prelude_package.cue` in `pkg/cuex`.
+- Host and package instances are both named **`orvalho.cue`**.
+- Secret **values** are outside CUE; everything else config-shaped goes through CUE.
+- Live model is `cue.Value` (optional decode after validate).
 
 ## Guest JS downlevel (goja)
 
 Modern actor JS is downleveled with **esbuild** to **ES2015** before it runs on goja.
 
-- Compat note / target rationale: [`docs/goja-compat.md`](./docs/goja-compat.md)
-- Fixture pipeline: `tools/js-downlevel/`
-- Build: `mise run js:downlevel`
-- CI golden check: `mise run js:downlevel:check` (also part of `mise run ci`)
+- Compat note: [`docs/goja-compat.md`](./docs/goja-compat.md)
+- `mise run js:downlevel` / `mise run ci`
 
 ## Development
 
 ```bash
 go test ./...
-# or
 mise run test
-
 go build -o bin/orvalho ./cmd/orvalho
 ```
