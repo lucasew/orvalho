@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"orvalho/pkg/actor"
+	"orvalho/attic/pkg/actor"
 
 	"github.com/dop251/goja"
 )
