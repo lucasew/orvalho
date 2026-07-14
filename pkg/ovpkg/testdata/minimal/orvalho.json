@@ -1,0 +1,7 @@
+{
+  "id": "hello",
+  "entry": "worker.js",
+  "runtime": "js",
+  "bindings": {},
+  "egress": []
+}
