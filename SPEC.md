@@ -49,7 +49,7 @@ Stock ROM is the target environment: drivers already exist; OS process isolation
 ### Manager
 
 - Runs on the owner’s primary machine (Linux first).
-- **Daemon** plus **CLI** for automation.
+- **Daemon** plus **CLI** for automation (same product binary family as worker; see CLI below).
 - **Router-style web UI** for setup and day-to-day admin (pair devices, deploy packages, review permissions, inspect mesh/actors).
 - UI/API bound to **localhost only** in v1 (no LAN/WAN admin, no tsnet).
 - Holds the manager key material; signs packages; pairs workers; allocates actor addresses.
@@ -88,11 +88,11 @@ Stock ROM is the target environment: drivers already exist; OS process isolation
 Deploy unit is a **zip package** (Orvalho package):
 
 - Archive format: zip.
-- Manifest: **`orvalho.json`** at a fixed path in the archive.
+- Manifest: **CUE** at a fixed path in the archive (e.g. `orvalho.cue`), validated against an in-repo CUE schema. Not JSON as the source of truth — host and package config both use CUE.
 - Payload: JS worker build graph, static assets, and other files the manifest references.
 - **Signed by the manager key**; worker verifies before install/update.
 
-Manifest (conceptual — exact schema evolves in code) declares at least:
+Manifest (conceptual — exact schema evolves in CUE + Go) declares at least:
 
 - Actor identity / name
 - Entry / runtime kind (`js`)
@@ -148,11 +148,17 @@ First end-to-end proof:
 
 This proves: identity, pair, sign/install, sandbox, bindings (assets/secrets/config), egress policy, userspace overlay, IPv6-per-actor publish.
 
+## CLI and configuration
+
+- **CLI:** [Cobra](https://github.com/spf13/cobra) for **all** command-line surfaces (manager, worker, identity, pack/deploy, etc.). Prefer a single `orvalho` binary with role/subcommand trees over ad-hoc `flag` parsers. Optional build tags may slim Android worker binaries later without abandoning Cobra structure.
+- **Config:** **CUE** for **all** configuration — host/manager/worker runtime config **and** package manifests inside ovpkg zips. Schema lives in-repo; instances unify with defaults and optional CLI flag overlays. Do not invent parallel JSON/YAML config models for product config.
+- **Package tooling (`ovpkg`):** read/write zip packages whose manifest is CUE; validate via CUE before install/sign.
+
 ## Implementation notes (base)
 
 - **Language:** Go, pure Go preferred (**no CGO**).
 - **JS host:** goja + host polyfills/bindings for WinterTC subset.
-- **Identity:** deterministic key material where already started (e.g. manager/device keys; mesh keys derived or minted from the same trust root). Existing `pkg/identity` is salvageable if useful; not sacred.
+- **Identity:** manager/device key material as product code requires; mesh keys derived or minted from the same trust root. Attic code is cherry-pick only.
 - **Codebase attitude:** selective reuse of current tree and branches only when it clearly fits; **do not overfit architecture to existing checkpoint code**. One runtime story (goja), not dual goja/QuickJS product paths.
 - **Android lifecycle:** best-effort background stickiness; correctness must not require promising 24/7 uptime on stock Android in v1 docs. Mesh and actors reconnect when the worker runs.
 - **Scale:** small — a handful of personal devices per owner; not a cluster product.
@@ -160,11 +166,11 @@ This proves: identity, pair, sign/install, sandbox, bindings (assets/secrets/con
 ## Milestone sketch
 
 1. **Runtime contract** — goja isolate, WinterTC subset, `fetch` handler, timers, assets/secrets/config bindings, esbuild pipeline.
-2. **Package + manager** — zip + `orvalho.json`, sign/verify, localhost daemon/CLI/UI, permission consent.
+2. **Package + manager** — zip + CUE manifest, sign/verify, localhost daemon/CLI (Cobra)/UI, permission consent.
 3. **Mesh + publish** — wireguard-go, pair, IPv6-per-actor, HTTP serve on actor address.
 4. **Reference** — Astro SSR cat API on a worker (Linux, then Android).
 5. **Later** — device bindings (HAL), durable storage bindings, actor-exported APIs, older Android backports, optional discovery UX / app store experiments.
 
 ## Open details (deliberately not frozen here)
 
-Exact `orvalho.json` schema, ULA prefix math, HTTP vs HTTPS on the mesh, per-actor resource limit numbers, relay deployment topology, and Android packaging specifics — decide in implementation as the base lands.
+Exact CUE package/host schemas, ULA prefix math, HTTP vs HTTPS on the mesh, per-actor resource limit numbers, relay deployment topology, and Android packaging specifics — decide in implementation as the base lands.
