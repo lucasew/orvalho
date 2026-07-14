@@ -1,8 +1,44 @@
 [tools]
 go = "1.25.5"
 
+# esbuild binary pinned via npm registry platform packages (no Node required at install).
+[tools."http:esbuild"]
+version = "0.28.1"
+strip_components = 1
+
+[tools."http:esbuild".platforms]
+linux-x64 = { url = "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-{{ version }}.tgz" }
+linux-arm64 = { url = "https://registry.npmjs.org/@esbuild/linux-arm64/-/linux-arm64-{{ version }}.tgz" }
+macos-x64 = { url = "https://registry.npmjs.org/@esbuild/darwin-x64/-/darwin-x64-{{ version }}.tgz" }
+macos-arm64 = { url = "https://registry.npmjs.org/@esbuild/darwin-arm64/-/darwin-arm64-{{ version }}.tgz" }
+
 [tasks.test]
+description = "Run Go tests"
 run = "go test ./..."
 
+# Downlevel target is ES2015 — see docs/goja-compat.md.
+[tasks."js:downlevel"]
+description = "Downlevel modern JS fixture to goja-safe ES2015 via esbuild"
+run = """
+mkdir -p tools/js-downlevel/out
+esbuild tools/js-downlevel/fixtures/modern.js \
+  --bundle \
+  --outfile=tools/js-downlevel/out/bundle.js \
+  --target=es2015 \
+  --format=iife \
+  --platform=neutral
+"""
+
+[tasks."js:downlevel:check"]
+description = "Rebuild downlevel bundle and compare to golden output"
+depends = ["js:downlevel"]
+run = "diff -u tools/js-downlevel/golden/bundle.js tools/js-downlevel/out/bundle.js"
+
+[tasks."js:downlevel:golden"]
+description = "Regenerate golden downlevel bundle from the fixture (commit the result)"
+depends = ["js:downlevel"]
+run = "cp tools/js-downlevel/out/bundle.js tools/js-downlevel/golden/bundle.js"
+
 [tasks.ci]
-depends = ["test"]
+description = "CI entrypoint: downlevel golden check + Go tests"
+depends = ["js:downlevel:check", "test"]
