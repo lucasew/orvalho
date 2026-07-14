@@ -1,38 +1,38 @@
 package main
 
 import (
-    "context"
-    "fmt"
-    "time"
+	"context"
+	"fmt"
+	"time"
 
-    "github.com/lucasew/orvalho/pkg/runtime"
-    "github.com/lucasew/orvalho/pkg/policy"
+	"github.com/lucasew/orvalho/pkg/policy"
+	"github.com/lucasew/orvalho/pkg/runtime"
 )
 
 func main() {
-    rt := runtime.NewRuntime()
-    if err := rt.Initialize(); err != nil {
-        panic(err)
-    }
+	rt := runtime.NewRuntime()
+	if err := rt.Initialize(); err != nil {
+		panic(err)
+	}
 
-    manifest := policy.Manifest{
-        Capabilities: map[string]policy.CapabilityReq{
-            "gpu": {Required: true},
-            "camera": {Required: true},
-        },
-    }
+	manifest := policy.Manifest{
+		Capabilities: map[string]policy.CapabilityReq{
+			"gpu":    {Required: true},
+			"camera": {Required: true},
+		},
+	}
 
-    actor, err := rt.SpawnActor("test-actor", manifest)
-    if err != nil {
-        panic(err)
-    }
+	actor, err := rt.SpawnActor("test-actor", manifest)
+	if err != nil {
+		panic(err)
+	}
 
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-    actor.Start(ctx)
+	actor.Start(ctx)
 
-    script := `
+	script := `
     async function main() {
         console.log("Listing devices...");
         const gpus = env.DEVICES.list("gpu");
@@ -54,8 +54,8 @@ func main() {
     main();
     `
 
-    rt.SendScript(actor, script)
+	rt.SendScript(actor, script)
 
-    time.Sleep(1 * time.Second)
-    fmt.Println("Done")
+	time.Sleep(1 * time.Second)
+	fmt.Println("Done")
 }
