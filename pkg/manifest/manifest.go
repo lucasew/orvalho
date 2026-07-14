@@ -17,11 +17,34 @@ const Filename = "orvalho.json"
 // SchemaVersionCurrent is the only schema_version accepted by this package.
 const SchemaVersionCurrent = 1
 
-// RuntimeJS is the only guest runtime kind supported in v1.
-const RuntimeJS = "js"
+// Runtime is the guest runtime kind declared in orvalho.json.
+//
+// encoding/json marshals and unmarshals this as a plain string.
+type Runtime string
+
+// Guest runtime kinds.
+const (
+	// RuntimeJS is the only guest runtime kind supported in v1.
+	RuntimeJS Runtime = "js"
+)
 
 // ProtocolHTTP is the default publish protocol hint.
 const ProtocolHTTP = "http"
+
+// String returns the runtime kind as a string.
+func (r Runtime) String() string {
+	return string(r)
+}
+
+// Valid reports whether r is a known runtime kind for the current schema.
+func (r Runtime) Valid() bool {
+	switch r {
+	case RuntimeJS:
+		return true
+	default:
+		return false
+	}
+}
 
 // Manifest is the parsed form of orvalho.json.
 //
@@ -42,8 +65,8 @@ type Manifest struct {
 	// Entry is the package-relative path to the JS worker entry module.
 	Entry string `json:"entry"`
 
-	// Runtime is the guest runtime kind. v1: "js".
-	Runtime string `json:"runtime"`
+	// Runtime is the guest runtime kind. v1: RuntimeJS ("js").
+	Runtime Runtime `json:"runtime"`
 
 	// Bindings declares host-injected env bindings requested by the package.
 	Bindings *Bindings `json:"bindings,omitempty"`
@@ -167,7 +190,7 @@ func (m *Manifest) normalize() {
 	m.ID = strings.TrimSpace(m.ID)
 	m.Name = strings.TrimSpace(m.Name)
 	m.Entry = strings.TrimSpace(m.Entry)
-	m.Runtime = strings.TrimSpace(m.Runtime)
+	m.Runtime = Runtime(strings.TrimSpace(string(m.Runtime)))
 
 	if m.Bindings != nil {
 		if m.Bindings.Assets != nil {
