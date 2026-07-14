@@ -6,7 +6,7 @@ require (
 	filippo.io/age v1.3.1
 	github.com/btcsuite/btcd/btcutil v1.1.6
 	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9
-	github.com/spf13/cobra v1.7.0
+	github.com/spf13/cobra v1.10.2
 	github.com/stellar/go v0.0.0-20251023205731-8cd5ab33bcdd
 	github.com/tyler-smith/go-bip39 v1.1.0
 	golang.org/x/crypto v0.46.0
