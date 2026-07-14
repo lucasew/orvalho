@@ -88,11 +88,11 @@ Stock ROM is the target environment: drivers already exist; OS process isolation
 Deploy unit is a **zip package** (Orvalho package):
 
 - Archive format: zip.
-- Manifest: **CUE** at a fixed path in the archive (e.g. `orvalho.cue`), validated against an in-repo CUE schema. Not JSON as the source of truth — host and package config both use CUE.
+- Manifest: **`orvalho.cue` only** at the archive root. Validated by unifying with the embedded **package** prelude (plus common). **JSON package manifests are forbidden** — no dual read path, no migration shim.
 - Payload: JS worker build graph, static assets, and other files the manifest references.
 - **Signed by the manager key**; worker verifies before install/update.
 
-Manifest (conceptual — exact schema evolves in CUE + Go) declares at least:
+Manifest (package prelude + instance) declares at least:
 
 - Actor identity / name
 - Entry / runtime kind (`js`)
@@ -150,10 +150,41 @@ This proves: identity, pair, sign/install, sandbox, bindings (assets/secrets/con
 
 ## CLI and configuration
 
-- **CLI:** [Cobra](https://github.com/spf13/cobra) for **all** command-line surfaces — no custom argv parsers. Single `orvalho` binary with role/subcommand trees. Root `orvalho version` (not per-role version commands).
-- **Config:** **CUE** for **all** configuration except **secret values**. Host and package instances are both named **`orvalho.cue`**. Embedded preludes (`prelude_common`, `prelude_host`, `prelude_package`) unify with instances (contapila/workspaced style). **No `cue.mod` / CUE module system.** Live model is `cue.Value`; optional struct decode only after validation.
-- **Data dir:** always passed explicitly on the CLI (`--data-dir`). No implicit XDG/home discovery as the product model.
-- **Package tooling (`ovpkg`):** zip with root `orvalho.cue`; validate via package prelude before install/sign.
+### CLI (Cobra)
+
+- [Cobra](https://github.com/spf13/cobra) for **all** command-line surfaces — **no custom argv / `flag` parsers**.
+- Single product binary `orvalho` with role/subcommand trees (`identity`, `manager`, `worker`, `config`, …). Optional build tags may slim Android later without abandoning Cobra.
+- Root **`orvalho version`** only — not per-role `manager version` / `worker version`.
+- **Full Cobra** means every CLI surface goes through Cobra; it does **not** mean every mesh product feature is implemented.
+
+### Configuration (CUE)
+
+- **CUE is the only config language** for product configuration. **Secret values** are the exception (injected by the manager at install; CUE may declare secret *names* / requirements only).
+- **No parallel config system:** no JSON/YAML host or package config as source of truth; no env-as-schema. Cobra flags are **paths or overlays into CUE**, not a second configuration model.
+- **No hand-maintained config DTOs as schema.** The live model is **`cue.Value`**. Optional fill of a Go struct is allowed **only after** CUE validation — the struct is an output of validation, not a second schema you maintain beside CUE.
+- Host and package instances are both named **`orvalho.cue`**. Which prelude applies depends on the load path (host vs package), not the filename.
+- **Data dir** is **always** an explicit CLI argument (`--data-dir`). No implicit XDG/home discovery as the product model. Optional host config path via `--config` when needed (default: `<data-dir>/orvalho.cue`).
+
+### CUE load style (contapila / workspaced)
+
+- **Embed** preludes in the binary (`//go:embed`). **Ignore the CUE module system** — no `cue.mod`, no runtime `cue` CLI required for normal use.
+- Three prelude layers (workspaced home/codebase analogy):
+  - `prelude_common.cue` — shared constraints
+  - `prelude_host.cue` — manager/worker host instance
+  - `prelude_package.cue` — zip package instance
+- Load recipe: `Compile` preludes → `Unify` instance (and optional flag/generated overlays) → `Validate` (including concrete checks for required fields). Empty host `orvalho.cue` may be valid when defaults suffice; missing package `orvalho.cue` is invalid.
+
+### Repository layout (config / CLI)
+
+| Path | Role |
+|------|------|
+| `cmd/orvalho` | Sole product CLI entrypoint (Cobra) |
+| `pkg/cuex` | Embedded preludes; `LoadHost` / `LoadPackage`; `cue.Value` |
+| `pkg/ovpkg` | Zip read/write; root `orvalho.cue`; validates via cuex |
+| `pkg/identity` | Manager key material (values on disk, not in CUE) |
+| `attic/` | Non-product; cherry-pick only — do not import from live code |
+
+There is **no** product `pkg/manifest` JSON schema package. Package domain helpers live on CUE values via cuex/ovpkg.
 
 ## Implementation notes (base)
 
@@ -174,4 +205,4 @@ This proves: identity, pair, sign/install, sandbox, bindings (assets/secrets/con
 
 ## Open details (deliberately not frozen here)
 
-Exact CUE package/host schemas, ULA prefix math, HTTP vs HTTPS on the mesh, per-actor resource limit numbers, relay deployment topology, and Android packaging specifics — decide in implementation as the base lands.
+ULA prefix math, HTTP vs HTTPS on the mesh, per-actor resource limit numbers, relay deployment topology, Android packaging specifics, and further CUE field growth as features land — decide in implementation. Prelude field sets evolve in `pkg/cuex` with the code; this document freezes **policy**, not every CUE key.
