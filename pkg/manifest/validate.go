@@ -116,7 +116,7 @@ func (m *Manifest) Validate() error {
 
 	if m.Runtime == "" {
 		v.add("runtime", "required")
-	} else if m.Runtime != RuntimeJS {
+	} else if !m.Runtime.Valid() {
 		v.add("runtime", fmt.Sprintf("unsupported runtime %q (expected %q)", m.Runtime, RuntimeJS))
 	}
 
