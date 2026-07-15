@@ -405,3 +405,50 @@ func cleanArchivePath(name string) (string, error) {
 	}
 	return clean, nil
 }
+
+// OpenPath opens a package from a zip file or a directory tree containing orvalho.cue.
+func OpenPath(path string) (*Package, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if st.IsDir() {
+		return PackageFromDir(path)
+	}
+	return OpenFile(path)
+}
+
+// Entry returns the package entry path from the validated CUE manifest.
+func (p *Package) Entry() (string, error) {
+	if p == nil || p.Config == nil {
+		return "", fmt.Errorf("ovpkg: package not loaded")
+	}
+	s, ok, err := cuex.LookupString(p.Value(), "entry")
+	if err != nil {
+		return "", err
+	}
+	if !ok || s == "" {
+		return "", fmt.Errorf("ovpkg: missing entry")
+	}
+	return s, nil
+}
+
+// Port returns the optional package port, or 0 if unset.
+func (p *Package) Port() (int, error) {
+	if p == nil || p.Config == nil {
+		return 0, fmt.Errorf("ovpkg: package not loaded")
+	}
+	// Prefer top-level port, then publish.port.
+	for _, path := range []string{"port", "publish.port"} {
+		fv := p.Value().LookupPath(cue.ParsePath(path))
+		if !fv.Exists() {
+			continue
+		}
+		n, err := fv.Int64()
+		if err != nil {
+			return 0, err
+		}
+		return int(n), nil
+	}
+	return 0, nil
+}

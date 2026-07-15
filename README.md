@@ -29,6 +29,10 @@ orvalho --data-dir /path/to/data config validate
 orvalho --data-dir /path/to/data config show
 orvalho --data-dir /path/to/data identity generate
 orvalho --data-dir /path/to/data identity show
+
+# Dev: serve one package (zip or directory) on loopback — no mesh/signing
+orvalho serve ./pkg/ovpkg/testdata/minimal
+orvalho serve ./my-actor.ovpkg --listen 127.0.0.1:8787
 ```
 
 ### Configuration (CUE)
