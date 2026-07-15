@@ -218,3 +218,36 @@ func TestOpenMissingManifest(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestOpenPathDirAndZip(t *testing.T) {
+	dir := filepath.Join("testdata", "minimal")
+	pkg, err := ovpkg.OpenPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := pkg.Entry()
+	if err != nil || entry != "worker.js" {
+		t.Fatalf("entry=%q err=%v", entry, err)
+	}
+	port, err := pkg.Port()
+	if err != nil || port != 0 {
+		t.Fatalf("port=%d err=%v", port, err)
+	}
+
+	var buf bytes.Buffer
+	if err := ovpkg.WritePackage(&buf, pkg); err != nil {
+		t.Fatal(err)
+	}
+	zipPath := filepath.Join(t.TempDir(), "m.ovpkg")
+	if err := os.WriteFile(zipPath, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pkg2, err := ovpkg.OpenPath(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry2, err := pkg2.Entry()
+	if err != nil || entry2 != "worker.js" {
+		t.Fatalf("zip entry=%q err=%v", entry2, err)
+	}
+}

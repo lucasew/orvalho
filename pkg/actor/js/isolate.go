@@ -11,8 +11,9 @@ import (
 	"github.com/dop251/goja"
 )
 
-// Isolate is one pure-goja VM with host-driven timers.
-// Create with [New], then advance with [Isolate.Tick].
+// Isolate is one pure-goja VM with host-driven timers and minimal WinterTC
+// web types (Headers, Request, Response). Create with [New], then advance
+// with [Isolate.Tick].
 type Isolate struct {
 	vm          *goja.Runtime
 	script      string
@@ -22,6 +23,11 @@ type Isolate struct {
 	// now is time.Now by default; tests may override.
 	now func() time.Time
 	mu  sync.Mutex
+
+	// Registries map JS objects to Go-side state for web types.
+	headersReg  map[*goja.Object]*headerBag
+	requestReg  map[*goja.Object]*requestBag
+	responseReg map[*goja.Object]*responseBag
 }
 
 // Ensure Isolate implements actor.Actor.
@@ -38,6 +44,7 @@ func New(script string, opts Options) *Isolate {
 		now:    time.Now,
 	}
 	iso.installTimers()
+	iso.installWebTypes()
 	return iso
 }
 
