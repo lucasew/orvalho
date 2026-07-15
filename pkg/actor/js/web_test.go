@@ -268,16 +268,3 @@ func TestReadResponseRejectsNonResponse(t *testing.T) {
 	}
 }
 
-func TestNoOutboundNetworkGlobals(t *testing.T) {
-	iso := New(``, Options{})
-	if _, err := iso.Tick(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	v, err := iso.vm.RunString(`typeof fetch`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := v.String(); got != "undefined" {
-		t.Fatalf("fetch typeof=%q, want undefined", got)
-	}
-}

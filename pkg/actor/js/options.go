@@ -1,5 +1,10 @@
 package js
 
+import (
+	"net/http"
+	"time"
+)
+
 // Default resource caps. Documented for hosts and enforced in the isolate.
 const (
 	// DefaultMaxPendingTimers is the default hard cap on concurrent
@@ -11,11 +16,11 @@ const (
 	DefaultMaxTimersPerTick = 1_000
 )
 
-// Options configures isolate resource limits.
+// Options configures isolate resource limits and host bindings.
 // Zero-valued fields receive the documented defaults in [New].
 type Options struct {
 	// MaxPendingTimers is the hard cap on concurrent scheduled timers.
-	// Scheduling past this limit throws a JS RangeError from setTimeout /
+	// Scheduling past this limit throws a JS TypeError from setTimeout /
 	// setInterval. Zero means DefaultMaxPendingTimers.
 	MaxPendingTimers int
 
@@ -23,6 +28,16 @@ type Options struct {
 	// Excess remain queued and Tick returns more=true. Zero means
 	// DefaultMaxTimersPerTick.
 	MaxTimersPerTick int
+
+	// Egress is the outbound fetch allowlist. Empty denies all destinations.
+	Egress EgressList
+
+	// HTTPClient is used for guest fetch. nil uses a default client with
+	// redirect checks against Egress.
+	HTTPClient *http.Client
+
+	// FetchTimeout bounds each outbound fetch (default DefaultFetchTimeout).
+	FetchTimeout time.Duration
 }
 
 func (o Options) withDefaults() Options {
@@ -31,6 +46,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.MaxTimersPerTick <= 0 {
 		o.MaxTimersPerTick = DefaultMaxTimersPerTick
+	}
+	if o.FetchTimeout <= 0 {
+		o.FetchTimeout = DefaultFetchTimeout
 	}
 	return o
 }

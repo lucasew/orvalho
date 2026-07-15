@@ -60,8 +60,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("entry %s: %w", entry, err)
 	}
 
+	egress, err := pkg.Egress()
+	if err != nil {
+		return err
+	}
+
 	script := actorjs.PrepareGuestScript(string(src))
-	iso := actorjs.New(script, actorjs.Options{})
+	iso := actorjs.New(script, actorjs.Options{
+		Egress: actorjs.EgressList(egress),
+	})
 
 	listen := serveListen
 	if listen == "" {

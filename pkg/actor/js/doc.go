@@ -30,5 +30,7 @@
 //
 // Entry convention: global `default.fetch(request, env, ctx)`. Use
 // [PrepareGuestScript] to rewrite a leading `export default` for goja.
-// Outbound fetch and env bindings are out of scope here.
+//
+// Outbound guest `fetch` is host-backed and gated by [Options.Egress]
+// (empty allowlist denies all). Env asset/secret bindings are out of scope here.
 package js

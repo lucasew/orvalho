@@ -452,3 +452,28 @@ func (p *Package) Port() (int, error) {
 	}
 	return 0, nil
 }
+
+// Egress returns the package outbound allowlist from the validated CUE
+// manifest. Missing egress yields a nil slice (deny-all for host fetch).
+func (p *Package) Egress() ([]string, error) {
+	if p == nil || p.Config == nil {
+		return nil, fmt.Errorf("ovpkg: package not loaded")
+	}
+	v := p.Value().LookupPath(cue.ParsePath("egress"))
+	if !v.Exists() {
+		return nil, nil
+	}
+	iter, err := v.List()
+	if err != nil {
+		return nil, fmt.Errorf("ovpkg: egress: %w", err)
+	}
+	var out []string
+	for iter.Next() {
+		s, err := iter.Value().String()
+		if err != nil {
+			return nil, fmt.Errorf("ovpkg: egress entry: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
