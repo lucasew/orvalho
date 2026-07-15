@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"cuelang.org/go/cue"
+
 	"orvalho/pkg/cuex"
 	"orvalho/pkg/ovpkg"
 )
@@ -249,5 +251,42 @@ func TestOpenPathDirAndZip(t *testing.T) {
 	entry2, err := pkg2.Entry()
 	if err != nil || entry2 != "worker.js" {
 		t.Fatalf("zip entry=%q err=%v", entry2, err)
+	}
+}
+
+func TestExampleCatSSRPackage(t *testing.T) {
+	dir := filepath.Join("..", "..", "examples", "cat-ssr")
+	if _, err := os.Stat(dir); err != nil {
+		t.Skipf("example not present: %v", err)
+	}
+	pkg, err := ovpkg.OpenPath(dir)
+	if err != nil {
+		t.Fatalf("OpenPath: %v", err)
+	}
+	entry, err := pkg.Entry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry != "worker.js" {
+		t.Fatalf("entry=%q", entry)
+	}
+	id, ok, err := cuex.LookupString(pkg.Value(), "id")
+	if err != nil || !ok || id != "cat-ssr" {
+		t.Fatalf("id=%q ok=%v err=%v", id, ok, err)
+	}
+	// Egress allowlist must name the cat API host.
+	egress := pkg.Value().LookupPath(cue.ParsePath("egress"))
+	if !egress.Exists() {
+		t.Fatal("missing egress")
+	}
+	src, err := pkg.Get(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "catfact.ninja") {
+		t.Fatal("worker should reference catfact.ninja")
+	}
+	if !strings.Contains(string(src), "export default") {
+		t.Fatal("worker should use Workers default export")
 	}
 }

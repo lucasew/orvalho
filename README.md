@@ -32,8 +32,21 @@ orvalho --data-dir /path/to/data identity show
 
 # Dev: serve one package (zip or directory) on loopback — no mesh/signing
 orvalho serve ./pkg/ovpkg/testdata/minimal
+orvalho serve ./examples/cat-ssr
 orvalho serve ./my-actor.ovpkg --listen 127.0.0.1:8787
 ```
+
+### Example: cat facts SSR
+
+[`examples/cat-ssr`](./examples/cat-ssr) is the hand-written reference package (SPEC workload, no Astro yet).
+
+```bash
+orvalho serve ./examples/cat-ssr
+curl http://127.0.0.1:8787/
+```
+
+Today it returns HTML with an **offline fallback** fact (host outbound `fetch` is not wired). Once egress fetch lands, the same package loads a live fact from `catfact.ninja` (declared in package `egress`).
+
 
 ### Configuration (CUE)
 
