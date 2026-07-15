@@ -7,7 +7,7 @@
 
 var CAT_FACT_URL = "https://catfact.ninja/fact";
 var FALLBACK_FACT =
-  "Cats sleep 12–16 hours a day. (offline scaffold — outbound host fetch not wired yet)";
+  "Cats sleep 12–16 hours a day. (offline fallback — live catfact.ninja unreachable or denied)";
 
 function escapeHTML(s) {
   return String(s)
@@ -65,7 +65,7 @@ async function loadFact() {
     return {
       fact: FALLBACK_FACT,
       source: "fallback",
-      detail: "global fetch is undefined — install outbound fetch (#37) for live facts",
+      detail: "global fetch is undefined",
     };
   }
   try {

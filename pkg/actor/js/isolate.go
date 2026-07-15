@@ -3,6 +3,7 @@ package js
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -12,8 +13,8 @@ import (
 )
 
 // Isolate is one pure-goja VM with host-driven timers and minimal WinterTC
-// web types (Headers, Request, Response). Create with [New], then advance
-// with [Isolate.Tick].
+// web types (Headers, Request, Response) plus allowlisted outbound fetch.
+// Create with [New], then advance with [Isolate.Tick].
 type Isolate struct {
 	vm          *goja.Runtime
 	script      string
@@ -28,6 +29,11 @@ type Isolate struct {
 	headersReg  map[*goja.Object]*headerBag
 	requestReg  map[*goja.Object]*requestBag
 	responseReg map[*goja.Object]*responseBag
+
+	// activeCtx is the context of the current host Fetch/Tick; outbound
+	// fetch inherits it for cancellation.
+	activeCtx     context.Context
+	defaultClient *http.Client
 }
 
 // Ensure Isolate implements actor.Actor.
@@ -45,6 +51,7 @@ func New(script string, opts Options) *Isolate {
 	}
 	iso.installTimers()
 	iso.installWebTypes()
+	iso.installOutboundFetch()
 	return iso
 }
 
@@ -65,6 +72,8 @@ func (iso *Isolate) Tick(ctx context.Context) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+	iso.activeCtx = ctx
+	defer func() { iso.activeCtx = nil }()
 
 	iso.vm.ClearInterrupt()
 	stopWatch := make(chan struct{})

@@ -45,7 +45,7 @@ orvalho serve ./examples/cat-ssr
 curl http://127.0.0.1:8787/
 ```
 
-Today it returns HTML with an **offline fallback** fact (host outbound `fetch` is not wired). Once egress fetch lands, the same package loads a live fact from `catfact.ninja` (declared in package `egress`).
+With package `egress` wired into the isolate, `orvalho serve` performs allowlisted outbound `fetch`. The cat demo loads a live fact from `catfact.ninja` when the network is up; otherwise it shows an offline fallback page.
 
 
 ### Configuration (CUE)
