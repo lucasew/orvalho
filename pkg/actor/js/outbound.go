@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -25,16 +26,20 @@ func (iso *Isolate) installOutboundFetch() {
 // jsFetch implements the guest global fetch(input, init?).
 // The HTTP round-trip runs synchronously under the isolate lock (host-driven
 // model). The return value is always a Promise (fulfilled or rejected).
+// Each attempt is logged to stderr as: orvalho fetch: METHOD url -> ...
 func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 	p, resolve, reject := iso.vm.NewPromise()
 	promise := iso.vm.ToValue(p)
+	start := time.Now()
 
 	reqURL, method, headers, body, err := iso.parseFetchArgs(call)
 	if err != nil {
+		logGuestFetch(method, reqURL, 0, 0, start, err)
 		_ = reject(iso.vm.NewTypeError(err.Error()))
 		return promise
 	}
 	if err := iso.opts.Egress.CheckURL(reqURL); err != nil {
+		logGuestFetch(method, reqURL, 0, 0, start, fmt.Errorf("egress denied: %w", err))
 		_ = reject(iso.vm.NewTypeError(err.Error()))
 		return promise
 	}
@@ -56,6 +61,7 @@ func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, method, reqURL, bodyReader)
 	if err != nil {
+		logGuestFetch(method, reqURL, 0, 0, start, err)
 		_ = reject(iso.vm.NewTypeError(err.Error()))
 		return promise
 	}
@@ -69,13 +75,16 @@ func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 	client := iso.httpClient()
 	resp, err := client.Do(httpReq)
 	if err != nil {
+		logGuestFetch(method, reqURL, 0, 0, start, fmt.Errorf("fetch failed: %w", err))
 		_ = reject(iso.vm.NewTypeError("fetch failed: " + err.Error()))
 		return promise
 	}
 	defer resp.Body.Close()
 
+	finalURL := resp.Request.URL.String()
 	// Re-check final URL after redirects.
-	if err := iso.opts.Egress.CheckURL(resp.Request.URL.String()); err != nil {
+	if err := iso.opts.Egress.CheckURL(finalURL); err != nil {
+		logGuestFetch(method, finalURL, resp.StatusCode, 0, start, fmt.Errorf("egress denied after redirect: %w", err))
 		_ = reject(iso.vm.NewTypeError(err.Error()))
 		return promise
 	}
@@ -83,17 +92,41 @@ func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 	limited := io.LimitReader(resp.Body, MaxOutboundBody+1)
 	raw, err := io.ReadAll(limited)
 	if err != nil {
+		logGuestFetch(method, finalURL, resp.StatusCode, 0, start, fmt.Errorf("read body: %w", err))
 		_ = reject(iso.vm.NewTypeError("fetch read body: " + err.Error()))
 		return promise
 	}
 	if len(raw) > MaxOutboundBody {
+		logGuestFetch(method, finalURL, resp.StatusCode, len(raw), start, fmt.Errorf("response body too large"))
 		_ = reject(iso.vm.NewTypeError("fetch response body too large"))
 		return promise
 	}
 
+	logURL := reqURL
+	if finalURL != "" && finalURL != reqURL {
+		logURL = reqURL + " => " + finalURL
+	}
+	logGuestFetch(method, logURL, resp.StatusCode, len(raw), start, nil)
+
 	resObj := iso.newResponseFromHTTPLocked(resp.StatusCode, resp.Status, resp.Header, string(raw))
 	_ = resolve(resObj)
 	return promise
+}
+
+// logGuestFetch writes one line about a guest-originated outbound fetch.
+func logGuestFetch(method, url string, status, bodyBytes int, start time.Time, err error) {
+	if method == "" {
+		method = "?"
+	}
+	if url == "" {
+		url = "<invalid>"
+	}
+	dur := time.Since(start).Round(time.Millisecond)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "orvalho fetch: %s %s -> error: %v (%s)\n", method, url, err, dur)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "orvalho fetch: %s %s -> %d %dB %s\n", method, url, status, bodyBytes, dur)
 }
 
 func (iso *Isolate) httpClient() *http.Client {
