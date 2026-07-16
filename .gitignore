@@ -1,0 +1,31 @@
+# Build outputs
+bin/
+dist/
+*.out
+*.test
+*.prof
+
+# esbuild downlevel workspace
+tools/js-downlevel/out/
+
+# Dependencies
+vendor/
+
+# Env / secrets
+.env
+.env.local
+.dev.vars
+
+# Logs
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Mise local overrides
+.mise.local.toml
