@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -40,7 +41,8 @@ Outside values fill runtime.env (then CUE projects to agents.*.env):
 
 Exactly one agent is required. CUE or binding failures never-allocate (exit before listen).
 
-Entry convention: Workers-shaped default export with fetch(request, env, ctx).`,
+Entry convention: Workers-shaped default export with fetch(request, env, ctx).
+Multi-file ESM entries (import/export) are bundled on load via esbuild (needs esbuild on PATH).`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runServe,
 }
@@ -78,9 +80,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	src, err := pkg.Get(agent.Entrypoint)
+
+	script, err := loadGuestScript(path, pkg, agent.Entrypoint)
 	if err != nil {
-		return fmt.Errorf("entrypoint %s: %w", agent.Entrypoint, err)
+		return err
 	}
 
 	egress, err := pkg.Egress()
@@ -93,7 +96,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return err // never-allocate
 	}
 
-	script := actorjs.PrepareGuestScript(string(src))
 	iso := actorjs.New(script, actorjs.Options{
 		Egress:   actorjs.EgressList(egress),
 		Env:      agent.Env,
@@ -148,6 +150,68 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 		return err
 	}
+}
+
+// loadGuestScript returns goja-ready source: esbuild bundle for multi-file ESM,
+// or PrepareGuestScript for single-file workers.
+func loadGuestScript(path string, pkg *ovpkg.Package, entry string) (string, error) {
+	src, err := pkg.Get(entry)
+	if err != nil {
+		return "", fmt.Errorf("entrypoint %s: %w", entry, err)
+	}
+	if !actorjs.NeedsBundle(string(src)) {
+		return actorjs.PrepareGuestScript(string(src)), nil
+	}
+
+	pkgDir, cleanup, err := packageWorkDir(path, pkg)
+	if err != nil {
+		return "", err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	fmt.Fprintf(os.Stderr, "orvalho serve: bundling %s with esbuild…\n", entry)
+	bundled, err := actorjs.BundleEntry(actorjs.BundleOptions{
+		PackageDir: pkgDir,
+		Entry:      entry,
+	})
+	if err != nil {
+		return "", fmt.Errorf("bundle entry %s: %w", entry, err)
+	}
+	return bundled, nil
+}
+
+// packageWorkDir returns a filesystem directory for the package (for esbuild).
+// Directory packages use path as-is; zip packages are extracted to a temp dir.
+func packageWorkDir(path string, pkg *ovpkg.Package) (dir string, cleanup func(), err error) {
+	st, err := os.Stat(path)
+	if err == nil && st.IsDir() {
+		abs, err := filepath.Abs(path)
+		return abs, nil, err
+	}
+	// Zip or non-dir: materialize Files + manifest into temp.
+	tmp, err := os.MkdirTemp("", "orvalho-pkg-*")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup = func() { _ = os.RemoveAll(tmp) }
+	if err := os.WriteFile(filepath.Join(tmp, ovpkg.ManifestName), pkg.Manifest, 0o644); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	for name, data := range pkg.Files {
+		full := filepath.Join(tmp, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			cleanup()
+			return "", nil, err
+		}
+		if err := os.WriteFile(full, data, 0o644); err != nil {
+			cleanup()
+			return "", nil, err
+		}
+	}
+	return tmp, cleanup, nil
 }
 
 // collectServeRuntimeEnv builds runtime.env: process env (all keys), then

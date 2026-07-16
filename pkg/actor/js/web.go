@@ -302,7 +302,7 @@ func (iso *Isolate) responseConstructor(call goja.ConstructorCall) *goja.Object 
 		headers:    newHeaderBag(),
 	}
 	if len(call.Arguments) > 0 && !goja.IsUndefined(call.Argument(0)) && !goja.IsNull(call.Argument(0)) {
-		r.body = call.Argument(0).String()
+		r.body = bodyArgToString(iso, call.Argument(0))
 	}
 	if len(call.Arguments) > 1 && !goja.IsUndefined(call.Argument(1)) && !goja.IsNull(call.Argument(1)) {
 		init := call.Argument(1).ToObject(iso.vm)
@@ -356,6 +356,42 @@ func (iso *Isolate) responseGetHeaders(call goja.FunctionCall) goja.Value {
 func (iso *Isolate) responseText(call goja.FunctionCall) goja.Value {
 	r := iso.responseBagOf(call)
 	return iso.resolvedStringPromise(r.body)
+}
+
+// bodyArgToString coerces a Response body init to a host string.
+// Handles strings and our minimal ReadableStream (_orvalhoText).
+func bodyArgToString(iso *Isolate, v goja.Value) string {
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return ""
+	}
+	if s, ok := v.Export().(string); ok {
+		return s
+	}
+	obj, ok := v.(*goja.Object)
+	if !ok {
+		// Avoid "[object Object]" for plain objects without stream helper.
+		if exp := v.Export(); exp != nil {
+			if b, ok := exp.([]byte); ok {
+				return string(b)
+			}
+		}
+		s := v.String()
+		if s == "[object Object]" {
+			return ""
+		}
+		return s
+	}
+	if fn, ok := goja.AssertFunction(obj.Get("_orvalhoText")); ok {
+		out, err := fn(obj)
+		if err == nil && out != nil {
+			return out.String()
+		}
+	}
+	s := obj.String()
+	if s == "[object Object]" {
+		return ""
+	}
+	return s
 }
 
 func (iso *Isolate) resolvedStringPromise(s string) goja.Value {

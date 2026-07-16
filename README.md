@@ -60,12 +60,25 @@ With package `egress` wired into the isolate, `orvalho serve` performs allowlist
 - Secret **values** are outside CUE; everything else config-shaped goes through CUE.
 - Live model is `cue.Value` (optional decode after validate).
 
-## Guest JS downlevel (goja)
+## Guest JS downlevel / multi-file (goja)
 
 Modern actor JS is downleveled with **esbuild** to **ES2015** before it runs on goja.
 
 - Compat note: [`docs/goja-compat.md`](./docs/goja-compat.md)
 - `mise run js:downlevel` / `mise run ci`
+- **Multi-file ESM** entries (e.g. Astro CF `entry.mjs` + chunks) are **bundled on load** by `orvalho serve` when the entry contains `import`/`export … from` (requires `esbuild` on `PATH`, via mise).
+
+### Example: pesquisarr (Astro → CF dist)
+
+```bash
+# sibling checkout with dist/ already built
+export PESQUISARR=../pesquisarr
+./examples/pesquisarr/assemble.sh
+orvalho serve ./examples/pesquisarr --listen 127.0.0.1:8788
+curl http://127.0.0.1:8788/
+```
+
+See [`examples/pesquisarr/README.md`](./examples/pesquisarr/README.md). Not full CF parity (KV/D1/etc.); homepage SSR is the smoke target.
 
 ## Development
 

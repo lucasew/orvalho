@@ -52,6 +52,7 @@ func New(script string, opts Options) *Isolate {
 	iso.installTimers()
 	iso.installWebTypes()
 	iso.installOutboundFetch()
+	iso.installHostPolyfills()
 	return iso
 }
 

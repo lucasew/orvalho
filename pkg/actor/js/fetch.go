@@ -57,7 +57,10 @@ func (iso *Isolate) fetchLocked(ctx context.Context, req HTTPRequest) (HTTPRespo
 	if err != nil {
 		return HTTPResponse{}, err
 	}
-	exCtx := iso.vm.NewObject()
+	exCtx, err := iso.buildExecutionContextLocked()
+	if err != nil {
+		return HTTPResponse{}, err
+	}
 	result, err := fetchFn(goja.Undefined(), iso.vm.ToValue(reqObj), env, exCtx)
 	if err != nil {
 		return HTTPResponse{}, mapJSError(ctx, err)
@@ -126,6 +129,12 @@ func (iso *Isolate) awaitPromiseLocked(ctx context.Context, v goja.Value, maxWai
 		case goja.PromiseStateRejected:
 			reason := p.Result()
 			if reason != nil && !goja.IsUndefined(reason) {
+				// Prefer Exception stack when guest rejects with an Error.
+				if obj, ok := reason.(*goja.Object); ok {
+					if stack := obj.Get("stack"); stack != nil && !goja.IsUndefined(stack) {
+						return nil, fmt.Errorf("js: fetch rejected: %s\n%s", reason.String(), stack.String())
+					}
+				}
 				return nil, fmt.Errorf("js: fetch rejected: %s", reason.String())
 			}
 			return nil, fmt.Errorf("js: fetch rejected")

@@ -7,6 +7,26 @@ import (
 	"github.com/dop251/goja"
 )
 
+// buildExecutionContextLocked builds the Workers executionContext (third arg to fetch).
+// Astro/CF adapters call context.waitUntil.bind(context).
+func (iso *Isolate) buildExecutionContextLocked() (*goja.Object, error) {
+	ctx := iso.vm.NewObject()
+	// waitUntil(promise) — fire-and-forget; we do not track for v1 serve.
+	waitUntil := func(call goja.FunctionCall) goja.Value {
+		return goja.Undefined()
+	}
+	if err := ctx.Set("waitUntil", waitUntil); err != nil {
+		return nil, err
+	}
+	// passThroughOnException is a no-op on our host.
+	if err := ctx.Set("passThroughOnException", func(call goja.FunctionCall) goja.Value {
+		return goja.Undefined()
+	}); err != nil {
+		return nil, err
+	}
+	return ctx, nil
+}
+
 // buildEnvLocked constructs the guest env object for default.fetch.
 // String keys come from Options.Env; object bindings from Options.Bindings.
 // Name clash between a string and a binding is an error (never-allocate at serve).
@@ -39,6 +59,10 @@ func (iso *Isolate) buildEnvLocked() (*goja.Object, error) {
 			return nil, err
 		}
 		seen[name] = "binding"
+	}
+	// cloudflare:workers stub reads globalThis.__orvalhoCFEnv (see stubs/cloudflare_workers.js).
+	if err := iso.vm.Set("__orvalhoCFEnv", env); err != nil {
+		return nil, err
 	}
 	return env, nil
 }
