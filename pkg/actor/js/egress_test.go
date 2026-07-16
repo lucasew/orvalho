@@ -50,6 +50,19 @@ func TestEgressEmptyDenies(t *testing.T) {
 	}
 }
 
+func TestEgressStarAllowsAnyHTTPS(t *testing.T) {
+	e := EgressList{"*"}
+	if !e.Allows("https://anywhere.example/path") {
+		t.Fatal("star should allow any https host")
+	}
+	if !e.Allows("http://other.test/") {
+		t.Fatal("star should allow http")
+	}
+	if e.Allows("file:///etc/passwd") {
+		t.Fatal("star still rejects non-http(s)")
+	}
+}
+
 func TestEgressRejectsNonHTTP(t *testing.T) {
 	e := EgressList{"example.com"}
 	if e.Allows("file:///etc/passwd") {

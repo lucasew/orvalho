@@ -14,6 +14,7 @@ import (
 //   - hostname: exact match on URL hostname (case-insensitive), e.g. "catfact.ninja"
 //   - *.hostname: suffix match, e.g. "*.example.com" matches "a.example.com"
 //   - http(s)://origin: scheme + host [+ port] must match, e.g. "https://catfact.ninja"
+//   - "*": allow any http(s) host (explicit open egress; must be declared in the package)
 type EgressList []string
 
 // Allows reports whether rawURL is permitted by the allowlist.
@@ -48,8 +49,12 @@ func (e EgressList) AllowsURL(u *url.URL) bool {
 
 func ruleAllows(rule string, u *url.URL, host string) bool {
 	rule = strings.TrimSpace(rule)
-	if rule == "" || rule == "*" {
+	if rule == "" {
 		return false
+	}
+	// Explicit package open egress (CUE allows bare "*"). Still only http(s).
+	if rule == "*" {
+		return true
 	}
 	if strings.HasPrefix(rule, "http://") || strings.HasPrefix(rule, "https://") {
 		ru, err := url.Parse(rule)

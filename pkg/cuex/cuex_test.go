@@ -26,14 +26,28 @@ agents: {
 	}
 }
 
-func TestLoadPackageRejectsOpenProxy(t *testing.T) {
-	_, err := LoadPackage([]byte(`
+func TestLoadPackageAllowsStarEgress(t *testing.T) {
+	cfg, err := LoadPackage([]byte(`
 id: "x"
 agents: { main: { entrypoint: "a.js" } }
 egress: ["*"]
 `), "orvalho.cue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg == nil {
+		t.Fatal("nil cfg")
+	}
+}
+
+func TestLoadPackageRejectsInvalidEgress(t *testing.T) {
+	_, err := LoadPackage([]byte(`
+id: "x"
+agents: { main: { entrypoint: "a.js" } }
+egress: ["not a host!!"]
+`), "orvalho.cue")
 	if err == nil {
-		t.Fatal("expected error for bare * egress")
+		t.Fatal("expected error for invalid egress entry")
 	}
 }
 

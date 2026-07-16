@@ -10,9 +10,9 @@
 // Package-relative path: no absolute, no ".." segments.
 #RelPath: string & =~"^[^/]" & !~"(^|/)\\.\\.($|/)"
 
-// Outbound allowlist entry: hostname, *.hostname, or http(s):// origin.
-// Bare "*" is rejected (open proxy).
-#Egress: string & =~"^(?:\\*\\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$|^https?://[^\\s/]+$"
+// Outbound allowlist entry: hostname, *.hostname, http(s):// origin, or
+// bare "*" (allow any http(s) host — explicit open egress; empty egress still denies all).
+#Egress: string & =~"^\\*$|^(?:\\*\\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$|^https?://[^\\s/]+$"
 
 #BindingName: string & =~"^[A-Za-z_][A-Za-z0-9_]*$"
 
