@@ -17,7 +17,7 @@ Stock ROM is the target environment: drivers already exist; OS process isolation
 - Expose platform capabilities through a **HAL-style bindings API** (web-shaped, capability-gated).
 - Distribute and update workloads as **signed packages**.
 - Connect manager, workers, and clients over a **userspace overlay network** so the owner does not depend on public IPs or trusting the LAN.
-- Prefer [WinterTC](https://wintertc.org/) / Workers-shaped web APIs over proprietary host surfaces.
+- Prefer [WinterTC](https://wintertc.org/) / [Cloudflare Workers](https://developers.cloudflare.com/workers/)-shaped web APIs over proprietary host surfaces. **WinterTC when it specifies; Cloudflare Workers when it does not.** Long-term bar: real Workers/Astro adapter bundles run **without rewriting guest JS** (only package metadata and host-provided `env`).
 
 ## Non-goals (current vision)
 
@@ -25,11 +25,12 @@ Stock ROM is the target environment: drivers already exist; OS process isolation
 - App store / public package discovery (useful for popularization later; not the trust model now).
 - First-class **Wasm** actors or a second guest runtime (Wasm may appear later only as something JS instantiates; it is not part of packaging or the actor model now).
 - Actor-to-actor communication in v1 (local or remote). Later: explicit exported APIs (e.g. contract/RPC style), not shared memory.
-- Node.js-compatible server surface on device.
+- Full **Node.js-compatible** server surface on device (`nodejs_compat` / `cloudflare:workers` stubs may land later only as needed for real CF bundles — not a product Node host).
 - Tailscale/`tsnet` as product or admin networking in v1.
 - Path-based HTTP gateway as the primary way to address actors.
 - Supporting ancient Android as a development gate (backports later; do not freeze progress on min-SDK archaeology).
 - SBCs, iOS, or kernel WireGuard as requirements.
+- Multi-agent **supervisor** in the first serve path (a package may declare multiple agents in CUE later; early `orvalho serve` requires exactly one).
 
 ## Trust model
 
@@ -73,15 +74,27 @@ Stock ROM is the target environment: drivers already exist; OS process isolation
 
 - **JavaScript only** as the guest language for now.
 - **One VM per actor** (goja). No shared mutable state between actors. Actors may run **concurrently** with each other (separate isolates / host scheduling). Inside one actor: single-threaded, Workers-style event loop.
-- Actors are **fully ephemeral**: process or actor restart drops heap. Durable data only through **bindings** the actor explicitly uses.
-- Programming model: **WinterTC / Cloudflare Workers-esque** edge runtime — especially `export default { fetch(request, env, ctx) }` (or the compiled equivalent the host invokes), `Request` / `Response` / related web types, and capability-gated `env`.
-- Not a generic Node process: no ambient `fs`, raw sockets, or process environment.
+- Actors are **fully ephemeral**: process or actor restart drops heap. Durable data only through **bindings** and host-injected string env the actor explicitly receives.
+- Programming model: **Cloudflare Module Worker** shape — `export default { fetch(request, env, ctx) }` (and later other exported handlers only if needed). `Request` / `Response` / related web types follow WinterTC where specified.
+- **Packaging ≠ Worker definition:** `orvalho.cue` is deploy/package metadata (like wrangler config). The **JS bundle** is the Worker. Guest code must not require an Orvalho-specific SDK for the happy path.
+- Not a generic Node process: no ambient `fs`, raw sockets, or process environment inside the isolate. Outside-world values reach the guest only as the concrete `env` the host builds after CUE evaluation.
 
 ### Engine and build
 
 - **Runtime VM:** [goja](https://github.com/dop251/goja) (pure Go; CGO avoided).
-- **Guest build:** toolchain emits Workers-shaped output, then **esbuild (or equivalent) downlevels** to a JS level documented in a goja compat matrix. Downlevel fixes language/syntax; **platform APIs are host-provided**, not assumed from the VM.
+- **Guest build / load:** Workers-shaped modules; **esbuild (or equivalent)** downlevels to a goja-safe language level (compat matrix). Downlevel fixes language/syntax; **platform APIs are host-provided**.
+- **Multi-file bundles:** prefer **bundle-to-one on load** with esbuild (same idea as wrangler bundling) rather than a full multi-module workerd loader first. Real multi-chunk Astro/`no_bundle` trees are a compatibility bar, not a first gate.
 - Prefer one engine on the main line; experimental alternate VMs are not product surface.
+
+### Load and `env` materialize
+
+1. Load package `orvalho.cue` with host-supplied **`runtime.env`** (see Packages).
+2. CUE validate / project; on failure **do not allocate** the actor (no half-live process, no address burn) — Nomad-style placement failure.
+3. Select the agent instance (see Packages / serve).
+4. Build guest `env`:
+   - **String properties** from concrete **`agents.<name>.env`** (`map[string]string`) — Cloudflare **vars/secrets** shape (guest cannot tell them apart).
+   - **Object properties** from **`agents.<name>.bindings`** via the host **driver registry**.
+5. Invoke **`default.fetch(request, env, ctx)`**. Do not dump raw `runtime.env` into the isolate unless CUE projected those keys onto `agent.env`.
 
 ## Packages
 
@@ -92,25 +105,56 @@ Deploy unit is a **zip package** (Orvalho package):
 - Payload: JS worker build graph, static assets, and other files the manifest references.
 - **Signed by the manager key**; worker verifies before install/update.
 
-Manifest (package prelude + instance) declares at least:
+### Package CUE shape (policy)
 
-- Actor identity / name
-- Entry / runtime kind (`js`)
-- Requested **bindings** and **permissions**
-- **Egress allowlist** (hosts or patterns the actor may `fetch`)
-- Port (and related publish) hints; **IPv6 assignment remains manager authority**
+Conceptual model (prelude fields evolve in `pkg/cuex`; this freezes intent):
 
-## Bindings (`env`)
+```cue
+runtime: {
+	// Outside world → package. Host unifies a concrete map at load/serve/install.
+	env: [string]: string
+}
 
-One **bindings API** for everything host-injected. v1 and later differ in *which* bindings exist, not in shape.
+agents: [string]: {
+	entrypoint: string
+	// String bag for this worker only (CF vars/secrets on guest env). Map, not a list of names.
+	env: [string]: string
+	// Typed host drivers (assets, later devices, storage, …). Not one binding per env var.
+	bindings?: [string]: {
+		type: string // driver id from the host registry
+		// …driver-specific fields
+	}
+}
 
-| Binding family | v1 | Later |
-|----------------|----|--------|
-| **Assets** | Yes — read-only files from the package | |
-| **Secrets** | Yes — values injected at install by manager | |
-| **Configuration** | Yes — non-secret config bindings | |
+// Package-level concerns as today/later: id, egress, publish/port hints, etc.
+```
+
+- **`runtime.env`:** inputs from the outside world (`map[string]string`). Serve may fill from process environment, `.env` / `.dev.vars`, and `--var` (precedence is implementation detail). Manager/worker later use other channels; **same CUE field**.
+- **CUE is the DTO:** the package validates `runtime.env` with CUE constraints and **routes** values into each agent’s `env` (copy, rename, derive). No parallel hand-maintained Go schema for this projection.
+- **`agents.<name>.env`:** only this map becomes string properties on the guest `env` for that worker.
+- **`bindings`:** named capabilities with a **`type`** (driver id). Host registry materializes objects onto guest `env` under the same names. String configuration is **not** modeled as one binding per variable.
+- **Egress allowlist**, publish/port hints, package id: still package concerns; **IPv6 assignment remains manager authority**.
+
+### Allocation / never-start
+
+If CUE unify/validate fails, a required outside value is missing, a binding `type` is unknown to the host, or a driver cannot materialize → **the agent is never allocated** (serve does not listen; install/placement does not create a live actor). No silent stub objects on `env` for missing drivers.
+
+### Dev serve
+
+- **`orvalho serve`** loads one package (dir or zip) without mesh/signing.
+- **Exactly one** entry in `agents` for now; zero or more than one is an error. A multi-agent **supervisor** is backlog.
+- Same materialize rules as above so serve exercises the production env contract.
+
+## Bindings (host drivers)
+
+**Registry pattern:** the **host worker/serve process** registers drivers by id. Packages **request** bindings by name + `type`; guests **never** register drivers. v1 and later differ in *which* drivers exist, not in the ask/provide shape.
+
+| Driver / surface | v1 | Later |
+|------------------|----|--------|
+| **String env** (`agent.env`) | Yes — CF-style strings on guest `env` (vars; secrets same at runtime, different provisioning) | Manager-sealed secret store |
+| **`assets`** | Yes — CF-like `env.<NAME>.fetch(request\|url\|string) → Response` over package files | Richer static routing if needed |
 | **Storage** (KV/SQL/etc.) | Not required for first demo | When actors need durability |
-| **Devices (HAL)** | Same API shape reserved | Camera, GPU, sensors, … via host drivers |
+| **Devices (HAL)** | Same registry shape reserved | Camera, GPU, sensors, … |
 | **Actor export / RPC** | No | Explicit exported APIs between actors |
 
 Outbound **`fetch`**: only destinations allowed by the package allowlist after owner consent. A personal mesh must not become an open residential proxy by default.
@@ -146,7 +190,7 @@ First end-to-end proof:
 4. Example: **SSR page that calls an allowlisted cat API** and returns HTML.
 5. Client on the mesh opens `http://[actor-ipv6]:port/` (or equivalent) and gets a response.
 
-This proves: identity, pair, sign/install, sandbox, bindings (assets/secrets/config), egress policy, userspace overlay, IPv6-per-actor publish.
+This proves: identity, pair, sign/install, sandbox, CUE `runtime.env` → `agent.env`, assets (and other) drivers, egress policy, userspace overlay, IPv6-per-actor publish — ideally against an **unchanged Workers/Astro adapter bundle** plus Orvalho package metadata.
 
 ## CLI and configuration
 
@@ -159,8 +203,9 @@ This proves: identity, pair, sign/install, sandbox, bindings (assets/secrets/con
 
 ### Configuration (CUE)
 
-- **CUE is the only config language** for product configuration. **Secret values** are the exception (injected by the manager at install; CUE may declare secret *names* / requirements only).
-- **No parallel config system:** no JSON/YAML host or package config as source of truth; no env-as-schema. Cobra flags are **paths or overlays into CUE**, not a second configuration model.
+- **CUE is the only config language** for product configuration.
+- **Outside values** for packages enter as **`runtime.env`: `map[string]string`** (host overlay). Secret *values* are not authored into the signed zip; they are supplied at serve/install and validated/projected by package CUE. Guest-visible strings are only what CUE emits on **`agents.<name>.env`**.
+- **No parallel config system:** no JSON/YAML host or package config as source of truth; no “env as schema” outside CUE. Cobra flags are **paths or overlays into CUE**, not a second configuration model.
 - **No hand-maintained config DTOs as schema.** The live model is **`cue.Value`**. Optional fill of a Go struct is allowed **only after** CUE validation — the struct is an output of validation, not a second schema you maintain beside CUE.
 - Host and package instances are both named **`orvalho.cue`**. Which prelude applies depends on the load path (host vs package), not the filename.
 - **Data dir** is **always** an explicit CLI argument (`--data-dir`). No implicit XDG/home discovery as the product model. Optional host config path via `--config` when needed (default: `<data-dir>/orvalho.cue`).
@@ -189,7 +234,8 @@ There is **no** product `pkg/manifest` JSON schema package. Package domain helpe
 ## Implementation notes (base)
 
 - **Language:** Go, pure Go preferred (**no CGO**).
-- **JS host:** goja + host polyfills/bindings for WinterTC subset.
+- **JS host:** goja + host polyfills for WinterTC subset + CF-shaped `env` (strings + driver objects).
+- **Binding drivers:** in-process host registry; built-ins first (`assets`, …); no guest- or zip-supplied drivers.
 - **Identity:** manager/device key material as product code requires; mesh keys derived or minted from the same trust root. Attic code is cherry-pick only.
 - **Codebase attitude:** selective reuse of current tree and branches only when it clearly fits; **do not overfit architecture to existing checkpoint code**. One runtime story (goja), not dual goja/QuickJS product paths.
 - **Android lifecycle:** best-effort background stickiness; correctness must not require promising 24/7 uptime on stock Android in v1 docs. Mesh and actors reconnect when the worker runs.
@@ -197,12 +243,12 @@ There is **no** product `pkg/manifest` JSON schema package. Package domain helpe
 
 ## Milestone sketch
 
-1. **Runtime contract** — goja isolate, WinterTC subset, `fetch` handler, timers, assets/secrets/config bindings, esbuild pipeline.
-2. **Package + manager** — zip + CUE manifest, sign/verify, localhost daemon/CLI (Cobra)/UI, permission consent.
+1. **Runtime contract** — goja isolate, WinterTC/CF Module Worker `fetch`, timers, package CUE (`runtime.env` / `agents` / `agent.env` / bindings registry), assets driver, esbuild downlevel (+ on-load bundle for multi-file as needed), `orvalho serve` (exactly one agent).
+2. **Package + manager** — zip + CUE manifest, sign/verify, localhost daemon/CLI (Cobra)/UI, permission consent, install-time value injection into `runtime.env`.
 3. **Mesh + publish** — wireguard-go, pair, IPv6-per-actor, HTTP serve on actor address.
-4. **Reference** — Astro SSR cat API on a worker (Linux, then Android).
-5. **Later** — device bindings (HAL), durable storage bindings, actor-exported APIs, older Android backports, optional discovery UX / app store experiments.
+4. **Reference** — Astro SSR / real CF adapter bundle (e.g. cat API) on a worker (Linux, then Android) with **unchanged guest JS** where feasible.
+5. **Later** — multi-agent supervisor, `nodejs_compat` / virtual module stubs as required, device bindings (HAL), durable storage drivers, actor-exported APIs, older Android backports, optional discovery UX / app store experiments.
 
 ## Open details (deliberately not frozen here)
 
-ULA prefix math, HTTP vs HTTPS on the mesh, per-actor resource limit numbers, relay deployment topology, Android packaging specifics, and further CUE field growth as features land — decide in implementation. Prelude field sets evolve in `pkg/cuex` with the code; this document freezes **policy**, not every CUE key.
+ULA prefix math, HTTP vs HTTPS on the mesh, per-actor resource limit numbers, relay deployment topology, Android packaging specifics, exact serve value-source precedence, and further CUE field growth as features land — decide in implementation. Prelude field sets evolve in `pkg/cuex` with the code; this document freezes **policy**, not every CUE key.
