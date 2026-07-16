@@ -117,11 +117,231 @@ if (typeof globalThis.__orvalhoDynamicImport !== "function") {
 	return string(bannerBytes) + dynStub + "\n" + code + footer, nil
 }
 
-// rewriteDynamicImport replaces bare import( with __orvalhoDynamicImport(
-// so goja can parse the script. Does not touch import.meta.
+// rewriteDynamicImport replaces executable dynamic import(…) with
+// __orvalhoDynamicImport( so goja can parse the server bundle.
+//
+// IMPORTANT: only rewrite code tokens, never string/template/comment contents.
+// A blind ReplaceAll corrupts Astro island hydration runtime embedded as
+// string literals in the SSR bundle (browser then sees __orvalhoDynamicImport).
 func rewriteDynamicImport(src string) string {
-	// Avoid import.meta: only match import( optionally after yield/await/space.
-	return strings.ReplaceAll(src, "import(", "__orvalhoDynamicImport(")
+	var b strings.Builder
+	b.Grow(len(src) + 64)
+	i := 0
+	for i < len(src) {
+		// Line comment
+		if i+1 < len(src) && src[i] == '/' && src[i+1] == '/' {
+			j := i + 2
+			for j < len(src) && src[j] != '\n' {
+				j++
+			}
+			b.WriteString(src[i:j])
+			i = j
+			continue
+		}
+		// Block comment
+		if i+1 < len(src) && src[i] == '/' && src[i+1] == '*' {
+			j := i + 2
+			for j+1 < len(src) && !(src[j] == '*' && src[j+1] == '/') {
+				j++
+			}
+			if j+1 < len(src) {
+				j += 2
+			}
+			b.WriteString(src[i:j])
+			i = j
+			continue
+		}
+		// Single- or double-quoted string
+		if src[i] == '\'' || src[i] == '"' {
+			q := src[i]
+			j := i + 1
+			for j < len(src) {
+				if src[j] == '\\' && j+1 < len(src) {
+					j += 2
+					continue
+				}
+				if src[j] == q {
+					j++
+					break
+				}
+				j++
+			}
+			b.WriteString(src[i:j])
+			i = j
+			continue
+		}
+		// Template literal: leave quasi-literals alone; rewrite only ${...} code.
+		if src[i] == '`' {
+			end := scanTemplateLiteral(src, i)
+			b.WriteString(rewriteTemplateLiteral(src[i:end]))
+			i = end
+			continue
+		}
+		// Dynamic import( — keyword import followed by (
+		if n := importCallLen(src, i); n > 0 {
+			b.WriteString("__orvalhoDynamicImport(")
+			i += n
+			continue
+		}
+		b.WriteByte(src[i])
+		i++
+	}
+	return b.String()
+}
+
+// importCallLen returns the length of an import( call starting at i
+// (including whitespace between import and (), or 0 if not a call.
+func importCallLen(src string, i int) int {
+	const kw = "import"
+	if i+len(kw) > len(src) || src[i:i+len(kw)] != kw {
+		return 0
+	}
+	if i > 0 && isIdentByte(src[i-1]) {
+		return 0
+	}
+	j := i + len(kw)
+	for j < len(src) && (src[j] == ' ' || src[j] == '\t' || src[j] == '\n' || src[j] == '\r') {
+		j++
+	}
+	if j >= len(src) || src[j] != '(' {
+		return 0
+	}
+	return j + 1 - i // consume through '('
+}
+
+func isIdentByte(c byte) bool {
+	return c == '_' || c == '$' ||
+		(c >= 'a' && c <= 'z') ||
+		(c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9')
+}
+
+// scanTemplateLiteral returns the index just past the closing ` starting at i.
+func scanTemplateLiteral(src string, i int) int {
+	if i >= len(src) || src[i] != '`' {
+		return i
+	}
+	j := i + 1
+	for j < len(src) {
+		if src[j] == '\\' && j+1 < len(src) {
+			j += 2
+			continue
+		}
+		if src[j] == '`' {
+			return j + 1
+		}
+		if src[j] == '$' && j+1 < len(src) && src[j+1] == '{' {
+			j += 2
+			depth := 1
+			for j < len(src) && depth > 0 {
+				if src[j] == '`' {
+					// nested template
+					j = scanTemplateLiteral(src, j)
+					continue
+				}
+				if src[j] == '\'' || src[j] == '"' {
+					q := src[j]
+					j++
+					for j < len(src) {
+						if src[j] == '\\' && j+1 < len(src) {
+							j += 2
+							continue
+						}
+						if src[j] == q {
+							j++
+							break
+						}
+						j++
+					}
+					continue
+				}
+				if src[j] == '{' {
+					depth++
+				} else if src[j] == '}' {
+					depth--
+				}
+				if depth > 0 {
+					j++
+				}
+			}
+			if depth == 0 {
+				j++ // past closing }
+			}
+			continue
+		}
+		j++
+	}
+	return j
+}
+
+// rewriteTemplateLiteral rewrites import( only inside ${...} expressions.
+func rewriteTemplateLiteral(tmpl string) string {
+	if len(tmpl) < 2 || tmpl[0] != '`' {
+		return tmpl
+	}
+	var b strings.Builder
+	b.WriteByte('`')
+	i := 1
+	for i < len(tmpl) {
+		if tmpl[i] == '\\' && i+1 < len(tmpl) {
+			b.WriteByte(tmpl[i])
+			b.WriteByte(tmpl[i+1])
+			i += 2
+			continue
+		}
+		if tmpl[i] == '`' {
+			b.WriteByte('`')
+			return b.String()
+		}
+		if tmpl[i] == '$' && i+1 < len(tmpl) && tmpl[i+1] == '{' {
+			// find expression end
+			start := i
+			j := i + 2
+			depth := 1
+			for j < len(tmpl) && depth > 0 {
+				if tmpl[j] == '`' {
+					j = scanTemplateLiteral(tmpl, j)
+					continue
+				}
+				if tmpl[j] == '\'' || tmpl[j] == '"' {
+					q := tmpl[j]
+					j++
+					for j < len(tmpl) {
+						if tmpl[j] == '\\' && j+1 < len(tmpl) {
+							j += 2
+							continue
+						}
+						if tmpl[j] == q {
+							j++
+							break
+						}
+						j++
+					}
+					continue
+				}
+				if tmpl[j] == '{' {
+					depth++
+				} else if tmpl[j] == '}' {
+					depth--
+				}
+				if depth > 0 {
+					j++
+				}
+			}
+			if depth == 0 {
+				// ${ expr }
+				b.WriteString("${")
+				expr := tmpl[start+2 : j]
+				b.WriteString(rewriteDynamicImport(expr))
+				b.WriteByte('}')
+				i = j + 1
+				continue
+			}
+		}
+		b.WriteByte(tmpl[i])
+		i++
+	}
+	return b.String()
 }
 
 // neutralizeWebAssemblyEagerLoad strips eager WebAssembly.compile(…).then(…)
