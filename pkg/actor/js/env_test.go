@@ -97,3 +97,26 @@ func TestEnvNameClash(t *testing.T) {
 		t.Fatalf("want clash error, got %v", err)
 	}
 }
+
+func TestURLSearchParamsGet(t *testing.T) {
+	src := actorjs.PrepareGuestScript(`
+export default {
+  async fetch(request, env, ctx) {
+    var u = new URL(request.url);
+    var q = u.searchParams.get("query");
+    return new Response(q === null ? "null" : q, { status: 200 });
+  }
+};
+`)
+	iso := actorjs.New(src, actorjs.Options{})
+	res, err := iso.Fetch(context.Background(), actorjs.HTTPRequest{
+		Method: "GET",
+		URL:    "http://127.0.0.1:8788/search?query=teste",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Body != "teste" {
+		t.Fatalf("searchParams.get(query)=%q want teste", res.Body)
+	}
+}

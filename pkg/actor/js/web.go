@@ -75,6 +75,8 @@ func (iso *Isolate) installWebTypes() {
 	_ = resProto.DefineAccessorProperty("ok", iso.vm.ToValue(iso.responseGetOK), nil, goja.FLAG_FALSE, goja.FLAG_TRUE)
 	_ = resProto.DefineAccessorProperty("headers", iso.vm.ToValue(iso.responseGetHeaders), nil, goja.FLAG_FALSE, goja.FLAG_TRUE)
 	resProto.Set("text", iso.responseText)
+	resProto.Set("arrayBuffer", iso.responseArrayBuffer)
+	resProto.Set("json", iso.responseJSON)
 }
 
 func newHeaderBag() *headerBag {
@@ -383,6 +385,49 @@ func (iso *Isolate) responseText(call goja.FunctionCall) goja.Value {
 		}
 	}
 	return iso.resolvedStringPromise(r.body)
+}
+
+func (iso *Isolate) responseArrayBuffer(call goja.FunctionCall) goja.Value {
+	r := iso.responseBodyString(call)
+	// Expose as ArrayBuffer of UTF-8 bytes (good enough for binary if body was stored as Latin-1/bytes-in-string).
+	buf := iso.vm.NewArrayBuffer([]byte(r))
+	return iso.resolvedValuePromise(iso.vm.ToValue(buf))
+}
+
+func (iso *Isolate) responseJSON(call goja.FunctionCall) goja.Value {
+	r := iso.responseBodyString(call)
+	p, resolve, reject := iso.vm.NewPromise()
+	parse, ok := goja.AssertFunction(iso.vm.Get("JSON").ToObject(iso.vm).Get("parse"))
+	if !ok {
+		_ = reject(iso.vm.NewTypeError("JSON.parse unavailable"))
+		return iso.vm.ToValue(p)
+	}
+	parsed, err := parse(goja.Undefined(), iso.vm.ToValue(r))
+	if err != nil {
+		_ = reject(iso.vm.NewTypeError(err.Error()))
+		return iso.vm.ToValue(p)
+	}
+	_ = resolve(parsed)
+	return iso.vm.ToValue(p)
+}
+
+func (iso *Isolate) responseBodyString(call goja.FunctionCall) string {
+	r := iso.responseBagOf(call)
+	if r.bodyStream != nil {
+		// Sync snapshot only; callers of arrayBuffer/json on streams should prefer text() first.
+		if fn, ok := goja.AssertFunction(r.bodyStream.Get("_orvalhoText")); ok {
+			if v, err := fn(r.bodyStream); err == nil && v != nil {
+				return v.String()
+			}
+		}
+	}
+	return r.body
+}
+
+func (iso *Isolate) resolvedValuePromise(v goja.Value) goja.Value {
+	p, resolve, _ := iso.vm.NewPromise()
+	_ = resolve(v)
+	return iso.vm.ToValue(p)
 }
 
 // bodyArgToString coerces a Response body init to a host string.

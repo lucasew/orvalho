@@ -114,6 +114,131 @@ const hostPolyfillScript = `
       return out;
     };
   }
+  // Always install URLSearchParams: goja has none, and a stub get() that
+  // returns null breaks Astro.url.searchParams (e.g. /search?query=…).
+  function OrvalhoURLSearchParams(init) {
+    this._pairs = [];
+    var self = this;
+    function appendPair(k, v) {
+      self._pairs.push([String(k), String(v)]);
+    }
+    if (init == null || init === "") {
+      // empty
+    } else if (typeof init === "string") {
+      var s = init.charAt(0) === "?" ? init.slice(1) : init;
+      if (s) {
+        var parts = s.split("&");
+        for (var i = 0; i < parts.length; i++) {
+          if (!parts[i]) continue;
+          var eq = parts[i].indexOf("=");
+          var k, v;
+          if (eq < 0) {
+            k = parts[i];
+            v = "";
+          } else {
+            k = parts[i].slice(0, eq);
+            v = parts[i].slice(eq + 1);
+          }
+          try {
+            k = decodeURIComponent(k.replace(/\+/g, " "));
+            v = decodeURIComponent(v.replace(/\+/g, " "));
+          } catch (e) {}
+          appendPair(k, v);
+        }
+      }
+    } else if (typeof init === "object" && init !== null) {
+      if (typeof init.forEach === "function") {
+        init.forEach(function (v, k) { appendPair(k, v); });
+      } else if (Array.isArray(init)) {
+        for (var j = 0; j < init.length; j++) {
+          appendPair(init[j][0], init[j][1]);
+        }
+      } else {
+        for (var key in init) {
+          if (Object.prototype.hasOwnProperty.call(init, key)) appendPair(key, init[key]);
+        }
+      }
+    }
+    this.get = function (name) {
+      name = String(name);
+      for (var i = 0; i < self._pairs.length; i++) {
+        if (self._pairs[i][0] === name) return self._pairs[i][1];
+      }
+      return null;
+    };
+    this.getAll = function (name) {
+      name = String(name);
+      var out = [];
+      for (var i = 0; i < self._pairs.length; i++) {
+        if (self._pairs[i][0] === name) out.push(self._pairs[i][1]);
+      }
+      return out;
+    };
+    this.has = function (name) {
+      return self.get(name) !== null;
+    };
+    this.set = function (name, value) {
+      name = String(name);
+      var found = false;
+      for (var i = 0; i < self._pairs.length; i++) {
+        if (self._pairs[i][0] === name) {
+          if (!found) {
+            self._pairs[i][1] = String(value);
+            found = true;
+          } else {
+            self._pairs.splice(i, 1);
+            i--;
+          }
+        }
+      }
+      if (!found) appendPair(name, value);
+    };
+    this.append = function (name, value) { appendPair(name, value); };
+    this.delete = function (name) {
+      name = String(name);
+      self._pairs = self._pairs.filter(function (p) { return p[0] !== name; });
+    };
+    this.toString = function () {
+      return self._pairs
+        .map(function (p) {
+          return encodeURIComponent(p[0]) + "=" + encodeURIComponent(p[1]);
+        })
+        .join("&");
+    };
+    this.forEach = function (fn) {
+      for (var i = 0; i < self._pairs.length; i++) fn(self._pairs[i][1], self._pairs[i][0], self);
+    };
+    this.entries = function () {
+      var i = 0, pairs = self._pairs;
+      return {
+        next: function () {
+          if (i >= pairs.length) return { done: true, value: undefined };
+          var p = pairs[i++];
+          return { done: false, value: [p[0], p[1]] };
+        },
+      };
+    };
+    this.keys = function () {
+      var i = 0, pairs = self._pairs;
+      return {
+        next: function () {
+          if (i >= pairs.length) return { done: true, value: undefined };
+          return { done: false, value: pairs[i++][0] };
+        },
+      };
+    };
+    this.values = function () {
+      var i = 0, pairs = self._pairs;
+      return {
+        next: function () {
+          if (i >= pairs.length) return { done: true, value: undefined };
+          return { done: false, value: pairs[i++][1] };
+        },
+      };
+    };
+  }
+  globalThis.URLSearchParams = OrvalhoURLSearchParams;
+
   if (typeof globalThis.URL === "undefined" || typeof globalThis.URL.canParse !== "function") {
     var URLImpl = function URL(url, base) {
       url = String(url);
@@ -138,24 +263,26 @@ const hostPolyfillScript = `
         this.hash = m2[5] || "";
         this.origin = this.protocol + "//" + this.host;
       } else {
+        // Relative or path-only URL (still parse ?query)
+        var qAt = url.indexOf("?");
+        var hAt = url.indexOf("#");
+        var pathEnd = url.length;
+        if (qAt >= 0) pathEnd = qAt;
+        if (hAt >= 0 && hAt < pathEnd) pathEnd = hAt;
         this.protocol = "";
         this.host = "";
         this.hostname = "";
         this.port = "";
-        this.pathname = url.charAt(0) === "/" ? url : "/" + url;
-        this.search = "";
-        this.hash = "";
-        this.origin = "";
-        if (url.indexOf("://") === -1) {
-          this.pathname = url.charAt(0) === "/" ? url : "/" + url;
-          this.href = url;
+        this.pathname = url.slice(0, pathEnd) || "/";
+        if (this.pathname.charAt(0) !== "/" && this.pathname.indexOf("://") === -1) {
+          this.pathname = "/" + this.pathname.replace(/^\//, "");
         }
+        this.search = qAt >= 0 ? url.slice(qAt, hAt >= 0 ? hAt : url.length) : "";
+        this.hash = hAt >= 0 ? url.slice(hAt) : "";
+        this.origin = "";
+        this.href = url;
       }
-      this.searchParams = {
-        get: function () { return null; },
-        set: function () {},
-        toString: function () { return ""; }
-      };
+      this.searchParams = new OrvalhoURLSearchParams(this.search);
     };
     URLImpl.canParse = function (url, base) {
       try { new URLImpl(url, base); return true; } catch (e) { return false; }
@@ -163,13 +290,8 @@ const hostPolyfillScript = `
     URLImpl.prototype.toString = function () { return this.href; };
     URLImpl.prototype.toJSON = function () { return this.href; };
     globalThis.URL = URLImpl;
-  }
-  if (typeof globalThis.URLSearchParams === "undefined") {
-    globalThis.URLSearchParams = function URLSearchParams() {
-      this.get = function () { return null; };
-      this.set = function () {};
-      this.toString = function () { return ""; };
-    };
+  } else if (globalThis.URL && globalThis.URL.prototype) {
+    // Ensure instances get real searchParams if a broken URL already exists.
   }
   if (typeof globalThis.queueMicrotask !== "function") {
     globalThis.queueMicrotask = function (fn) { Promise.resolve().then(fn); };
