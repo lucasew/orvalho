@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"orvalho/pkg/cuex"
-	"orvalho/pkg/manager"
+	"orvalho/pkg/version"
 )
 
 var (
@@ -53,7 +53,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print orvalho version",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("orvalho %s\n", manager.Version)
+		fmt.Printf("orvalho %s\n", version.Version())
 	},
 }
 

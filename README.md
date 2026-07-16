@@ -85,5 +85,15 @@ See [`examples/pesquisarr/README.md`](./examples/pesquisarr/README.md). Not full
 ```bash
 go test ./...
 mise run test
+mise run ci
 go build -o bin/orvalho ./cmd/orvalho
+./bin/orvalho version
 ```
+
+### Release
+
+Uses [GoReleaser](https://goreleaser.com) + [svu](https://github.com/caarlos0/svu), same pattern as other personal Go CLIs:
+
+- Config: [`.goreleaser.yaml`](./.goreleaser.yaml)
+- Workflow: [`.github/workflows/autorelease.yml`](./.github/workflows/autorelease.yml) (CI on `main`/PR; manual **workflow_dispatch** with patch/minor/major to tag + release)
+- Local: `mise release patch` (runs `ci`, tags with `svu`, then `goreleaser release --clean`)
