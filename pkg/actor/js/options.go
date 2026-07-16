@@ -38,6 +38,14 @@ type Options struct {
 
 	// FetchTimeout bounds each outbound fetch (default DefaultFetchTimeout).
 	FetchTimeout time.Duration
+
+	// Env is the CF-style string bag on guest env (from agents.<name>.env after CUE).
+	// Keys must not clash with Bindings names.
+	Env map[string]string
+
+	// Bindings are named host objects on guest env (assets drivers, later HAL).
+	// Materialized on each Fetch into the env object passed to default.fetch.
+	Bindings map[string]Binding
 }
 
 func (o Options) withDefaults() Options {

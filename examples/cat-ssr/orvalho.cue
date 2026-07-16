@@ -1,25 +1,25 @@
 // Cat facts SSR demo package (hand-written Workers-shaped JS; no Astro).
-// When outbound fetch (#37) is available, the handler loads a fact from
-// catfact.ninja. Until then, orvalho serve still works with an offline fallback.
+// Host injects runtime.env; this package projects nothing extra onto agent.env.
+// ASSETS binding serves files under assets/ via CF-like env.ASSETS.fetch.
 
 id: "cat-ssr"
 name: "Cat facts SSR"
 
-entry: "worker.js"
-runtime: "js"
+agents: {
+	main: {
+		entrypoint: "worker.js"
+		bindings: {
+			ASSETS: {
+				type: "assets"
+				root: "assets"
+			}
+		}
+	}
+}
 
 port: 8787
 
-// Outbound allowlist — enforced once host fetch lands (#37).
 egress: [
 	"catfact.ninja",
 	"https://catfact.ninja",
 ]
-
-bindings: {
-	// Reserved for later env.assets (#35); HTML is self-contained for now.
-	assets: {
-		root: "assets"
-		paths: ["assets/style.css"]
-	}
-}

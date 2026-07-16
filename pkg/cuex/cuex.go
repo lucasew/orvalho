@@ -6,10 +6,13 @@
 package cuex
 
 import (
+	"bytes"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
@@ -28,11 +31,85 @@ type Config struct {
 }
 
 // LoadPackage unifies package preludes with instance CUE bytes (zip root orvalho.cue).
+// Packages that project agent.env from runtime.env must be loaded with
+// [LoadPackageWithEnv] so outside values can complete the instance.
 func LoadPackage(instance []byte, filename string) (*Config, error) {
+	return LoadPackageWithEnv(instance, filename, nil)
+}
+
+// LoadPackageWithEnv unifies package preludes, optional runtime.env from env,
+// then validates. env is the outside-world map (serve/manager); nil or empty
+// means no overlay. On validate failure the actor must not be allocated
+// (SPEC never-allocate).
+func LoadPackageWithEnv(instance []byte, filename string, env map[string]string) (*Config, error) {
 	if filename == "" {
 		filename = InstanceFilename
 	}
-	return load(instance, filename, "prelude_package.cue")
+	cfg, err := loadRaw(instance, filename, "prelude_package.cue")
+	if err != nil {
+		return nil, err
+	}
+	if len(env) > 0 {
+		overlay, err := encodeRuntimeEnvOverlay(env)
+		if err != nil {
+			return nil, err
+		}
+		cfg, err = cfg.unifyOverlayRaw(overlay, "runtime_env.cue")
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := cfg.Value.Validate(cue.Concrete(true)); err != nil {
+		return nil, fmt.Errorf("cuex: validate: %w", formatErr(err))
+	}
+	if err := requireAtLeastOneAgent(cfg.Value); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+func requireAtLeastOneAgent(v cue.Value) error {
+	agents := v.LookupPath(cue.ParsePath("agents"))
+	if !agents.Exists() {
+		return fmt.Errorf("cuex: validate: missing agents")
+	}
+	iter, err := agents.Fields()
+	if err != nil {
+		return fmt.Errorf("cuex: validate: agents: %w", err)
+	}
+	n := 0
+	for iter.Next() {
+		n++
+	}
+	if n == 0 {
+		return fmt.Errorf("cuex: validate: agents must declare at least one agent")
+	}
+	return nil
+}
+
+// encodeRuntimeEnvOverlay builds `runtime: { env: { ... } }` CUE from a string map.
+func encodeRuntimeEnvOverlay(env map[string]string) (string, error) {
+	// Use JSON object encoding for safe string escaping, then wrap as CUE.
+	// CUE accepts JSON as a subset for this shape.
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	m := make(map[string]string, len(env))
+	for _, k := range keys {
+		m[k] = env[k]
+	}
+	var buf bytes.Buffer
+	buf.WriteString("runtime: { env: ")
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(m); err != nil {
+		return "", fmt.Errorf("cuex: encode runtime.env: %w", err)
+	}
+	// Encode adds trailing newline; trim and close braces.
+	b := bytes.TrimSpace(buf.Bytes())
+	return string(b) + " }\n", nil
 }
 
 // LoadHost unifies host preludes with instance CUE bytes.
@@ -69,6 +146,20 @@ func LoadHostDataDir(dataDir string) (*Config, error) {
 
 // UnifyOverlay compiles overlay CUE and unifies it onto cfg (e.g. flag overrides).
 func (c *Config) UnifyOverlay(overlay string, filename string) (*Config, error) {
+	cfg, err := c.unifyOverlayRaw(overlay, filename)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.Value.Validate(cue.Concrete(true)); err != nil {
+		// Concrete may be too strict for open optionals; use final.
+		if err2 := cfg.Value.Validate(); err2 != nil {
+			return nil, fmt.Errorf("cuex: unify overlay: %w", formatErr(err2))
+		}
+	}
+	return cfg, nil
+}
+
+func (c *Config) unifyOverlayRaw(overlay string, filename string) (*Config, error) {
 	if c == nil {
 		return nil, fmt.Errorf("cuex: nil config")
 	}
@@ -78,22 +169,30 @@ func (c *Config) UnifyOverlay(overlay string, filename string) (*Config, error) 
 	if filename == "" {
 		filename = "overlay.cue"
 	}
-	// Compile overlay in the same context as Value.
 	layer := c.Value.Context().CompileString(overlay, cue.Filename(filename))
 	if err := layer.Err(); err != nil {
 		return nil, fmt.Errorf("cuex: compile overlay: %w", formatErr(err))
 	}
 	unified := c.Value.Unify(layer)
-	if err := unified.Validate(cue.Concrete(true)); err != nil {
-		// Concrete may be too strict for open optionals; use final.
-		if err2 := unified.Validate(); err2 != nil {
-			return nil, fmt.Errorf("cuex: unify overlay: %w", formatErr(err2))
-		}
+	if err := unified.Err(); err != nil {
+		return nil, fmt.Errorf("cuex: unify overlay: %w", formatErr(err))
 	}
 	return &Config{Value: unified}, nil
 }
 
 func load(instance []byte, instanceName, rolePrelude string) (*Config, error) {
+	cfg, err := loadRaw(instance, instanceName, rolePrelude)
+	if err != nil {
+		return nil, err
+	}
+	// Concrete(true) fails incomplete required fields (e.g. missing package fields).
+	if err := cfg.Value.Validate(cue.Concrete(true)); err != nil {
+		return nil, fmt.Errorf("cuex: validate: %w", formatErr(err))
+	}
+	return cfg, nil
+}
+
+func loadRaw(instance []byte, instanceName, rolePrelude string) (*Config, error) {
 	ctx := cuecontext.New()
 
 	commonBytes, err := preludeFS.ReadFile("prelude_common.cue")
@@ -122,9 +221,8 @@ func load(instance []byte, instanceName, rolePrelude string) (*Config, error) {
 	}
 
 	unified := schema.Unify(user)
-	// Concrete(true) fails incomplete required fields (e.g. missing package entry).
-	if err := unified.Validate(cue.Concrete(true)); err != nil {
-		return nil, fmt.Errorf("cuex: validate: %w", formatErr(err))
+	if err := unified.Err(); err != nil {
+		return nil, fmt.Errorf("cuex: unify: %w", formatErr(err))
 	}
 	return &Config{Value: unified}, nil
 }
@@ -147,4 +245,26 @@ func LookupString(v cue.Value, path string) (string, bool, error) {
 		return "", false, err
 	}
 	return s, true, nil
+}
+
+// LookupStringMap returns a map[string]string at path, or (nil, false) if absent.
+func LookupStringMap(v cue.Value, path string) (map[string]string, bool, error) {
+	fv := v.LookupPath(cue.ParsePath(path))
+	if !fv.Exists() {
+		return nil, false, nil
+	}
+	iter, err := fv.Fields()
+	if err != nil {
+		return nil, false, err
+	}
+	out := make(map[string]string)
+	for iter.Next() {
+		name := iter.Selector().Unquoted()
+		s, err := iter.Value().String()
+		if err != nil {
+			return nil, false, fmt.Errorf("cuex: %s.%s: %w", path, name, err)
+		}
+		out[name] = s
+	}
+	return out, true, nil
 }

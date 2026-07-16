@@ -17,8 +17,9 @@ import (
 func minimalManifest() []byte {
 	return []byte(`
 id: "minimal"
-entry: "worker.js"
-runtime: "js"
+agents: {
+	main: { entrypoint: "worker.js" }
+}
 `)
 }
 
@@ -42,9 +43,9 @@ func TestWriteDirAndOpenRoundTrip_MinimalFixture(t *testing.T) {
 	if err != nil || !ok || id != "minimal" {
 		t.Fatalf("id=%q ok=%v err=%v", id, ok, err)
 	}
-	entry, ok, err := cuex.LookupString(pkg.Value(), "entry")
+	entry, ok, err := cuex.LookupString(pkg.Value(), "agents.main.entrypoint")
 	if err != nil || !ok || entry != "worker.js" {
-		t.Fatalf("entry=%q ok=%v err=%v", entry, ok, err)
+		t.Fatalf("entrypoint=%q ok=%v err=%v", entry, ok, err)
 	}
 
 	wantWorker, err := os.ReadFile(filepath.Join(dir, "worker.js"))
@@ -115,9 +116,9 @@ func TestWriteDirAndOpenRoundTrip_NestedFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)
 	}
-	entry, ok, err := cuex.LookupString(pkg.Value(), "entry")
+	entry, ok, err := cuex.LookupString(pkg.Value(), "agents.main.entrypoint")
 	if err != nil || !ok || entry != "src/main.js" {
-		t.Fatalf("entry=%q ok=%v err=%v", entry, ok, err)
+		t.Fatalf("entrypoint=%q ok=%v err=%v", entry, ok, err)
 	}
 	if _, err := pkg.Get("src/lib/util.js"); err != nil {
 		t.Fatal(err)

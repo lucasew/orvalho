@@ -32,5 +32,6 @@
 // [PrepareGuestScript] to rewrite a leading `export default` for goja.
 //
 // Outbound guest `fetch` is host-backed and gated by [Options.Egress]
-// (empty allowlist denies all). Env asset/secret bindings are out of scope here.
+// (empty allowlist denies all). Guest env is built from Options.Env (strings)
+// and Options.Bindings (host drivers such as assets).
 package js

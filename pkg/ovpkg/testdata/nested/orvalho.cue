@@ -1,3 +1,7 @@
 id: "nested"
-entry: "src/main.js"
-runtime: "js"
+
+agents: {
+	main: {
+		entrypoint: "src/main.js"
+	}
+}

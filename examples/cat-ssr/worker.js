@@ -92,6 +92,24 @@ async function loadFact() {
 
 export default {
   async fetch(request, env, ctx) {
+    // Static files via CF-like ASSETS binding when present.
+    var u = String(request.url || "");
+    var path = u;
+    var q = path.indexOf("?");
+    if (q !== -1) path = path.slice(0, q);
+    var scheme = path.indexOf("://");
+    if (scheme !== -1) {
+      path = path.slice(scheme + 3);
+      var slash = path.indexOf("/");
+      path = slash === -1 ? "/" : path.slice(slash);
+    }
+    if (path !== "/" && path !== "" && env && env.ASSETS && typeof env.ASSETS.fetch === "function") {
+      var assetRes = env.ASSETS.fetch(request);
+      if (assetRes && assetRes.status !== 404) {
+        return assetRes;
+      }
+    }
+
     var loaded = await loadFact();
     var html = pageHTML(loaded.fact, loaded.source, loaded.detail);
     return new Response(html, {

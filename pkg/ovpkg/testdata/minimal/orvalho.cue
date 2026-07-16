@@ -1,3 +1,7 @@
 id: "minimal"
-entry: "worker.js"
-runtime: "js"
+
+agents: {
+	main: {
+		entrypoint: "worker.js"
+	}
+}

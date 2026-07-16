@@ -34,7 +34,10 @@ orvalho --data-dir /path/to/data identity show
 orvalho serve ./pkg/ovpkg/testdata/minimal
 orvalho serve ./examples/cat-ssr
 orvalho serve ./my-actor.ovpkg --listen 127.0.0.1:8787
+orvalho serve ./pkg --var SITE_TITLE=Cats --env-file .dev.vars
 ```
+
+Packages declare **`agents`** (exactly one for `serve`), optional **`runtime.env`** projections, and typed **`bindings`** (e.g. `ASSETS` with `type: "assets"`). See [`SPEC.md`](./SPEC.md).
 
 ### Example: cat facts SSR
 
@@ -43,6 +46,7 @@ orvalho serve ./my-actor.ovpkg --listen 127.0.0.1:8787
 ```bash
 orvalho serve ./examples/cat-ssr
 curl http://127.0.0.1:8787/
+curl http://127.0.0.1:8787/style.css   # via env.ASSETS.fetch when the worker forwards
 ```
 
 With package `egress` wired into the isolate, `orvalho serve` performs allowlisted outbound `fetch`. The cat demo loads a live fact from `catfact.ninja` when the network is up; otherwise it shows an offline fallback page.

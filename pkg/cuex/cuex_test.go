@@ -9,8 +9,9 @@ import (
 func TestLoadPackageMinimal(t *testing.T) {
 	cfg, err := LoadPackage([]byte(`
 id: "cat-ssr"
-entry: "dist/worker.js"
-runtime: "js"
+agents: {
+	main: { entrypoint: "dist/worker.js" }
+}
 `), "orvalho.cue")
 	if err != nil {
 		t.Fatal(err)
@@ -19,13 +20,16 @@ runtime: "js"
 	if err != nil || !ok || id != "cat-ssr" {
 		t.Fatalf("id=%q ok=%v err=%v", id, ok, err)
 	}
+	ep, ok, err := LookupString(cfg.Value, "agents.main.entrypoint")
+	if err != nil || !ok || ep != "dist/worker.js" {
+		t.Fatalf("entrypoint=%q ok=%v err=%v", ep, ok, err)
+	}
 }
 
 func TestLoadPackageRejectsOpenProxy(t *testing.T) {
 	_, err := LoadPackage([]byte(`
 id: "x"
-entry: "a.js"
-runtime: "js"
+agents: { main: { entrypoint: "a.js" } }
 egress: ["*"]
 `), "orvalho.cue")
 	if err == nil {
@@ -36,7 +40,40 @@ egress: ["*"]
 func TestLoadPackageRequiresFields(t *testing.T) {
 	_, err := LoadPackage([]byte(`id: "x"`), "orvalho.cue")
 	if err == nil {
-		t.Fatal("expected missing entry/runtime error")
+		t.Fatal("expected missing agents error")
+	}
+}
+
+func TestLoadPackageWithRuntimeEnvProjection(t *testing.T) {
+	src := []byte(`
+id: "proj"
+runtime: {
+	env: {
+		SITE_TITLE: string & !=""
+	}
+}
+agents: {
+	main: {
+		entrypoint: "w.js"
+		env: {
+			TITLE: runtime.env.SITE_TITLE
+		}
+	}
+}
+`)
+	_, err := LoadPackage(src, "orvalho.cue")
+	if err == nil {
+		t.Fatal("expected incomplete without runtime.env")
+	}
+	cfg, err := LoadPackageWithEnv(src, "orvalho.cue", map[string]string{
+		"SITE_TITLE": "Cats",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	title, ok, err := LookupString(cfg.Value, "agents.main.env.TITLE")
+	if err != nil || !ok || title != "Cats" {
+		t.Fatalf("TITLE=%q ok=%v err=%v", title, ok, err)
 	}
 }
 

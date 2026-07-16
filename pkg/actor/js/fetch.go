@@ -23,7 +23,7 @@ func PrepareGuestScript(src string) string {
 // Fetch invokes the Workers-shaped entry `default.fetch(request, env, ctx)`
 // and returns a host Response. The isolate script is evaluated on first use.
 //
-// env and ctx are empty objects in this milestone (bindings land later).
+// env is built from Options.Env (strings) and Options.Bindings (host drivers).
 // Returned Promises are awaited; pending work is advanced via Tick (timers)
 // until the Promise settles or ctx / wait deadline expires.
 func (iso *Isolate) Fetch(ctx context.Context, req HTTPRequest) (HTTPResponse, error) {
@@ -53,7 +53,10 @@ func (iso *Isolate) fetchLocked(ctx context.Context, req HTTPRequest) (HTTPRespo
 		return HTTPResponse{}, err
 	}
 
-	env := iso.vm.NewObject()
+	env, err := iso.buildEnvLocked()
+	if err != nil {
+		return HTTPResponse{}, err
+	}
 	exCtx := iso.vm.NewObject()
 	result, err := fetchFn(goja.Undefined(), iso.vm.ToValue(reqObj), env, exCtx)
 	if err != nil {

@@ -418,19 +418,119 @@ func OpenPath(path string) (*Package, error) {
 	return OpenFile(path)
 }
 
-// Entry returns the package entry path from the validated CUE manifest.
-func (p *Package) Entry() (string, error) {
+// Agent is one worker declared under agents.<name> after CUE evaluation.
+type Agent struct {
+	// Name is the key under agents.
+	Name string
+	// Entrypoint is the package-relative JS module path.
+	Entrypoint string
+	// Env is the concrete string bag projected onto guest env (CF vars/secrets).
+	Env map[string]string
+	// Bindings maps guest env names to raw CUE binding objects (type + fields).
+	// Host drivers materialize these; values are not decoded here beyond type.
+	Bindings map[string]BindingSpec
+}
+
+// BindingSpec is a typed host binding request from package CUE.
+type BindingSpec struct {
+	Type string
+	// Fields is the full binding value as cue.Value (includes type).
+	Value cue.Value
+}
+
+// SingleAgent returns the sole agent in the package.
+// Serve requires exactly one agent; zero or more than one is an error
+// (multi-agent supervisor is backlog).
+func (p *Package) SingleAgent() (*Agent, error) {
 	if p == nil || p.Config == nil {
-		return "", fmt.Errorf("ovpkg: package not loaded")
+		return nil, fmt.Errorf("ovpkg: package not loaded")
 	}
-	s, ok, err := cuex.LookupString(p.Value(), "entry")
+	agents := p.Value().LookupPath(cue.ParsePath("agents"))
+	if !agents.Exists() {
+		return nil, fmt.Errorf("ovpkg: missing agents")
+	}
+	iter, err := agents.Fields()
+	if err != nil {
+		return nil, fmt.Errorf("ovpkg: agents: %w", err)
+	}
+	var names []string
+	var values []cue.Value
+	for iter.Next() {
+		names = append(names, iter.Selector().Unquoted())
+		values = append(values, iter.Value())
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("ovpkg: agents is empty (need exactly one)")
+	}
+	if len(names) > 1 {
+		sort.Strings(names)
+		return nil, fmt.Errorf("ovpkg: multiple agents %v (serve requires exactly one; supervisor is backlog)", names)
+	}
+	return decodeAgent(names[0], values[0])
+}
+
+func decodeAgent(name string, v cue.Value) (*Agent, error) {
+	ep, err := v.LookupPath(cue.ParsePath("entrypoint")).String()
+	if err != nil {
+		return nil, fmt.Errorf("ovpkg: agents.%s.entrypoint: %w", name, err)
+	}
+	envMap, _, err := cuex.LookupStringMap(v, "env")
+	if err != nil {
+		return nil, fmt.Errorf("ovpkg: agents.%s.env: %w", name, err)
+	}
+	if envMap == nil {
+		envMap = map[string]string{}
+	}
+	bindings := map[string]BindingSpec{}
+	bv := v.LookupPath(cue.ParsePath("bindings"))
+	if bv.Exists() {
+		iter, err := bv.Fields()
+		if err != nil {
+			return nil, fmt.Errorf("ovpkg: agents.%s.bindings: %w", name, err)
+		}
+		for iter.Next() {
+			bname := iter.Selector().Unquoted()
+			bv := iter.Value()
+			typ, err := bv.LookupPath(cue.ParsePath("type")).String()
+			if err != nil {
+				return nil, fmt.Errorf("ovpkg: agents.%s.bindings.%s.type: %w", name, bname, err)
+			}
+			bindings[bname] = BindingSpec{Type: typ, Value: bv}
+		}
+	}
+	return &Agent{
+		Name:       name,
+		Entrypoint: ep,
+		Env:        envMap,
+		Bindings:   bindings,
+	}, nil
+}
+
+// Entry returns the sole agent's entrypoint (see [Package.SingleAgent]).
+// Deprecated path name kept for call-site churn reduction; prefer SingleAgent.
+func (p *Package) Entry() (string, error) {
+	a, err := p.SingleAgent()
 	if err != nil {
 		return "", err
 	}
-	if !ok || s == "" {
-		return "", fmt.Errorf("ovpkg: missing entry")
+	return a.Entrypoint, nil
+}
+
+// WithRuntimeEnv re-validates the package manifest with outside-world env
+// unified as runtime.env. Returns a new Package sharing the same payload files.
+func (p *Package) WithRuntimeEnv(env map[string]string) (*Package, error) {
+	if p == nil || len(p.Manifest) == 0 {
+		return nil, ErrMissingManifest
 	}
-	return s, nil
+	cfg, err := cuex.LoadPackageWithEnv(p.Manifest, ManifestName, env)
+	if err != nil {
+		return nil, fmt.Errorf("ovpkg: validate with runtime.env: %w", err)
+	}
+	return &Package{
+		Manifest: p.Manifest,
+		Files:    p.Files,
+		Config:   cfg,
+	}, nil
 }
 
 // Port returns the optional package port, or 0 if unset.
