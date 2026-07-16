@@ -70,7 +70,45 @@ func (iso *Isolate) fetchLocked(ctx context.Context, req HTTPRequest) (HTTPRespo
 	if err != nil {
 		return HTTPResponse{}, err
 	}
+	// Drain streaming bodies (Astro SSR returns Response(ReadableStream)).
+	result, err = iso.materializeResponseBodyLocked(ctx, result)
+	if err != nil {
+		return HTTPResponse{}, err
+	}
 	return iso.readResponseLocked(result)
+}
+
+// materializeResponseBodyLocked awaits response.text() when the body is a stream
+// so the host HTTP layer always sees a complete string body.
+func (iso *Isolate) materializeResponseBodyLocked(ctx context.Context, v goja.Value) (goja.Value, error) {
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return v, nil
+	}
+	obj, ok := v.(*goja.Object)
+	if !ok {
+		return v, nil
+	}
+	r, ok := iso.responseReg[obj]
+	if !ok || r.bodyStream == nil {
+		return v, nil
+	}
+	textFn, ok := goja.AssertFunction(obj.Get("text"))
+	if !ok {
+		return v, nil
+	}
+	p, err := textFn(obj)
+	if err != nil {
+		return nil, mapJSError(ctx, err)
+	}
+	settled, err := iso.awaitPromiseLocked(ctx, p, defaultFetchWait)
+	if err != nil {
+		return nil, err
+	}
+	if settled != nil && !goja.IsUndefined(settled) {
+		r.body = settled.String()
+		r.bodyStream = nil
+	}
+	return v, nil
 }
 
 func (iso *Isolate) ensureInitializedLocked(ctx context.Context) error {
@@ -96,6 +134,8 @@ func (iso *Isolate) ensureInitializedLocked(ctx context.Context) error {
 	if err != nil {
 		return mapJSError(ctx, err)
 	}
+	// CF unenv may overwrite console during init; re-bind host logging.
+	iso.bindConsole()
 	return nil
 }
 

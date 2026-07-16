@@ -11,8 +11,15 @@ import (
 // installHostPolyfills adds minimal globals Astro/CF Workers bundles expect
 // that are outside our WinterTC subset but required for real adapter output.
 func (iso *Isolate) installHostPolyfills() {
-	// console must exist before CF unenv patches Object.assign(console, …).
-	// Log to host stderr so Astro/adapter errors are visible under serve.
+	iso.bindConsole()
+
+	// atob / btoa / URL / streams / crypto / Intl — one script for guest globals.
+	_, _ = iso.vm.RunString(hostPolyfillScript)
+}
+
+// bindConsole installs console.* that write to the host process stderr.
+// Re-run after guest script init: CF unenv may replace console methods.
+func (iso *Isolate) bindConsole() {
 	logFn := func(prefix string) func(goja.FunctionCall) goja.Value {
 		return func(call goja.FunctionCall) goja.Value {
 			parts := make([]string, 0, len(call.Arguments))
@@ -23,21 +30,19 @@ func (iso *Isolate) installHostPolyfills() {
 			return goja.Undefined()
 		}
 	}
-	_ = iso.vm.Set("console", map[string]any{
-		"log":   logFn("log"),
-		"info":  logFn("info"),
-		"warn":  logFn("warn"),
-		"error": logFn("error"),
-		"debug": logFn("debug"),
-		"trace": logFn("trace"),
-	})
+	con := iso.vm.NewObject()
+	_ = con.Set("log", logFn("log"))
+	_ = con.Set("info", logFn("info"))
+	_ = con.Set("warn", logFn("warn"))
+	_ = con.Set("error", logFn("error"))
+	_ = con.Set("debug", logFn("debug"))
+	_ = con.Set("trace", logFn("trace"))
+	_ = iso.vm.Set("console", con)
+}
 
-	// atob / btoa (base64) — host-installed for CF/Astro bundles.
-	_, _ = iso.vm.RunString(`
+// hostPolyfillScript is injected into every isolate (before guest code).
+const hostPolyfillScript = `
 (function () {
-  if (typeof globalThis.console === "undefined") {
-    globalThis.console = { log: function(){}, info: function(){}, warn: function(){}, error: function(){}, debug: function(){}, trace: function(){} };
-  }
   var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
   if (typeof globalThis.btoa !== "function") {
     globalThis.btoa = function (input) {
@@ -141,7 +146,6 @@ func (iso *Isolate) installHostPolyfills() {
         this.search = "";
         this.hash = "";
         this.origin = "";
-        // Relative path used as pathname for asset resolution.
         if (url.indexOf("://") === -1) {
           this.pathname = url.charAt(0) === "/" ? url : "/" + url;
           this.href = url;
@@ -154,12 +158,7 @@ func (iso *Isolate) installHostPolyfills() {
       };
     };
     URLImpl.canParse = function (url, base) {
-      try {
-        new URLImpl(url, base);
-        return true;
-      } catch (e) {
-        return false;
-      }
+      try { new URLImpl(url, base); return true; } catch (e) { return false; }
     };
     URLImpl.prototype.toString = function () { return this.href; };
     URLImpl.prototype.toJSON = function () { return this.href; };
@@ -173,14 +172,10 @@ func (iso *Isolate) installHostPolyfills() {
     };
   }
   if (typeof globalThis.queueMicrotask !== "function") {
-    globalThis.queueMicrotask = function (fn) {
-      Promise.resolve().then(fn);
-    };
+    globalThis.queueMicrotask = function (fn) { Promise.resolve().then(fn); };
   }
   if (typeof globalThis.structuredClone !== "function") {
-    globalThis.structuredClone = function (v) {
-      return JSON.parse(JSON.stringify(v));
-    };
+    globalThis.structuredClone = function (v) { return JSON.parse(JSON.stringify(v)); };
   }
   if (typeof globalThis.performance === "undefined") {
     globalThis.performance = { now: function () { return Date.now(); } };
@@ -211,82 +206,237 @@ func (iso *Isolate) installHostPolyfills() {
       return "00000000-0000-4000-8000-000000000000";
     };
   }
-  // Minimal Streams (Astro SSR). Buffers enqueued chunks for host Response.text().
-  if (typeof globalThis.ReadableStream === "undefined") {
-    function chunkToString(c) {
-      if (c == null) return "";
-      if (typeof c === "string") return c;
-      if (c instanceof Uint8Array) return new TextDecoder().decode(c);
-      if (typeof ArrayBuffer !== "undefined" && c instanceof ArrayBuffer) {
-        return new TextDecoder().decode(new Uint8Array(c));
-      }
-      return String(c);
+
+  function chunkToString(c) {
+    if (c == null) return "";
+    if (typeof c === "string") return c;
+    if (typeof c === "number") return String(c);
+    if (c instanceof Uint8Array) return new TextDecoder().decode(c);
+    if (typeof ArrayBuffer !== "undefined" && c instanceof ArrayBuffer) {
+      return new TextDecoder().decode(new Uint8Array(c));
     }
-    globalThis.ReadableStream = function ReadableStream(underlying) {
-      this._underlying = underlying || {};
+    // Avoid "[object Object]" for stream-ish values.
+    if (typeof c === "object" && c !== null && typeof c.toString === "function") {
+      var s = c.toString();
+      if (s !== "[object Object]") return s;
+    }
+    return "";
+  }
+
+  // Streams: support async start/pull and TransformStream pipeThrough (Astro SSR).
+  if (typeof globalThis.ReadableStream === "undefined") {
+    globalThis.ReadableStream = function ReadableStream(underlyingSource) {
+      var underlying = underlyingSource || {};
       this._chunks = [];
       this._closed = false;
+      this._errored = null;
       this.locked = false;
       var self = this;
       var controller = {
-        enqueue: function (c) { self._chunks.push(c); },
+        enqueue: function (c) {
+          if (!self._closed) self._chunks.push(c);
+        },
         close: function () { self._closed = true; },
-        error: function () { self._closed = true; },
+        error: function (e) { self._errored = e || new Error("stream error"); self._closed = true; },
+        desiredSize: 1,
       };
-      if (typeof this._underlying.start === "function") {
-        try { this._underlying.start(controller); } catch (e) {}
+      var startRet;
+      try {
+        if (typeof underlying.start === "function") startRet = underlying.start(controller);
+      } catch (e) {
+        self._errored = e;
+        self._closed = true;
       }
+      this._ready = Promise.resolve(startRet).catch(function (e) {
+        self._errored = e;
+        self._closed = true;
+      });
+      this._underlying = underlying;
+      this._controller = controller;
+
       this.getReader = function () {
         self.locked = true;
         var i = 0;
         return {
           read: function () {
-            if (typeof self._underlying.pull === "function" && !self._closed) {
-              try { self._underlying.pull(controller); } catch (e) {}
-            }
-            if (i < self._chunks.length) {
-              return Promise.resolve({ done: false, value: self._chunks[i++] });
-            }
-            return Promise.resolve({ done: true, value: undefined });
+            return self._ready.then(function pump() {
+              if (self._errored) return Promise.reject(self._errored);
+              if (i < self._chunks.length) {
+                return { done: false, value: self._chunks[i++] };
+              }
+              if (!self._closed && typeof underlying.pull === "function") {
+                return Promise.resolve(underlying.pull(controller)).then(function () {
+                  if (i < self._chunks.length) {
+                    return { done: false, value: self._chunks[i++] };
+                  }
+                  if (self._closed) return { done: true, value: undefined };
+                  // Yield to microtasks so async producers can enqueue.
+                  return Promise.resolve().then(pump);
+                });
+              }
+              if (self._closed) return { done: true, value: undefined };
+              // Wait one tick for async start/enqueue without pull.
+              return Promise.resolve().then(function () {
+                if (i < self._chunks.length) {
+                  return { done: false, value: self._chunks[i++] };
+                }
+                if (self._closed || self._errored) {
+                  if (self._errored) return Promise.reject(self._errored);
+                  return { done: true, value: undefined };
+                }
+                // Still open with no chunks: resolve empty to avoid hang after idle pulls.
+                // Prefer waiting on ready already done; spin a few microtasks.
+                return { done: true, value: undefined };
+              });
+            });
           },
-          cancel: function () { return Promise.resolve(); },
+          cancel: function () {
+            self._closed = true;
+            return Promise.resolve();
+          },
           releaseLock: function () { self.locked = false; },
         };
       };
-      this.cancel = function () { return Promise.resolve(); };
+
+      this.cancel = function () {
+        self._closed = true;
+        return Promise.resolve();
+      };
       this.tee = function () { return [self, self]; };
+
+      this.pipeTo = function (writable) {
+        var reader = self.getReader();
+        var writer = writable.getWriter ? writable.getWriter() : null;
+        if (!writer) return Promise.reject(new TypeError("not a WritableStream"));
+        function pump() {
+          return reader.read().then(function (r) {
+            if (r.done) return writer.close();
+            return writer.write(r.value).then(pump);
+          });
+        }
+        return self._ready.then(pump);
+      };
+      this.pipeThrough = function (transform) {
+        var writable = transform.writable;
+        var readable = transform.readable;
+        self.pipeTo(writable).catch(function () {});
+        return readable;
+      };
+
+      // Sync snapshot (may be partial). Prefer _orvalhoCollect async for full body.
       this._orvalhoText = function () {
         var out = "";
         for (var j = 0; j < self._chunks.length; j++) out += chunkToString(self._chunks[j]);
         return out;
       };
+      this._orvalhoCollect = function () {
+        // Wait for async start(), then for the stream to close (or idle),
+        // polling pull so TransformStream producers can finish writing.
+        var self2 = self;
+        var idle = 0;
+        var steps = 0;
+        function step() {
+          if (self2._errored) return Promise.reject(self2._errored);
+          steps++;
+          if (steps > 200000) return Promise.resolve(self2._orvalhoText());
+          var pullP = Promise.resolve();
+          if (!self2._closed && typeof self2._underlying.pull === "function") {
+            try { pullP = Promise.resolve(self2._underlying.pull(self2._controller)); } catch (e) {}
+          }
+          return pullP.then(function () {
+            if (self2._closed) return self2._orvalhoText();
+            if (self2._chunks.length > 0) {
+              idle = 0;
+              return Promise.resolve().then(step);
+            }
+            idle++;
+            // No new chunks for several turns after start completed: treat as done.
+            if (idle > 32) {
+              self2._closed = true;
+              return self2._orvalhoText();
+            }
+            return Promise.resolve().then(step);
+          });
+        }
+        return self2._ready.then(step);
+      };
     };
-    globalThis.WritableStream = function WritableStream() {
+
+    globalThis.WritableStream = function WritableStream(underlyingSink) {
+      var sink = underlyingSink || {};
+      var self = this;
+      this.locked = false;
       this.getWriter = function () {
+        self.locked = true;
         return {
-          write: function () { return Promise.resolve(); },
-          close: function () { return Promise.resolve(); },
-          abort: function () { return Promise.resolve(); },
-          releaseLock: function () {},
+          write: function (chunk) {
+            if (typeof sink.write === "function") {
+              return Promise.resolve(sink.write(chunk, { signal: null }));
+            }
+            return Promise.resolve();
+          },
+          close: function () {
+            if (typeof sink.close === "function") return Promise.resolve(sink.close());
+            return Promise.resolve();
+          },
+          abort: function (e) {
+            if (typeof sink.abort === "function") return Promise.resolve(sink.abort(e));
+            return Promise.resolve();
+          },
+          releaseLock: function () { self.locked = false; },
+          get closed() { return Promise.resolve(); },
+          get ready() { return Promise.resolve(); },
+          desiredSize: 1,
         };
       };
     };
-    globalThis.TransformStream = function TransformStream() {
-      this.readable = new globalThis.ReadableStream();
-      this.writable = new globalThis.WritableStream();
+
+    globalThis.TransformStream = function TransformStream(transformer) {
+      transformer = transformer || {};
+      var readableController = null;
+      var readable = new globalThis.ReadableStream({
+        start: function (c) { readableController = c; },
+      });
+      var writable = new globalThis.WritableStream({
+        write: function (chunk) {
+          if (typeof transformer.transform === "function") {
+            return Promise.resolve(
+              transformer.transform(chunk, {
+                enqueue: function (c) { readableController.enqueue(c); },
+                terminate: function () { readableController.close(); },
+              })
+            );
+          }
+          readableController.enqueue(chunk);
+          return Promise.resolve();
+        },
+        close: function () {
+          var done = Promise.resolve();
+          if (typeof transformer.flush === "function") {
+            done = Promise.resolve(
+              transformer.flush({
+                enqueue: function (c) { readableController.enqueue(c); },
+              })
+            );
+          }
+          return done.then(function () { readableController.close(); });
+        },
+      });
+      this.readable = readable;
+      this.writable = writable;
     };
   }
-  // Stub WebAssembly (devalue/etc. compile WASM at load; goja has none).
+
   if (typeof globalThis.WebAssembly === "undefined") {
     var emptyExports = {};
     globalThis.WebAssembly = {
       compile: function () { return Promise.resolve({}); },
       instantiate: function () {
-        return Promise.resolve({ instance: { exports: emptyExports }, module: {} });
+        return Promise.resolve({ instance: { exports: emptyExports }, module: {}, exports: emptyExports });
       },
       compileStreaming: function () { return Promise.resolve({}); },
       instantiateStreaming: function () {
-        return Promise.resolve({ instance: { exports: emptyExports }, module: {} });
+        return Promise.resolve({ instance: { exports: emptyExports }, module: {}, exports: emptyExports });
       },
       Module: function () {},
       Instance: function () { this.exports = emptyExports; },
@@ -295,7 +445,6 @@ func (iso *Isolate) installHostPolyfills() {
       validate: function () { return false; },
     };
   }
-  // Minimal Intl for Astro/CF bundles (goja has no Intl).
   if (typeof globalThis.Intl === "undefined") {
     function DTF() {}
     DTF.prototype.format = function (d) { return String(d); };
@@ -334,5 +483,4 @@ func (iso *Isolate) installHostPolyfills() {
     };
   }
 })();
-`)
-}
+`

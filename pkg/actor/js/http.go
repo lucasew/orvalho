@@ -1,9 +1,12 @@
 package js
 
 import (
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 )
 
 // MaxRequestBody is the maximum inbound body size for [Handler] (1 MiB).
@@ -11,16 +14,20 @@ const MaxRequestBody = 1 << 20
 
 // Handler returns an http.Handler that maps each request to default.fetch.
 // Requests are serialized through the isolate lock (single-threaded actor).
+// Each request is logged to stderr (method, path, status, duration, body size).
 func Handler(iso *Isolate) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
 		defer r.Body.Close()
 		body, err := io.ReadAll(io.LimitReader(r.Body, MaxRequestBody+1))
 		if err != nil {
 			http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
+			fmt.Fprintf(os.Stderr, "orvalho serve: %s %s -> 400 (%v)\n", r.Method, r.URL.RequestURI(), err)
 			return
 		}
 		if len(body) > MaxRequestBody {
 			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			fmt.Fprintf(os.Stderr, "orvalho serve: %s %s -> 413 body too large\n", r.Method, r.URL.RequestURI())
 			return
 		}
 
@@ -55,6 +62,8 @@ func Handler(iso *Isolate) http.Handler {
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			fmt.Fprintf(os.Stderr, "orvalho serve: %s %s -> 500 error: %v (%s)\n",
+				r.Method, r.URL.RequestURI(), err, time.Since(start).Round(time.Millisecond))
 			return
 		}
 
@@ -66,6 +75,8 @@ func Handler(iso *Isolate) http.Handler {
 			status = http.StatusOK
 		}
 		w.WriteHeader(status)
-		_, _ = w.Write([]byte(res.Body))
+		n, _ := w.Write([]byte(res.Body))
+		fmt.Fprintf(os.Stderr, "orvalho serve: %s %s -> %d %dB %s\n",
+			r.Method, r.URL.RequestURI(), status, n, time.Since(start).Round(time.Millisecond))
 	})
 }

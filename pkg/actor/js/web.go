@@ -42,6 +42,9 @@ type responseBag struct {
 	statusText string
 	headers    *headerBag
 	body       string
+	// bodyStream is a guest ReadableStream when the Response body is not a plain string.
+	// Host drains it via text() / collectBody before returning to HTTP.
+	bodyStream *goja.Object
 }
 
 func (iso *Isolate) installWebTypes() {
@@ -302,7 +305,21 @@ func (iso *Isolate) responseConstructor(call goja.ConstructorCall) *goja.Object 
 		headers:    newHeaderBag(),
 	}
 	if len(call.Arguments) > 0 && !goja.IsUndefined(call.Argument(0)) && !goja.IsNull(call.Argument(0)) {
-		r.body = bodyArgToString(iso, call.Argument(0))
+		arg := call.Argument(0)
+		if s, ok := arg.Export().(string); ok {
+			r.body = s
+		} else if obj, ok := arg.(*goja.Object); ok {
+			// Prefer keeping the stream so the host can drain after async produce.
+			if obj.Get("_orvalhoCollect") != nil && !goja.IsUndefined(obj.Get("_orvalhoCollect")) {
+				r.bodyStream = obj
+				// Best-effort sync snapshot (async start may still be pending).
+				r.body = bodyArgToString(iso, arg)
+			} else {
+				r.body = bodyArgToString(iso, arg)
+			}
+		} else {
+			r.body = bodyArgToString(iso, arg)
+		}
 	}
 	if len(call.Arguments) > 1 && !goja.IsUndefined(call.Argument(1)) && !goja.IsNull(call.Argument(1)) {
 		init := call.Argument(1).ToObject(iso.vm)
@@ -355,6 +372,16 @@ func (iso *Isolate) responseGetHeaders(call goja.FunctionCall) goja.Value {
 
 func (iso *Isolate) responseText(call goja.FunctionCall) goja.Value {
 	r := iso.responseBagOf(call)
+	if r.bodyStream != nil {
+		if fn, ok := goja.AssertFunction(r.bodyStream.Get("_orvalhoCollect")); ok {
+			v, err := fn(r.bodyStream)
+			if err != nil {
+				panic(iso.vm.ToValue(err.Error()))
+			}
+			// Collect returns a Promise<string>; update body when it settles (best-effort).
+			return v
+		}
+	}
 	return iso.resolvedStringPromise(r.body)
 }
 

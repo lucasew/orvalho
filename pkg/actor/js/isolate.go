@@ -93,6 +93,7 @@ func (iso *Isolate) Tick(ctx context.Context) (bool, error) {
 		if err != nil {
 			return false, mapJSError(ctx, err)
 		}
+		iso.bindConsole()
 		return iso.timers.len() > 0, nil
 	}
 
