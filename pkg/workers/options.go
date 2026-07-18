@@ -1,6 +1,7 @@
-package js
+package workers
 
 import (
+	"context"
 	"net/http"
 	"time"
 )
@@ -16,8 +17,16 @@ const (
 	DefaultMaxTimersPerTick = 1_000
 )
 
-// Options configures isolate resource limits and host bindings.
+// FetchFunc is the host-injected implementation of guest global fetch.
+// When Options.Fetch is nil, the guest has no outbound fetch capability.
+type FetchFunc func(ctx context.Context, req *http.Request) (*http.Response, error)
+
+// Options configures isolate resource limits and host capabilities.
 // Zero-valued fields receive the documented defaults in [New].
+//
+// Capability rule: what is not injected is not allowed. Outbound network,
+// bindings, and string env are all host-provided; the Workers kernel
+// (Request/Response/Headers, timers) is ambient.
 type Options struct {
 	// MaxPendingTimers is the hard cap on concurrent scheduled timers.
 	// Scheduling past this limit throws a JS TypeError from setTimeout /
@@ -29,17 +38,17 @@ type Options struct {
 	// DefaultMaxTimersPerTick.
 	MaxTimersPerTick int
 
-	// Egress is the outbound fetch allowlist. Empty denies all destinations.
-	Egress EgressList
+	// Fetch installs guest global fetch when non-nil. Nil means the guest
+	// has no fetch (not injected ⇒ not allowed). Use [HTTPFetch] for
+	// allowlisted net/http-backed fetch.
+	Fetch FetchFunc
 
-	// HTTPClient is used for guest fetch. nil uses a default client with
-	// redirect checks against Egress.
-	HTTPClient *http.Client
-
-	// FetchTimeout bounds each outbound fetch (default DefaultFetchTimeout).
+	// FetchTimeout bounds each outbound fetch when using [HTTPFetch]
+	// defaults (also honored by the built-in fetch wrapper). Zero means
+	// DefaultFetchTimeout.
 	FetchTimeout time.Duration
 
-	// Env is the CF-style string bag on guest env (from agents.<name>.env after CUE).
+	// Env is the CF-style string bag on guest env.
 	// Keys must not clash with Bindings names.
 	Env map[string]string
 

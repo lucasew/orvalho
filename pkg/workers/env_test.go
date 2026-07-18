@@ -1,4 +1,4 @@
-package js_test
+package workers_test
 
 import (
 	"context"
@@ -7,15 +7,15 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 
-	actorjs "orvalho/pkg/actor/js"
+	"orvalho/pkg/workers"
 )
 
 func TestEnvStringAndAssetsFetch(t *testing.T) {
-	src := actorjs.PrepareGuestScript(`
+	src := workers.PrepareGuestScript(`
 export default {
   async fetch(request, env, ctx) {
-    // Avoid URL global (not in goja WinterTC subset yet).
     if (String(request.url).indexOf("/title") !== -1) {
       return new Response(env.SITE_TITLE || "", { status: 200 });
     }
@@ -23,24 +23,17 @@ export default {
   }
 };
 `)
-	files := map[string][]byte{
-		"assets/hello.txt": []byte("hello-asset"),
+	fsys := fstest.MapFS{
+		"assets/hello.txt": {Data: []byte("hello-asset")},
 	}
-	iso := actorjs.New(src, actorjs.Options{
+	iso := workers.New(src, workers.Options{
 		Env: map[string]string{"SITE_TITLE": "Cats"},
-		Bindings: map[string]actorjs.Binding{
-			"ASSETS": &actorjs.AssetBinding{
-				Root: "assets",
-				Read: func(path string) ([]byte, bool) {
-					b, ok := files[path]
-					return b, ok
-				},
-			},
+		Bindings: map[string]workers.Binding{
+			"ASSETS": workers.NewAssetBinding(fsys, "assets"),
 		},
 	})
 
-	// String env
-	res, err := iso.Fetch(context.Background(), actorjs.HTTPRequest{
+	res, err := iso.Fetch(context.Background(), workers.HTTPRequest{
 		Method: "GET",
 		URL:    "http://127.0.0.1/title",
 	})
@@ -51,8 +44,7 @@ export default {
 		t.Fatalf("title body=%q", res.Body)
 	}
 
-	// Assets
-	srv := httptest.NewServer(actorjs.Handler(iso))
+	srv := httptest.NewServer(workers.Handler(iso))
 	defer srv.Close()
 	resp, err := http.Get(srv.URL + "/hello.txt")
 	if err != nil {
@@ -70,7 +62,6 @@ export default {
 		t.Fatalf("content-type=%q", ct)
 	}
 
-	// Missing asset
 	resp2, err := http.Get(srv.URL + "/nope.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -82,24 +73,21 @@ export default {
 }
 
 func TestEnvNameClash(t *testing.T) {
-	src := actorjs.PrepareGuestScript(`export default { async fetch(r, env) { return new Response("ok"); } };`)
-	iso := actorjs.New(src, actorjs.Options{
+	src := workers.PrepareGuestScript(`export default { async fetch(r, env) { return new Response("ok"); } };`)
+	iso := workers.New(src, workers.Options{
 		Env: map[string]string{"ASSETS": "x"},
-		Bindings: map[string]actorjs.Binding{
-			"ASSETS": &actorjs.AssetBinding{
-				Root: "assets",
-				Read: func(string) ([]byte, bool) { return nil, false },
-			},
+		Bindings: map[string]workers.Binding{
+			"ASSETS": workers.NewAssetBinding(fstest.MapFS{}, "assets"),
 		},
 	})
-	_, err := iso.Fetch(context.Background(), actorjs.HTTPRequest{URL: "http://x/"})
+	_, err := iso.Fetch(context.Background(), workers.HTTPRequest{URL: "http://x/"})
 	if err == nil || !strings.Contains(err.Error(), "clash") {
 		t.Fatalf("want clash error, got %v", err)
 	}
 }
 
 func TestURLSearchParamsGet(t *testing.T) {
-	src := actorjs.PrepareGuestScript(`
+	src := workers.PrepareGuestScript(`
 export default {
   async fetch(request, env, ctx) {
     var u = new URL(request.url);
@@ -108,8 +96,8 @@ export default {
   }
 };
 `)
-	iso := actorjs.New(src, actorjs.Options{})
-	res, err := iso.Fetch(context.Background(), actorjs.HTTPRequest{
+	iso := workers.New(src, workers.Options{})
+	res, err := iso.Fetch(context.Background(), workers.HTTPRequest{
 		Method: "GET",
 		URL:    "http://127.0.0.1:8788/search?query=teste",
 	})

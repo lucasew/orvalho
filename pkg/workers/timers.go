@@ -1,4 +1,4 @@
-package js
+package workers
 
 import (
 	"container/heap"

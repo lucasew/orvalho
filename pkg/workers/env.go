@@ -1,24 +1,24 @@
-package js
+package workers
 
 import (
 	"fmt"
+	"io/fs"
+	"path"
 	"strings"
 
 	"github.com/dop251/goja"
 )
 
 // buildExecutionContextLocked builds the Workers executionContext (third arg to fetch).
-// Astro/CF adapters call context.waitUntil.bind(context).
+// waitUntil is a stub: accepted and ignored (no post-response isolate work).
 func (iso *Isolate) buildExecutionContextLocked() (*goja.Object, error) {
 	ctx := iso.vm.NewObject()
-	// waitUntil(promise) — fire-and-forget; we do not track for v1 serve.
 	waitUntil := func(call goja.FunctionCall) goja.Value {
 		return goja.Undefined()
 	}
 	if err := ctx.Set("waitUntil", waitUntil); err != nil {
 		return nil, err
 	}
-	// passThroughOnException is a no-op on our host.
 	if err := ctx.Set("passThroughOnException", func(call goja.FunctionCall) goja.Value {
 		return goja.Undefined()
 	}); err != nil {
@@ -29,14 +29,14 @@ func (iso *Isolate) buildExecutionContextLocked() (*goja.Object, error) {
 
 // buildEnvLocked constructs the guest env object for default.fetch.
 // String keys come from Options.Env; object bindings from Options.Bindings.
-// Name clash between a string and a binding is an error (never-allocate at serve).
+// Name clash between a string and a binding is an error.
 func (iso *Isolate) buildEnvLocked() (*goja.Object, error) {
 	env := iso.vm.NewObject()
 	seen := map[string]string{} // name -> "string" | "binding"
 
 	for k, v := range iso.opts.Env {
 		if k == "" {
-			return nil, fmt.Errorf("js: empty env string key")
+			return nil, fmt.Errorf("workers: empty env string key")
 		}
 		if err := env.Set(k, v); err != nil {
 			return nil, err
@@ -46,45 +46,53 @@ func (iso *Isolate) buildEnvLocked() (*goja.Object, error) {
 
 	for name, b := range iso.opts.Bindings {
 		if name == "" {
-			return nil, fmt.Errorf("js: empty binding name")
+			return nil, fmt.Errorf("workers: empty binding name")
 		}
 		if prev, ok := seen[name]; ok {
-			return nil, fmt.Errorf("js: env name %q clashes (%s vs binding)", name, prev)
+			return nil, fmt.Errorf("workers: env name %q clashes (%s vs binding)", name, prev)
 		}
 		obj, err := b.Materialize(iso)
 		if err != nil {
-			return nil, fmt.Errorf("js: binding %q: %w", name, err)
+			return nil, fmt.Errorf("workers: binding %q: %w", name, err)
 		}
 		if err := env.Set(name, obj); err != nil {
 			return nil, err
 		}
 		seen[name] = "binding"
 	}
-	// cloudflare:workers stub reads globalThis.__orvalhoCFEnv (see stubs/cloudflare_workers.js).
+	// cloudflare:workers stub reads globalThis.__orvalhoCFEnv (see bundle stubs).
 	if err := iso.vm.Set("__orvalhoCFEnv", env); err != nil {
 		return nil, err
 	}
 	return env, nil
 }
 
-// Binding is a host-side env object factory (driver registry materialize result).
+// Binding is a host-side env object factory (goja-native DI).
 type Binding interface {
 	Materialize(iso *Isolate) (*goja.Object, error)
 }
 
-// AssetBinding is a CF-like static assets binding (env.NAME.fetch → Response).
+// AssetBinding is a CF-like static assets binding (env.NAME.fetch → Response)
+// over a pluggable [fs.FS].
 type AssetBinding struct {
-	// Root is the package-relative directory prefix (e.g. "assets").
+	// FS is the file tree (required).
+	FS fs.FS
+	// Root is an optional subdirectory within FS (e.g. "assets").
 	Root string
-	// Paths, if non-empty, is an allowlist of package-relative paths.
+	// Paths, if non-empty, is an allowlist of FS paths relative to the FS root
+	// (including Root prefix when set), slash-separated.
 	Paths []string
-	// Read returns file bytes for a package-relative path.
-	Read func(path string) ([]byte, bool)
+}
+
+// NewAssetBinding builds an [AssetBinding] over fsys.
+// root is an optional prefix inside the FS; paths is an optional allowlist.
+func NewAssetBinding(fsys fs.FS, root string, paths ...string) *AssetBinding {
+	return &AssetBinding{FS: fsys, Root: root, Paths: paths}
 }
 
 func (a *AssetBinding) Materialize(iso *Isolate) (*goja.Object, error) {
-	if a == nil || a.Read == nil {
-		return nil, fmt.Errorf("assets: missing Read")
+	if a == nil || a.FS == nil {
+		return nil, fmt.Errorf("assets: missing FS")
 	}
 	root := strings.Trim(strings.ReplaceAll(a.Root, "\\", "/"), "/")
 	allow := map[string]struct{}{}
@@ -97,7 +105,7 @@ func (a *AssetBinding) Materialize(iso *Isolate) (*goja.Object, error) {
 
 	obj := iso.vm.NewObject()
 	fetchFn := func(call goja.FunctionCall) goja.Value {
-		return iso.assetsFetch(call, root, allow, a.Read)
+		return iso.assetsFetch(call, a.FS, root, allow)
 	}
 	if err := obj.Set("fetch", fetchFn); err != nil {
 		return nil, err
@@ -105,24 +113,23 @@ func (a *AssetBinding) Materialize(iso *Isolate) (*goja.Object, error) {
 	return obj, nil
 }
 
-func (iso *Isolate) assetsFetch(call goja.FunctionCall, root string, allow map[string]struct{}, read func(string) ([]byte, bool)) goja.Value {
+func (iso *Isolate) assetsFetch(call goja.FunctionCall, fsys fs.FS, root string, allow map[string]struct{}) goja.Value {
 	if len(call.Arguments) < 1 {
 		panic(iso.vm.NewTypeError("ASSETS.fetch requires a Request, URL, or string"))
 	}
 	arg := call.Argument(0)
 	method := "GET"
-	path := ""
+	urlPath := ""
 
 	if obj, ok := arg.(*goja.Object); ok {
 		if r, ok := iso.requestReg[obj]; ok {
 			method = r.method
-			path = urlPathOnly(r.url)
+			urlPath = urlPathOnly(r.url)
 		} else {
-			// URL object or plain object with href/pathname — treat as string.
-			path = urlPathOnly(arg.String())
+			urlPath = urlPathOnly(arg.String())
 		}
 	} else {
-		path = urlPathOnly(arg.String())
+		urlPath = urlPathOnly(arg.String())
 	}
 
 	method = strings.ToUpper(method)
@@ -130,12 +137,12 @@ func (iso *Isolate) assetsFetch(call goja.FunctionCall, root string, allow map[s
 		return iso.assetsResponse(405, "Method Not Allowed", "text/plain; charset=utf-8", "Method Not Allowed")
 	}
 
-	filePath, ok := assetsResolvePath(root, path, allow)
+	filePath, ok := assetsResolvePath(root, urlPath, allow)
 	if !ok {
 		return iso.assetsResponse(404, "Not Found", "text/plain; charset=utf-8", "Not Found")
 	}
-	data, found := read(filePath)
-	if !found {
+	data, err := fs.ReadFile(fsys, filePath)
+	if err != nil {
 		return iso.assetsResponse(404, "Not Found", "text/plain; charset=utf-8", "Not Found")
 	}
 	if method == "HEAD" {
@@ -168,7 +175,6 @@ func (iso *Isolate) assetsResponse(status int, statusText, contentType, body str
 
 func urlPathOnly(raw string) string {
 	raw = strings.TrimSpace(raw)
-	// Strip scheme://host if present.
 	if i := strings.Index(raw, "://"); i >= 0 {
 		rest := raw[i+3:]
 		if j := strings.Index(rest, "/"); j >= 0 {
@@ -192,10 +198,8 @@ func urlPathOnly(raw string) string {
 func assetsResolvePath(root, urlPath string, allow map[string]struct{}) (string, bool) {
 	urlPath = strings.TrimPrefix(urlPath, "/")
 	if urlPath == "" || strings.HasSuffix(urlPath, "/") {
-		// Directory index not implemented; 404.
 		return "", false
 	}
-	// Reject .. and absolute escapes.
 	for _, seg := range strings.Split(urlPath, "/") {
 		if seg == ".." || seg == "" {
 			return "", false
@@ -205,9 +209,12 @@ func assetsResolvePath(root, urlPath string, allow map[string]struct{}) (string,
 	if root == "" {
 		filePath = urlPath
 	} else {
-		filePath = root + "/" + urlPath
+		filePath = path.Join(root, urlPath)
 	}
-	filePath = strings.TrimPrefix(filePath, "/")
+	filePath = path.Clean(filePath)
+	if strings.HasPrefix(filePath, "..") {
+		return "", false
+	}
 	if len(allow) > 0 {
 		if _, ok := allow[filePath]; !ok {
 			return "", false
@@ -216,8 +223,8 @@ func assetsResolvePath(root, urlPath string, allow map[string]struct{}) (string,
 	return filePath, true
 }
 
-func contentTypeForPath(path string) string {
-	lower := strings.ToLower(path)
+func contentTypeForPath(p string) string {
+	lower := strings.ToLower(p)
 	switch {
 	case strings.HasSuffix(lower, ".css"):
 		return "text/css; charset=utf-8"

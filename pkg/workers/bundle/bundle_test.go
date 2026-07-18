@@ -1,4 +1,4 @@
-package js_test
+package bundle_test
 
 import (
 	"os"
@@ -7,14 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	actorjs "orvalho/pkg/actor/js"
+	"orvalho/pkg/workers/bundle"
 )
 
 func TestNeedsBundle(t *testing.T) {
-	if actorjs.NeedsBundle(`export default { fetch() {} }`) {
+	if bundle.NeedsBundle(`export default { fetch() {} }`) {
 		t.Fatal("single-file export default without import should not need bundle")
 	}
-	if !actorjs.NeedsBundle(`import { w } from "./chunks/x.mjs"; export { w as default };`) {
+	if !bundle.NeedsBundle(`import { w } from "./chunks/x.mjs"; export { w as default };`) {
 		t.Fatal("esm import should need bundle")
 	}
 }
@@ -37,7 +37,7 @@ export default {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err := actorjs.BundleEntry(actorjs.BundleOptions{
+	out, err := bundle.BundleEntry(bundle.BundleOptions{
 		PackageDir: dir,
 		Entry:      "entry.mjs",
 	})
@@ -50,7 +50,6 @@ export default {
 	if !strings.Contains(out, "globalThis.default") {
 		t.Fatal("expected default export footer")
 	}
-	// Should inline hi()
 	if !strings.Contains(out, "hi") {
 		t.Fatal("expected lib symbol in bundle")
 	}

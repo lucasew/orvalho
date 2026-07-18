@@ -1,4 +1,4 @@
-package js
+package workers
 
 import (
 	"context"
@@ -142,13 +142,13 @@ func (iso *Isolate) ensureInitializedLocked(ctx context.Context) error {
 func (iso *Isolate) lookupDefaultFetchLocked() (goja.Callable, error) {
 	def := iso.vm.Get("default")
 	if def == nil || goja.IsUndefined(def) || goja.IsNull(def) {
-		return nil, fmt.Errorf("js: missing global default export (expected default.fetch)")
+		return nil, fmt.Errorf("workers: missing global default export (expected default.fetch)")
 	}
 	obj := def.ToObject(iso.vm)
 	fetchVal := obj.Get("fetch")
 	fn, ok := goja.AssertFunction(fetchVal)
 	if !ok {
-		return nil, fmt.Errorf("js: default.fetch is not a function")
+		return nil, fmt.Errorf("workers: default.fetch is not a function")
 	}
 	return fn, nil
 }
@@ -172,15 +172,15 @@ func (iso *Isolate) awaitPromiseLocked(ctx context.Context, v goja.Value, maxWai
 				// Prefer Exception stack when guest rejects with an Error.
 				if obj, ok := reason.(*goja.Object); ok {
 					if stack := obj.Get("stack"); stack != nil && !goja.IsUndefined(stack) {
-						return nil, fmt.Errorf("js: fetch rejected: %s\n%s", reason.String(), stack.String())
+						return nil, fmt.Errorf("workers: fetch rejected: %s\n%s", reason.String(), stack.String())
 					}
 				}
-				return nil, fmt.Errorf("js: fetch rejected: %s", reason.String())
+				return nil, fmt.Errorf("workers: fetch rejected: %s", reason.String())
 			}
-			return nil, fmt.Errorf("js: fetch rejected")
+			return nil, fmt.Errorf("workers: fetch rejected")
 		case goja.PromiseStatePending:
 			if !iso.now().Before(deadline) {
-				return nil, fmt.Errorf("js: fetch promise timed out after %s", maxWait)
+				return nil, fmt.Errorf("workers: fetch promise timed out after %s", maxWait)
 			}
 			// Advance host-driven timers; also re-enter the VM so microtasks can run.
 			if err := iso.drainOneTickLocked(ctx); err != nil {

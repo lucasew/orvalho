@@ -1,4 +1,4 @@
-package js_test
+package workers_test
 
 import (
 	"encoding/json"
@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	actorjs "orvalho/pkg/actor/js"
 	"orvalho/pkg/ovpkg"
+	"orvalho/pkg/workers"
 )
 
 func loadCatSSR(t *testing.T) (*ovpkg.Package, string) {
@@ -38,9 +38,11 @@ func loadCatSSR(t *testing.T) (*ovpkg.Package, string) {
 
 func TestCatSSRExampleHandlerFallback(t *testing.T) {
 	_, src := loadCatSSR(t)
-	// Empty egress → fetch installed but every host denied → fallback page.
-	iso := actorjs.New(actorjs.PrepareGuestScript(src), actorjs.Options{})
-	srv := httptest.NewServer(actorjs.Handler(iso))
+	// Inject fetch with empty allowlist → all hosts denied → fallback page.
+	iso := workers.New(workers.PrepareGuestScript(src), workers.Options{
+		Fetch: workers.HTTPFetch(nil, nil, 0),
+	})
+	srv := httptest.NewServer(workers.Handler(iso))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/")
@@ -69,7 +71,6 @@ func TestCatSSRExampleLiveViaAllowlist(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	// Point the worker at our httptest by rewriting the constant URL.
 	src = strings.Replace(src, "https://catfact.ninja/fact", upstream.URL+"/fact", 1)
 
 	u, err := url.Parse(upstream.URL)
@@ -80,14 +81,12 @@ func TestCatSSRExampleLiveViaAllowlist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Package lists catfact.ninja; for the mock, allow the httptest host too.
-	allow := append(actorjs.EgressList(egress), u.Host)
+	allow := append(workers.EgressList(egress), u.Host)
 
-	iso := actorjs.New(actorjs.PrepareGuestScript(src), actorjs.Options{
-		Egress:     allow,
-		HTTPClient: upstream.Client(),
+	iso := workers.New(workers.PrepareGuestScript(src), workers.Options{
+		Fetch: workers.HTTPFetch(allow, upstream.Client(), 0),
 	})
-	srv := httptest.NewServer(actorjs.Handler(iso))
+	srv := httptest.NewServer(workers.Handler(iso))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/")

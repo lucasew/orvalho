@@ -1,4 +1,4 @@
-package js
+package main
 
 import (
 	"fmt"
@@ -6,18 +6,19 @@ import (
 	"cuelang.org/go/cue"
 
 	"orvalho/pkg/ovpkg"
+	"orvalho/pkg/workers"
 )
 
-// MaterializeAgentBindings builds host Binding map from a package agent.
+// materializeAgentBindings builds workers.Binding map from a package agent.
 // Unsupported types fail (never-allocate).
-func MaterializeAgentBindings(pkg *ovpkg.Package, agent *ovpkg.Agent) (map[string]Binding, error) {
+func materializeAgentBindings(pkg *ovpkg.Package, agent *ovpkg.Agent) (map[string]workers.Binding, error) {
 	if agent == nil {
-		return nil, fmt.Errorf("js: nil agent")
+		return nil, fmt.Errorf("serve: nil agent")
 	}
-	out := make(map[string]Binding, len(agent.Bindings))
+	out := make(map[string]workers.Binding, len(agent.Bindings))
 	for name, spec := range agent.Bindings {
 		if _, ok := agent.Env[name]; ok {
-			return nil, fmt.Errorf("js: env name %q used as both string and binding", name)
+			return nil, fmt.Errorf("serve: env name %q used as both string and binding", name)
 		}
 		b, err := materializeSpec(pkg, name, spec)
 		if err != nil {
@@ -28,7 +29,7 @@ func MaterializeAgentBindings(pkg *ovpkg.Package, agent *ovpkg.Agent) (map[strin
 	return out, nil
 }
 
-func materializeSpec(pkg *ovpkg.Package, name string, spec ovpkg.BindingSpec) (Binding, error) {
+func materializeSpec(pkg *ovpkg.Package, name string, spec ovpkg.BindingSpec) (workers.Binding, error) {
 	switch spec.Type {
 	case "assets":
 		return materializeAssets(pkg, name, spec.Value)
@@ -37,7 +38,7 @@ func materializeSpec(pkg *ovpkg.Package, name string, spec ovpkg.BindingSpec) (B
 	}
 }
 
-func materializeAssets(pkg *ovpkg.Package, name string, v cue.Value) (Binding, error) {
+func materializeAssets(pkg *ovpkg.Package, name string, v cue.Value) (workers.Binding, error) {
 	rootV := v.LookupPath(cue.ParsePath("root"))
 	if !rootV.Exists() {
 		return nil, fmt.Errorf("assets binding %q: missing root", name)
@@ -61,18 +62,5 @@ func materializeAssets(pkg *ovpkg.Package, name string, v cue.Value) (Binding, e
 			paths = append(paths, s)
 		}
 	}
-	return &AssetBinding{
-		Root:  root,
-		Paths: paths,
-		Read: func(path string) ([]byte, bool) {
-			if pkg == nil {
-				return nil, false
-			}
-			b, err := pkg.Get(path)
-			if err != nil {
-				return nil, false
-			}
-			return b, true
-		},
-	}, nil
+	return workers.NewAssetBinding(pkg.PayloadFS(), root, paths...), nil
 }

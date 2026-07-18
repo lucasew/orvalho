@@ -1,4 +1,4 @@
-package js
+package workers
 
 import (
 	"context"
@@ -35,8 +35,7 @@ export default {
 };
 `)
 	iso := New(script, Options{
-		Egress:     EgressList{host},
-		HTTPClient: upstream.Client(),
+		Fetch: HTTPFetch(EgressList{host}, upstream.Client(), 0),
 	})
 	got, err := iso.Fetch(context.Background(), HTTPRequest{URL: "http://actor/"})
 	if err != nil {
@@ -68,10 +67,8 @@ export default {
   }
 };
 `)
-	// Allowlist something else — upstream host is denied.
 	iso := New(script, Options{
-		Egress:     EgressList{"only-this.example"},
-		HTTPClient: upstream.Client(),
+		Fetch: HTTPFetch(EgressList{"only-this.example"}, upstream.Client(), 0),
 	})
 	got, err := iso.Fetch(context.Background(), HTTPRequest{URL: "http://actor/"})
 	if err != nil {
@@ -103,7 +100,9 @@ export default {
   }
 };
 `)
-	iso := New(script, Options{HTTPClient: upstream.Client()})
+	iso := New(script, Options{
+		Fetch: HTTPFetch(nil, upstream.Client(), 0),
+	})
 	got, err := iso.Fetch(context.Background(), HTTPRequest{URL: "http://actor/"})
 	if err != nil {
 		t.Fatal(err)
@@ -113,8 +112,22 @@ export default {
 	}
 }
 
-func TestFetchGlobalIsFunction(t *testing.T) {
+func TestFetchGlobalAbsentWithoutDI(t *testing.T) {
 	iso := New(``, Options{})
+	if _, err := iso.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	v, err := iso.vm.RunString(`typeof fetch`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := v.String(); got != "undefined" {
+		t.Fatalf("typeof fetch=%q want undefined", got)
+	}
+}
+
+func TestFetchGlobalIsFunctionWhenInjected(t *testing.T) {
+	iso := New(``, Options{Fetch: HTTPFetch(EgressList{"*"}, nil, 0)})
 	if _, err := iso.Tick(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -133,6 +146,5 @@ func mustHost(t *testing.T, raw string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Allowlist host:port so concurrent local servers on 127.0.0.1 stay distinct.
 	return u.Host
 }

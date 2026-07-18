@@ -12,7 +12,9 @@ Product vision and constraints: [`SPEC.md`](./SPEC.md).
 | [`pkg/cuex`](./pkg/cuex) | Embedded CUE preludes + `LoadHost` / `LoadPackage` |
 | [`pkg/ovpkg`](./pkg/ovpkg) | Zip packages with root **`orvalho.cue`** |
 | [`pkg/identity`](./pkg/identity) | Manager key material |
-| [`pkg/actor`](./pkg/actor) | Actor host / goja isolate |
+| [`pkg/workers`](./pkg/workers) | Embeddable goja Workers host (core) |
+| [`pkg/workers/bundle`](./pkg/workers/bundle) | Optional esbuild + stubs for multi-file guests |
+| [`pkg/actor`](./pkg/actor) | Host-driven `Tick` step interface |
 | [`pkg/ula`](./pkg/ula) | ULA IPv6 actor address allocator |
 | [`pkg/manager`](./pkg/manager) / [`pkg/worker`](./pkg/worker) | Role library skeletons |
 | [`attic/`](./attic) | Prior experimental code — **not** product; do not import |

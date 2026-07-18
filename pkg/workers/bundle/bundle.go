@@ -1,4 +1,4 @@
-package js
+package bundle
 
 import (
 	"bytes"
@@ -28,7 +28,7 @@ type BundleOptions struct {
 // Stubs cloudflare:workers and common node:* imports used by Astro/CF builds.
 func BundleEntry(opts BundleOptions) (string, error) {
 	if opts.PackageDir == "" || opts.Entry == "" {
-		return "", fmt.Errorf("js: BundleEntry requires PackageDir and Entry")
+		return "", fmt.Errorf("bundle: BundleEntry requires PackageDir and Entry")
 	}
 	pkgDir, err := filepath.Abs(opts.PackageDir)
 	if err != nil {
@@ -36,7 +36,7 @@ func BundleEntry(opts BundleOptions) (string, error) {
 	}
 	entryPath := filepath.Join(pkgDir, filepath.FromSlash(opts.Entry))
 	if st, err := os.Stat(entryPath); err != nil || st.IsDir() {
-		return "", fmt.Errorf("js: entry %s: %w", opts.Entry, err)
+		return "", fmt.Errorf("bundle: entry %s: %w", opts.Entry, err)
 	}
 
 	stubDir, err := materializeStubs()
@@ -89,7 +89,7 @@ func BundleEntry(opts BundleOptions) (string, error) {
 	cmd.Stderr = &stderr
 	cmd.Stdout = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("js: esbuild: %w\n%s", err, stderr.String())
+		return "", fmt.Errorf("bundle: esbuild: %w\n%s", err, stderr.String())
 	}
 
 	raw, err := os.ReadFile(outPath)
