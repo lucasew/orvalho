@@ -79,11 +79,67 @@ Stock ROM is the target environment: drivers already exist; OS process isolation
 - **Packaging ≠ Worker definition:** `orvalho.cue` is deploy/package metadata (like wrangler config). The **JS bundle** is the Worker. Guest code must not require an Orvalho-specific SDK for the happy path.
 - Not a generic Node process: no ambient `fs`, raw sockets, or process environment inside the isolate. Outside-world values reach the guest only as the concrete `env` the host builds after CUE evaluation.
 
+### Embeddable workers library (`pkg/workers`)
+
+The goja host is a **reusable library**, not only an Orvalho-internal detail. Design the **API and dependency boundary** as if external consumers will embed it; stay in this module/repo until a second consumer forces a split.
+
+| Package | Role |
+|---------|------|
+| **`pkg/workers`** | Core: isolate, WinterTC/Workers kernel types, timers, `Tick` / `Fetch` / `http.Handler` (and thin `Server` helper). **No** CUE, zip, identity, mesh. |
+| **`pkg/workers/bundle`** | Optional: esbuild on-load bundle, CF/node stubs for multi-file adapter graphs. |
+| **Orvalho product** (`cmd/orvalho`, `pkg/ovpkg`, `pkg/cuex`, …) | Consumer: load package → build `Options` + script → call core. |
+
+**Public composition (embed sketch):**
+
+```go
+iso := workers.New(script, workers.Options{
+    Env: map[string]string{"SITE": "x"},
+    Bindings: map[string]workers.Binding{
+        "ASSETS": workers.NewAssetBinding(fsys, "assets"),
+        "APP":    &AppBinding{/* goja Materialize */},
+    },
+    Fetch: workers.HTTPFetch(allowlist, nil, 0), // DI — omit ⇒ no guest fetch
+})
+http.ListenAndServe(addr, workers.Handler(iso))
+// host owns *http.Server; library may offer a small constructor wrapping Handler
+```
+
+**Capability model — not injected ⇒ not allowed**
+
+| Ambient (Workers kernel) | Dependency injection only |
+|--------------------------|---------------------------|
+| `Headers` / `Request` / `Response` (minimal set for the kernel) | Outbound **`fetch`** only if host sets `Options.Fetch` (e.g. `HTTPFetch` allowlist helper) |
+| Host-driven timers (`setTimeout` / `setInterval`) | **Bindings** via goja-native `Binding.Materialize` |
+| | **Assets** binding over pluggable **`fs.FS`** |
+| | String **env** map |
+| | Console/logging and any host objects (app/server info, HAL, …) |
+
+- **Bindings are goja-native:** host implements `Materialize` (build JS objects with goja callbacks). No magic reflection map as the primary API.
+- **Assets:** first-party binding takes **`fs.FS`** (+ optional root / path allowlist). Package zip/dir is just one FS source supplied by the product layer.
+- **Outbound network:** not ambient. Empty/missing `Fetch` means the guest has no global `fetch`. Allowlists and HTTP clients are concerns of the injected implementation (Orvalho maps package `egress` → `HTTPFetch(...)`).
+
+**Concurrency and lifetime**
+
+- **Single-threaded:** one isolate, one lock. Concurrent HTTP requests **serialize** through that lock. No isolate pool in core v1.
+- **Freeze-by-default (Cloudflare-like):** guest code advances inside **`Fetch`** (run `default.fetch`, drain promises/timers under the lock until the handler settles). When idle (no in-flight request / host pulse), the isolate **does not progress** — no ambient wall-clock CPU.
+- **`Tick(ctx)`:** public, takes the same lock; for tests and for hosts that **opt into** a background pulse. The library does **not** start a silent forever tick loop.
+- Optional **`Run(ctx)`** (or equivalent) may exist as an explicit pulse helper; it is opt-in, not the default embed path.
+- Cross-request `setInterval` is **not** a supported app pattern under freeze. Durable work goes through **Go bindings**.
+- **`ctx.waitUntil`:** present for signature compatibility; v1 is a **stub** (no-op or resolve within the current `Fetch`). Not full post-response CF `waitUntil` semantics.
+- **Bodies:** buffered **strings/bytes** with hard size caps. No real streaming in v1 (stream-shaped guest APIs may still buffer under the hood where needed for adapter compat).
+
+**Script input (two layers)**
+
+- **Core:** opaque script string (+ `PrepareGuestScript` for simple `export default` rewrite). Host/CI owns the build for pure embeds.
+- **Bundle layer:** entry path + esbuild + stubs for multi-file Workers/Astro graphs (`orvalho serve` uses this).
+
+**Explicit non-goals for the library v1:** full WinterTC/workerd parity; real streaming bodies; real post-response `waitUntil`; multi-isolate pools; CUE/packages/signing/mesh inside core; ambient open egress.
+
 ### Engine and build
 
-- **Runtime VM:** [goja](https://github.com/dop251/goja) (pure Go; CGO avoided).
+- **Runtime VM:** [goja](https://github.com/dop251/goja) (pure Go; CGO avoided), via `pkg/workers`.
 - **Guest build / load:** Workers-shaped modules; **esbuild (or equivalent)** downlevels to a goja-safe language level (compat matrix). Downlevel fixes language/syntax; **platform APIs are host-provided**.
-- **Multi-file bundles:** prefer **bundle-to-one on load** with esbuild (same idea as wrangler bundling) rather than a full multi-module workerd loader first. Real multi-chunk Astro/`no_bundle` trees are a compatibility bar, not a first gate.
+- **Multi-file bundles:** prefer **bundle-to-one on load** with esbuild in `pkg/workers/bundle` (same idea as wrangler bundling) rather than a full multi-module workerd loader first. Real multi-chunk Astro/`no_bundle` trees are a compatibility bar, not a first gate.
 - Prefer one engine on the main line; experimental alternate VMs are not product surface.
 
 ### Load and `env` materialize
@@ -91,10 +147,11 @@ Stock ROM is the target environment: drivers already exist; OS process isolation
 1. Load package `orvalho.cue` with host-supplied **`runtime.env`** (see Packages).
 2. CUE validate / project; on failure **do not allocate** the actor (no half-live process, no address burn) — Nomad-style placement failure.
 3. Select the agent instance (see Packages / serve).
-4. Build guest `env`:
+4. Build guest `env` for `pkg/workers`:
    - **String properties** from concrete **`agents.<name>.env`** (`map[string]string`) — Cloudflare **vars/secrets** shape (guest cannot tell them apart).
-   - **Object properties** from **`agents.<name>.bindings`** via the host **driver registry**.
-5. Invoke **`default.fetch(request, env, ctx)`**. Do not dump raw `runtime.env` into the isolate unless CUE projected those keys onto `agent.env`.
+   - **Object properties** from **`agents.<name>.bindings`** via the host **driver registry** (product layer materializes into `workers.Binding`, e.g. assets over package `fs.FS`).
+   - **Outbound `Fetch`** from package egress allowlist (injected; not ambient).
+5. Invoke **`default.fetch(request, env, ctx)`** through the workers isolate. Do not dump raw `runtime.env` into the isolate unless CUE projected those keys onto `agent.env`.
 
 ## Packages
 
@@ -152,12 +209,12 @@ If CUE unify/validate fails, a required outside value is missing, a binding `typ
 | Driver / surface | v1 | Later |
 |------------------|----|--------|
 | **String env** (`agent.env`) | Yes — CF-style strings on guest `env` (vars; secrets same at runtime, different provisioning) | Manager-sealed secret store |
-| **`assets`** | Yes — CF-like `env.<NAME>.fetch(request\|url\|string) → Response` over package files | Richer static routing if needed |
+| **`assets`** | Yes — CF-like `env.<NAME>.fetch(request\|url\|string) → Response` over **`fs.FS`** (package files are one FS) | Richer static routing if needed |
 | **Storage** (KV/SQL/etc.) | Not required for first demo | When actors need durability |
 | **Devices (HAL)** | Same registry shape reserved | Camera, GPU, sensors, … |
 | **Actor export / RPC** | No | Explicit exported APIs between actors |
 
-Outbound **`fetch`**: only destinations allowed by the package allowlist after owner consent. A personal mesh must not become an open residential proxy by default.
+Outbound **`fetch`**: injected into the isolate only when the host wires `Options.Fetch` (Orvalho: package allowlist after owner consent). A personal mesh must not become an open residential proxy by default — missing injection means no guest network.
 
 ## Networking
 
@@ -224,6 +281,9 @@ This proves: identity, pair, sign/install, sandbox, CUE `runtime.env` → `agent
 | Path | Role |
 |------|------|
 | `cmd/orvalho` | Sole product CLI entrypoint (Cobra) |
+| `pkg/workers` | Embeddable goja Workers host (core; no package/CUE) |
+| `pkg/workers/bundle` | Optional esbuild + stubs for multi-file guest graphs |
+| `pkg/actor` | Host-driven `Tick` interface (step API) |
 | `pkg/cuex` | Embedded preludes; `LoadHost` / `LoadPackage`; `cue.Value` |
 | `pkg/ovpkg` | Zip read/write; root `orvalho.cue`; validates via cuex |
 | `pkg/identity` | Manager key material (values on disk, not in CUE) |
@@ -234,8 +294,8 @@ There is **no** product `pkg/manifest` JSON schema package. Package domain helpe
 ## Implementation notes (base)
 
 - **Language:** Go, pure Go preferred (**no CGO**).
-- **JS host:** goja + host polyfills for WinterTC subset + CF-shaped `env` (strings + driver objects).
-- **Binding drivers:** in-process host registry; built-ins first (`assets`, …); no guest- or zip-supplied drivers.
+- **JS host:** `pkg/workers` — goja + host polyfills for WinterTC subset + CF-shaped `env` (strings + driver objects via DI).
+- **Binding drivers:** in-process host registry at the product layer; built-ins first (`assets` over `fs.FS`, …); no guest- or zip-supplied drivers.
 - **Identity:** manager/device key material as product code requires; mesh keys derived or minted from the same trust root. Attic code is cherry-pick only.
 - **Codebase attitude:** selective reuse of current tree and branches only when it clearly fits; **do not overfit architecture to existing checkpoint code**. One runtime story (goja), not dual goja/QuickJS product paths.
 - **Android lifecycle:** best-effort background stickiness; correctness must not require promising 24/7 uptime on stock Android in v1 docs. Mesh and actors reconnect when the worker runs.
@@ -243,7 +303,7 @@ There is **no** product `pkg/manifest` JSON schema package. Package domain helpe
 
 ## Milestone sketch
 
-1. **Runtime contract** — goja isolate, WinterTC/CF Module Worker `fetch`, timers, package CUE (`runtime.env` / `agents` / `agent.env` / bindings registry), assets driver, esbuild downlevel (+ on-load bundle for multi-file as needed), `orvalho serve` (exactly one agent).
+1. **Runtime contract** — `pkg/workers` isolate (DI fetch/bindings, freeze-by-default), package CUE (`runtime.env` / `agents` / `agent.env` / bindings registry), assets over `fs.FS`, esbuild downlevel (+ `pkg/workers/bundle` for multi-file as needed), `orvalho serve` (exactly one agent).
 2. **Package + manager** — zip + CUE manifest, sign/verify, localhost daemon/CLI (Cobra)/UI, permission consent, install-time value injection into `runtime.env`.
 3. **Mesh + publish** — wireguard-go, pair, IPv6-per-actor, HTTP serve on actor address.
 4. **Reference** — Astro SSR / real CF adapter bundle (e.g. cat API) on a worker (Linux, then Android) with **unchanged guest JS** where feasible.

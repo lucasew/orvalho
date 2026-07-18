@@ -15,8 +15,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	actorjs "orvalho/pkg/actor/js"
 	"orvalho/pkg/ovpkg"
+	"orvalho/pkg/workers"
+	"orvalho/pkg/workers/bundle"
 )
 
 var (
@@ -91,15 +92,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	bindings, err := actorjs.MaterializeAgentBindings(pkg, agent)
+	bindings, err := materializeAgentBindings(pkg, agent)
 	if err != nil {
 		return err // never-allocate
 	}
 
-	iso := actorjs.New(script, actorjs.Options{
-		Egress:   actorjs.EgressList(egress),
+	// Product injects fetch from package egress (empty allowlist ⇒ deny all).
+	iso := workers.New(script, workers.Options{
 		Env:      agent.Env,
 		Bindings: bindings,
+		Fetch:    workers.HTTPFetch(workers.EgressList(egress), nil, 0),
 	})
 
 	listen := serveListen
@@ -118,7 +120,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	srv := &http.Server{
 		Addr:              listen,
-		Handler:           actorjs.Handler(iso),
+		Handler:           workers.Handler(iso),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -159,8 +161,8 @@ func loadGuestScript(path string, pkg *ovpkg.Package, entry string) (string, err
 	if err != nil {
 		return "", fmt.Errorf("entrypoint %s: %w", entry, err)
 	}
-	if !actorjs.NeedsBundle(string(src)) {
-		return actorjs.PrepareGuestScript(string(src)), nil
+	if !bundle.NeedsBundle(string(src)) {
+		return workers.PrepareGuestScript(string(src)), nil
 	}
 
 	pkgDir, cleanup, err := packageWorkDir(path, pkg)
@@ -172,7 +174,7 @@ func loadGuestScript(path string, pkg *ovpkg.Package, entry string) (string, err
 	}
 
 	fmt.Fprintf(os.Stderr, "orvalho serve: bundling %s with esbuild…\n", entry)
-	bundled, err := actorjs.BundleEntry(actorjs.BundleOptions{
+	bundled, err := bundle.BundleEntry(bundle.BundleOptions{
 		PackageDir: pkgDir,
 		Entry:      entry,
 	})

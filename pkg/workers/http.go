@@ -1,4 +1,4 @@
-package js
+package workers
 
 import (
 	"fmt"
@@ -22,12 +22,12 @@ func Handler(iso *Isolate) http.Handler {
 		body, err := io.ReadAll(io.LimitReader(r.Body, MaxRequestBody+1))
 		if err != nil {
 			http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
-			fmt.Fprintf(os.Stderr, "orvalho serve: %s %s -> 400 (%v)\n", r.Method, r.URL.RequestURI(), err)
+			fmt.Fprintf(os.Stderr, "workers: %s %s -> 400 (%v)\n", r.Method, r.URL.RequestURI(), err)
 			return
 		}
 		if len(body) > MaxRequestBody {
 			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
-			fmt.Fprintf(os.Stderr, "orvalho serve: %s %s -> 413 body too large\n", r.Method, r.URL.RequestURI())
+			fmt.Fprintf(os.Stderr, "workers: %s %s -> 413 body too large\n", r.Method, r.URL.RequestURI())
 			return
 		}
 
@@ -62,7 +62,7 @@ func Handler(iso *Isolate) http.Handler {
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-			fmt.Fprintf(os.Stderr, "orvalho serve: %s %s -> 500 error: %v (%s)\n",
+			fmt.Fprintf(os.Stderr, "workers: %s %s -> 500 error: %v (%s)\n",
 				r.Method, r.URL.RequestURI(), err, time.Since(start).Round(time.Millisecond))
 			return
 		}
@@ -76,7 +76,7 @@ func Handler(iso *Isolate) http.Handler {
 		}
 		w.WriteHeader(status)
 		n, _ := w.Write([]byte(res.Body))
-		fmt.Fprintf(os.Stderr, "orvalho serve: %s %s -> %d %dB %s\n",
+		fmt.Fprintf(os.Stderr, "workers: %s %s -> %d %dB %s\n",
 			r.Method, r.URL.RequestURI(), status, n, time.Since(start).Round(time.Millisecond))
 	})
 }

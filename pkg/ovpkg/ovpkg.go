@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"cuelang.org/go/cue"
 
@@ -82,6 +83,72 @@ func (p *Package) Get(name string) ([]byte, error) {
 	copy(out, data)
 	return out, nil
 }
+
+// PayloadFS returns an [fs.FS] over package payload files (not orvalho.cue).
+// Suitable for workers assets bindings and other host drivers that take an FS.
+func (p *Package) PayloadFS() fs.FS {
+	if p == nil || p.Files == nil {
+		return packageMapFS{files: map[string][]byte{}}
+	}
+	return packageMapFS{files: p.Files}
+}
+
+// packageMapFS implements fs.FS over Package.Files.
+type packageMapFS struct {
+	files map[string][]byte
+}
+
+type mapFile struct {
+	name string
+	data []byte
+	off  int
+}
+
+func (f packageMapFS) Open(name string) (fs.File, error) {
+	if !fs.ValidPath(name) {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrInvalid}
+	}
+	if name == "." {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+	}
+	data, ok := f.files[name]
+	if !ok {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+	}
+	cp := make([]byte, len(data))
+	copy(cp, data)
+	return &mapFile{name: name, data: cp}, nil
+}
+
+func (f *mapFile) Stat() (fs.FileInfo, error) {
+	return mapFileInfo{name: path.Base(f.name), size: int64(len(f.data))}, nil
+}
+
+func (f *mapFile) Read(p []byte) (int, error) {
+	if f.off >= len(f.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, f.data[f.off:])
+	f.off += n
+	if f.off >= len(f.data) {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+func (f *mapFile) Close() error { return nil }
+
+type mapFileInfo struct {
+	name string
+	size int64
+}
+
+func (i mapFileInfo) Name() string       { return i.name }
+func (i mapFileInfo) Size() int64        { return i.size }
+func (i mapFileInfo) Mode() fs.FileMode  { return 0o444 }
+func (i mapFileInfo) ModTime() time.Time { return time.Time{} }
+func (i mapFileInfo) IsDir() bool        { return false }
+func (i mapFileInfo) Sys() any           { return nil }
 
 // List returns sorted archive paths in the package, including ManifestName
 // when a manifest is present.

@@ -1,9 +1,8 @@
-package js
+package workers
 
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
@@ -13,8 +12,9 @@ import (
 )
 
 // Isolate is one pure-goja VM with host-driven timers and minimal WinterTC
-// web types (Headers, Request, Response) plus allowlisted outbound fetch.
-// Create with [New], then advance with [Isolate.Tick].
+// web types (Headers, Request, Response). Outbound fetch is optional DI.
+// Create with [New]; advance with [Isolate.Fetch] (request path) or
+// [Isolate.Tick] (tests / optional pulse). Idle isolates are frozen.
 type Isolate struct {
 	vm          *goja.Runtime
 	script      string
@@ -32,8 +32,7 @@ type Isolate struct {
 
 	// activeCtx is the context of the current host Fetch/Tick; outbound
 	// fetch inherits it for cancellation.
-	activeCtx     context.Context
-	defaultClient *http.Client
+	activeCtx context.Context
 }
 
 // Ensure Isolate implements actor.Actor.

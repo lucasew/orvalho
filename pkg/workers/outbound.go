@@ -1,4 +1,4 @@
-package js
+package workers
 
 import (
 	"context"
@@ -19,14 +19,59 @@ const MaxOutboundBody = 2 << 20
 // is present on the active context.
 const DefaultFetchTimeout = 15 * time.Second
 
+// HTTPFetch returns a [FetchFunc] backed by net/http with an egress allowlist.
+// Empty egress denies all destinations. client may be nil (default client with
+// redirect checks against egress). timeout zero uses DefaultFetchTimeout.
+func HTTPFetch(egress EgressList, client *http.Client, timeout time.Duration) FetchFunc {
+	if timeout <= 0 {
+		timeout = DefaultFetchTimeout
+	}
+	if client == nil {
+		client = &http.Client{
+			Timeout: timeout,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 10 {
+					return fmt.Errorf("stopped after 10 redirects")
+				}
+				if err := egress.CheckURL(req.URL.String()); err != nil {
+					return err
+				}
+				return nil
+			},
+		}
+	}
+	return func(ctx context.Context, req *http.Request) (*http.Response, error) {
+		if err := egress.CheckURL(req.URL.String()); err != nil {
+			return nil, err
+		}
+		// Caller owns deadlines on ctx (jsFetch applies FetchTimeout).
+		// Do not cancel here: response body is read after this returns.
+		req = req.WithContext(ctx)
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		// Re-check final URL after redirects.
+		if resp.Request != nil && resp.Request.URL != nil {
+			if err := egress.CheckURL(resp.Request.URL.String()); err != nil {
+				resp.Body.Close()
+				return nil, err
+			}
+		}
+		return resp, nil
+	}
+}
+
 func (iso *Isolate) installOutboundFetch() {
+	if iso.opts.Fetch == nil {
+		return
+	}
 	iso.vm.Set("fetch", iso.jsFetch)
 }
 
 // jsFetch implements the guest global fetch(input, init?).
 // The HTTP round-trip runs synchronously under the isolate lock (host-driven
 // model). The return value is always a Promise (fulfilled or rejected).
-// Each attempt is logged to stderr as: orvalho fetch: METHOD url -> ...
 func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 	p, resolve, reject := iso.vm.NewPromise()
 	promise := iso.vm.ToValue(p)
@@ -35,11 +80,6 @@ func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 	reqURL, method, headers, body, err := iso.parseFetchArgs(call)
 	if err != nil {
 		logGuestFetch(method, reqURL, 0, 0, start, err)
-		_ = reject(iso.vm.NewTypeError(err.Error()))
-		return promise
-	}
-	if err := iso.opts.Egress.CheckURL(reqURL); err != nil {
-		logGuestFetch(method, reqURL, 0, 0, start, fmt.Errorf("egress denied: %w", err))
 		_ = reject(iso.vm.NewTypeError(err.Error()))
 		return promise
 	}
@@ -72,8 +112,7 @@ func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 		httpReq.Header.Set("Content-Type", "text/plain;charset=UTF-8")
 	}
 
-	client := iso.httpClient()
-	resp, err := client.Do(httpReq)
+	resp, err := iso.opts.Fetch(ctx, httpReq)
 	if err != nil {
 		logGuestFetch(method, reqURL, 0, 0, start, fmt.Errorf("fetch failed: %w", err))
 		_ = reject(iso.vm.NewTypeError("fetch failed: " + err.Error()))
@@ -81,12 +120,9 @@ func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 	}
 	defer resp.Body.Close()
 
-	finalURL := resp.Request.URL.String()
-	// Re-check final URL after redirects.
-	if err := iso.opts.Egress.CheckURL(finalURL); err != nil {
-		logGuestFetch(method, finalURL, resp.StatusCode, 0, start, fmt.Errorf("egress denied after redirect: %w", err))
-		_ = reject(iso.vm.NewTypeError(err.Error()))
-		return promise
+	finalURL := reqURL
+	if resp.Request != nil && resp.Request.URL != nil {
+		finalURL = resp.Request.URL.String()
 	}
 
 	limited := io.LimitReader(resp.Body, MaxOutboundBody+1)
@@ -123,31 +159,10 @@ func logGuestFetch(method, url string, status, bodyBytes int, start time.Time, e
 	}
 	dur := time.Since(start).Round(time.Millisecond)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "orvalho fetch: %s %s -> error: %v (%s)\n", method, url, err, dur)
+		fmt.Fprintf(os.Stderr, "workers fetch: %s %s -> error: %v (%s)\n", method, url, err, dur)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "orvalho fetch: %s %s -> %d %dB %s\n", method, url, status, bodyBytes, dur)
-}
-
-func (iso *Isolate) httpClient() *http.Client {
-	if iso.opts.HTTPClient != nil {
-		return iso.opts.HTTPClient
-	}
-	if iso.defaultClient == nil {
-		iso.defaultClient = &http.Client{
-			Timeout: DefaultFetchTimeout,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) >= 10 {
-					return fmt.Errorf("stopped after 10 redirects")
-				}
-				if err := iso.opts.Egress.CheckURL(req.URL.String()); err != nil {
-					return err
-				}
-				return nil
-			},
-		}
-	}
-	return iso.defaultClient
+	fmt.Fprintf(os.Stderr, "workers fetch: %s %s -> %d %dB %s\n", method, url, status, bodyBytes, dur)
 }
 
 func (iso *Isolate) parseFetchArgs(call goja.FunctionCall) (url, method string, headers map[string]string, body string, err error) {
