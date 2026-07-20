@@ -1,4 +1,4 @@
-module orvalho
+module github.com/lucasew/orvalho
 
 go 1.25
 

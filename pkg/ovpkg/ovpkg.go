@@ -26,7 +26,7 @@ import (
 
 	"cuelang.org/go/cue"
 
-	"orvalho/pkg/cuex"
+	"github.com/lucasew/orvalho/pkg/cuex"
 )
 
 // ManifestName is the fixed path of the package CUE instance inside the archive.

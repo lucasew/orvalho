@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -347,21 +348,29 @@ func rewriteTemplateLiteral(tmpl string) string {
 // neutralizeWebAssemblyEagerLoad strips eager WebAssembly.compile(…).then(…)
 // init chains (devalue etc.). goja has no WASM; leftover binary blobs must not
 // be passed into instantiate/destructuring.
+//
+// esbuild minifies the payload helper name (E, C, …) and may drop a set of
+// parens around the destructuring param; match those variants with a regexp.
 func neutralizeWebAssemblyEagerLoad(src string) string {
-	// After rewriteDynamicImport / esbuild, typical pattern:
-	//   (function(){return Promise.resolve({})/*orvalho-no-wasm*/;})(E()).then(WebAssembly.instantiate).then((({ exports: A }) => { }));
-	// or original WebAssembly.compile(E()).then(...)
-	patterns := []string{
-		"(function(){return Promise.resolve({})/*orvalho-no-wasm*/;})(E()).then(WebAssembly.instantiate).then((({ exports: A }) => {\n      }));",
-		"WebAssembly.compile(E()).then(WebAssembly.instantiate).then((({ exports: A }) => {\n      }));",
-	}
-	out := src
-	for _, p := range patterns {
-		out = strings.ReplaceAll(out, p, "/*orvalho: stripped WebAssembly.init*/void 0;")
-	}
-	// Fallback: neutralize remaining compile calls.
+	const voidInit = "/*orvalho: stripped WebAssembly.init*/void 0;"
+	// Original compile chain or already-rewritten no-wasm stub + instantiate.
+	// Helper: any Identifier().then(WebAssembly.instantiate).then((optional paren)({ exports: Id }) => { ... });
+	re := regexp.MustCompile(
+		`(?:WebAssembly\.compile|\(function\(\)\{return Promise\.resolve\(\{\}\)/\*orvalho-no-wasm\*/;\}\))` +
+			`\([A-Za-z_$][\w$]*\(\)\)\.then\(WebAssembly\.instantiate\)\.then\(\(?\(\{\s*exports:\s*[A-Za-z_$][\w$]*\s*\}\)\s*=>\s*\{\s*\}\)?\s*\);`,
+	)
+	out := re.ReplaceAllString(src, voidInit)
+	// Any remaining compile → resolved empty module (instantiate may still be referenced).
 	out = strings.ReplaceAll(out, "WebAssembly.compile(",
 		"(function(){return Promise.resolve({})/*orvalho-no-wasm*/;})(")
+	// Drop leftover instantiate chaining after the compile rewrite (any helper name).
+	re2 := regexp.MustCompile(
+		`\(function\(\)\{return Promise\.resolve\(\{\}\)/\*orvalho-no-wasm\*/;\}\)\([A-Za-z_$][\w$]*\(\)\)\.then\(WebAssembly\.instantiate\)\.then\(\(?\(\{\s*exports:\s*[A-Za-z_$][\w$]*\s*\}\)\s*=>\s*\{\s*\}\)?\s*\);`,
+	)
+	out = re2.ReplaceAllString(out, voidInit)
+	// Last resort: do not call host WebAssembly.instantiate at all.
+	out = strings.ReplaceAll(out, "WebAssembly.instantiate",
+		"(function(){return Promise.resolve({exports:{}})/*orvalho-no-wasm-instantiate*/;})")
 	return out
 }
 

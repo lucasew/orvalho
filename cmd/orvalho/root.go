@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"orvalho/pkg/cuex"
-	"orvalho/pkg/version"
+	"github.com/lucasew/orvalho/pkg/cuex"
+	"github.com/lucasew/orvalho/pkg/version"
 )
 
 var (

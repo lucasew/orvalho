@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"orvalho/pkg/workers/bundle"
+	"github.com/lucasew/orvalho/pkg/workers/bundle"
 )
 
 func TestNeedsBundle(t *testing.T) {

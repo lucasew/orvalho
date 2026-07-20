@@ -10,8 +10,8 @@ Policy and product context: [SPEC.md](../../SPEC.md) (*Embeddable workers librar
 
 | Path | Role |
 |------|------|
-| `orvalho/pkg/workers` | Core isolate: web types, timers, `Fetch` / `Tick` / `Handler` |
-| `orvalho/pkg/workers/bundle` | Optional: esbuild multi-file entry + CF/node stubs |
+| `github.com/lucasew/orvalho/pkg/workers` | Core isolate: web types, timers, `Fetch` / `Tick` / `Handler` |
+| `github.com/lucasew/orvalho/pkg/workers/bundle` | Optional: esbuild multi-file entry + CF/node stubs |
 
 Core does **not** depend on CUE, zip packages, or Orvalho mesh code. Orvalho `serve` is one consumer of this API.
 
@@ -41,7 +41,7 @@ import (
 	"net/http"
 	"os"
 
-	"orvalho/pkg/workers"
+	"github.com/lucasew/orvalho/pkg/workers"
 )
 
 func main() {
@@ -117,7 +117,7 @@ String env keys must not clash with binding names.
 
 - Entry after load: `default.fetch(request, env, ctx)`.
 - **`PrepareGuestScript`** rewrites a leading `export default` → `globalThis.default =` for simple single-file workers.
-- Multi-file ESM (Astro / CF adapter graphs): use **`orvalho/pkg/workers/bundle`** (`BundleEntry`, needs `esbuild` on `PATH`), then pass the bundled string to `New`.
+- Multi-file ESM (Astro / CF adapter graphs): use **`github.com/lucasew/orvalho/pkg/workers/bundle`** (`BundleEntry`, needs `esbuild` on `PATH`), then pass the bundled string to `New`.
 
 Bodies are **buffered strings/bytes** with hard size caps (no real streaming in v1).
 

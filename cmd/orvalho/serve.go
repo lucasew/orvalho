@@ -15,9 +15,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"orvalho/pkg/ovpkg"
-	"orvalho/pkg/workers"
-	"orvalho/pkg/workers/bundle"
+	"github.com/lucasew/orvalho/pkg/ovpkg"
+	"github.com/lucasew/orvalho/pkg/workers"
+	"github.com/lucasew/orvalho/pkg/workers/bundle"
 )
 
 var (

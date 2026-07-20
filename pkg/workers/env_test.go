@@ -9,7 +9,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"orvalho/pkg/workers"
+	"github.com/lucasew/orvalho/pkg/workers"
 )
 
 func TestEnvStringAndAssetsFetch(t *testing.T) {

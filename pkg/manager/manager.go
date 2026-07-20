@@ -3,7 +3,7 @@
 // Skeleton only. Live code must not import orvalho/attic.
 package manager
 
-import "orvalho/pkg/version"
+import "github.com/lucasew/orvalho/pkg/version"
 
 // Version is the product version (from pkg/version / goreleaser ldflags).
 func Version() string { return version.Version() }

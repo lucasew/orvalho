@@ -9,7 +9,7 @@ import (
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/format"
 
-	"orvalho/pkg/cuex"
+	"github.com/lucasew/orvalho/pkg/cuex"
 )
 
 var configCmd = &cobra.Command{

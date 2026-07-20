@@ -5,8 +5,8 @@ import (
 
 	"cuelang.org/go/cue"
 
-	"orvalho/pkg/ovpkg"
-	"orvalho/pkg/workers"
+	"github.com/lucasew/orvalho/pkg/ovpkg"
+	"github.com/lucasew/orvalho/pkg/workers"
 )
 
 // materializeAgentBindings builds workers.Binding map from a package agent.

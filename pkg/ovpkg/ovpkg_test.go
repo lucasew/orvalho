@@ -10,8 +10,8 @@ import (
 
 	"cuelang.org/go/cue"
 
-	"orvalho/pkg/cuex"
-	"orvalho/pkg/ovpkg"
+	"github.com/lucasew/orvalho/pkg/cuex"
+	"github.com/lucasew/orvalho/pkg/ovpkg"
 )
 
 func minimalManifest() []byte {

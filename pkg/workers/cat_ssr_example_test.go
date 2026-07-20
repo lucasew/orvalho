@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"orvalho/pkg/ovpkg"
-	"orvalho/pkg/workers"
+	"github.com/lucasew/orvalho/pkg/ovpkg"
+	"github.com/lucasew/orvalho/pkg/workers"
 )
 
 func loadCatSSR(t *testing.T) (*ovpkg.Package, string) {
