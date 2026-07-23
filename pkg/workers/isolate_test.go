@@ -17,7 +17,7 @@ func TestNewDoesNotRunScript(t *testing.T) {
 
 func TestRunScriptOnFirstTick(t *testing.T) {
 	iso := New(`var ran = true;`, Options{})
-	more, err := iso.Tick(context.Background())
+	more, err := iso.Tick(t.Context())
 	if err != nil {
 		t.Fatalf("Tick: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestSetTimeoutFiresUnderHostControl(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0)
 	iso.now = func() time.Time { return base }
 
-	more, err := iso.Tick(context.Background())
+	more, err := iso.Tick(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestSetTimeoutFiresUnderHostControl(t *testing.T) {
 
 	// Still before deadline: callback must not run.
 	iso.now = func() time.Time { return base.Add(49 * time.Millisecond) }
-	more, err = iso.Tick(context.Background())
+	more, err = iso.Tick(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestSetTimeoutFiresUnderHostControl(t *testing.T) {
 
 	// At/after deadline: host Tick fires it.
 	iso.now = func() time.Time { return base.Add(50 * time.Millisecond) }
-	more, err = iso.Tick(context.Background())
+	more, err = iso.Tick(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,10 +82,10 @@ func TestSetTimeoutPassesArgs(t *testing.T) {
 	base := time.Unix(0, 0)
 	iso.now = func() time.Time { return base }
 
-	if _, err := iso.Tick(context.Background()); err != nil {
+	if _, err := iso.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := iso.Tick(context.Background()); err != nil {
+	if _, err := iso.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if got := iso.vm.Get("got").ToInteger(); got != 5 {
@@ -106,13 +106,13 @@ func TestSetIntervalAndClear(t *testing.T) {
 	now := base
 	iso.now = func() time.Time { return now }
 
-	if _, err := iso.Tick(context.Background()); err != nil {
+	if _, err := iso.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
 	for i := 0; i < 5; i++ {
 		now = now.Add(10 * time.Millisecond)
-		more, err := iso.Tick(context.Background())
+		more, err := iso.Tick(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -139,7 +139,7 @@ func TestClearTimeoutBeforeFire(t *testing.T) {
 	base := time.Unix(0, 0)
 	iso.now = func() time.Time { return base }
 
-	more, err := iso.Tick(context.Background())
+	more, err := iso.Tick(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestClearTimeoutBeforeFire(t *testing.T) {
 	}
 
 	iso.now = func() time.Time { return base.Add(100 * time.Millisecond) }
-	if _, err := iso.Tick(context.Background()); err != nil {
+	if _, err := iso.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if iso.vm.Get("ran").ToBoolean() {
@@ -158,7 +158,7 @@ func TestClearTimeoutBeforeFire(t *testing.T) {
 
 func TestContextCancelBeforeTick(t *testing.T) {
 	iso := New(`var x = 1;`, Options{})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err := iso.Tick(ctx)
 	if !errors.Is(err, context.Canceled) {
@@ -171,7 +171,7 @@ func TestContextCancelBeforeTick(t *testing.T) {
 
 func TestContextCancelInterruptsInfiniteLoop(t *testing.T) {
 	iso := New(`while (true) {}`, Options{})
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -205,14 +205,14 @@ func TestMaxTimersPerTickCap(t *testing.T) {
 	base := time.Unix(0, 0)
 	iso.now = func() time.Time { return base }
 
-	if _, err := iso.Tick(context.Background()); err != nil {
+	if _, err := iso.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if iso.PendingTimers() != 50 {
 		t.Fatalf("pending=%d, want 50", iso.PendingTimers())
 	}
 
-	more, err := iso.Tick(context.Background())
+	more, err := iso.Tick(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestMaxTimersPerTickCap(t *testing.T) {
 
 	// Drain remaining under the same cap.
 	for iso.PendingTimers() > 0 {
-		more, err = iso.Tick(context.Background())
+		more, err = iso.Tick(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -258,7 +258,7 @@ func TestMaxPendingTimersCap(t *testing.T) {
 		globalThis.threw = threw;
 	`, Options{MaxPendingTimers: 3, MaxTimersPerTick: 100})
 
-	_, err := iso.Tick(context.Background())
+	_, err := iso.Tick(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func TestPromiseMicrotaskOnTick(t *testing.T) {
 		var resolved = false;
 		Promise.resolve().then(function() { resolved = true; });
 	`, Options{})
-	if _, err := iso.Tick(context.Background()); err != nil {
+	if _, err := iso.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if !iso.vm.Get("resolved").ToBoolean() {
