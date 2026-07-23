@@ -1,7 +1,6 @@
 package workers
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -29,7 +28,7 @@ export default {
 };
 `)
 	iso := New(script, Options{})
-	got, err := iso.Fetch(context.Background(), HTTPRequest{
+	got, err := iso.Fetch(t.Context(), HTTPRequest{
 		Method: "GET",
 		URL:    "http://actor.test/hi",
 	})
@@ -49,7 +48,7 @@ export default {
 
 func TestFetchMissingDefault(t *testing.T) {
 	iso := New(`var x = 1;`, Options{})
-	_, err := iso.Fetch(context.Background(), HTTPRequest{URL: "http://x/"})
+	_, err := iso.Fetch(t.Context(), HTTPRequest{URL: "http://x/"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -65,7 +64,7 @@ export default {
 };
 `)
 	iso := New(script, Options{})
-	_, err := iso.Fetch(context.Background(), HTTPRequest{URL: "http://x/"})
+	_, err := iso.Fetch(t.Context(), HTTPRequest{URL: "http://x/"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -100,7 +99,7 @@ export default {
 		return base.Add(time.Duration(calls*10) * time.Millisecond)
 	}
 
-	got, err := iso.Fetch(context.Background(), HTTPRequest{URL: "http://x/"})
+	got, err := iso.Fetch(t.Context(), HTTPRequest{URL: "http://x/"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,6 @@
 package workers
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -37,7 +36,7 @@ export default {
 	iso := New(script, Options{
 		Fetch: HTTPFetch(EgressList{host}, upstream.Client(), 0),
 	})
-	got, err := iso.Fetch(context.Background(), HTTPRequest{URL: "http://actor/"})
+	got, err := iso.Fetch(t.Context(), HTTPRequest{URL: "http://actor/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +69,7 @@ export default {
 	iso := New(script, Options{
 		Fetch: HTTPFetch(EgressList{"only-this.example"}, upstream.Client(), 0),
 	})
-	got, err := iso.Fetch(context.Background(), HTTPRequest{URL: "http://actor/"})
+	got, err := iso.Fetch(t.Context(), HTTPRequest{URL: "http://actor/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +102,7 @@ export default {
 	iso := New(script, Options{
 		Fetch: HTTPFetch(nil, upstream.Client(), 0),
 	})
-	got, err := iso.Fetch(context.Background(), HTTPRequest{URL: "http://actor/"})
+	got, err := iso.Fetch(t.Context(), HTTPRequest{URL: "http://actor/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +113,7 @@ export default {
 
 func TestFetchGlobalAbsentWithoutDI(t *testing.T) {
 	iso := New(``, Options{})
-	if _, err := iso.Tick(context.Background()); err != nil {
+	if _, err := iso.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	v, err := iso.vm.RunString(`typeof fetch`)
@@ -128,7 +127,7 @@ func TestFetchGlobalAbsentWithoutDI(t *testing.T) {
 
 func TestFetchGlobalIsFunctionWhenInjected(t *testing.T) {
 	iso := New(``, Options{Fetch: HTTPFetch(EgressList{"*"}, nil, 0)})
-	if _, err := iso.Tick(context.Background()); err != nil {
+	if _, err := iso.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	v, err := iso.vm.RunString(`typeof fetch`)

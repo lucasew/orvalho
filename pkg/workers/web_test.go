@@ -1,7 +1,6 @@
 package workers
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -10,7 +9,7 @@ import (
 
 func TestHeadersGetSetHasDeleteCaseInsensitive(t *testing.T) {
 	iso := New(``, Options{})
-	if _, err := iso.Tick(context.Background()); err != nil {
+	if _, err := iso.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -57,7 +56,7 @@ func TestHeadersGetSetHasDeleteCaseInsensitive(t *testing.T) {
 
 func TestHeadersFromRecord(t *testing.T) {
 	iso := New(``, Options{})
-	if _, err := iso.Tick(context.Background()); err != nil {
+	if _, err := iso.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	v, err := iso.vm.RunString(`
@@ -74,7 +73,7 @@ func TestHeadersFromRecord(t *testing.T) {
 
 func TestRequestConstructAndRead(t *testing.T) {
 	iso := New(``, Options{})
-	if _, err := iso.Tick(context.Background()); err != nil {
+	if _, err := iso.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -119,7 +118,7 @@ func TestRequestConstructAndRead(t *testing.T) {
 
 func TestResponseConstructAndHostRead(t *testing.T) {
 	iso := New(``, Options{})
-	if _, err := iso.Tick(context.Background()); err != nil {
+	if _, err := iso.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -173,7 +172,7 @@ func TestHostMakeRequestReadableByJS(t *testing.T) {
 			};
 		};
 	`, Options{})
-	if _, err := iso.Tick(context.Background()); err != nil {
+	if _, err := iso.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -217,7 +216,7 @@ func TestJSResponseRoundTripViaHost(t *testing.T) {
 			});
 		};
 	`, Options{})
-	if _, err := iso.Tick(context.Background()); err != nil {
+	if _, err := iso.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -252,7 +251,7 @@ func TestJSResponseRoundTripViaHost(t *testing.T) {
 
 func TestReadResponseRejectsNonResponse(t *testing.T) {
 	iso := New(``, Options{})
-	if _, err := iso.Tick(context.Background()); err != nil {
+	if _, err := iso.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	v, err := iso.vm.RunString(`({status: 200, body: "nope"})`)
@@ -267,4 +266,3 @@ func TestReadResponseRejectsNonResponse(t *testing.T) {
 		t.Fatalf("unexpected err: %v", err)
 	}
 }
-

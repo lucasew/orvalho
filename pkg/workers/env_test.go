@@ -1,7 +1,6 @@
 package workers_test
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,7 +32,7 @@ export default {
 		},
 	})
 
-	res, err := iso.Fetch(context.Background(), workers.HTTPRequest{
+	res, err := iso.Fetch(t.Context(), workers.HTTPRequest{
 		Method: "GET",
 		URL:    "http://127.0.0.1/title",
 	})
@@ -80,7 +79,7 @@ func TestEnvNameClash(t *testing.T) {
 			"ASSETS": workers.NewAssetBinding(fstest.MapFS{}, "assets"),
 		},
 	})
-	_, err := iso.Fetch(context.Background(), workers.HTTPRequest{URL: "http://x/"})
+	_, err := iso.Fetch(t.Context(), workers.HTTPRequest{URL: "http://x/"})
 	if err == nil || !strings.Contains(err.Error(), "clash") {
 		t.Fatalf("want clash error, got %v", err)
 	}
@@ -97,7 +96,7 @@ export default {
 };
 `)
 	iso := workers.New(src, workers.Options{})
-	res, err := iso.Fetch(context.Background(), workers.HTTPRequest{
+	res, err := iso.Fetch(t.Context(), workers.HTTPRequest{
 		Method: "GET",
 		URL:    "http://127.0.0.1:8788/search?query=teste",
 	})

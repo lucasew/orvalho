@@ -23,7 +23,7 @@ func TestLazyInit(t *testing.T) {
 		ran = true;
 	`
 	r := New(script)
-	ctx := context.Background()
+	ctx := t.Context()
 	more, err := r.Tick(ctx)
 	if err != nil {
 		t.Fatalf("Tick failed: %v", err)
@@ -49,7 +49,7 @@ func TestSetTimeout(t *testing.T) {
 		}, 50);
 	`
 	r := New(script)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// First tick initializes and sets timer
 	more, err := r.Tick(ctx)
@@ -100,7 +100,7 @@ func TestSetInterval(t *testing.T) {
 		}, 10);
 	`
 	r := New(script)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Init
 	more, err := r.Tick(ctx)
@@ -139,7 +139,7 @@ func TestClearTimeout(t *testing.T) {
 		clearTimeout(id);
 	`
 	r := New(script)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	more, err := r.Tick(ctx)
 	if err != nil {
@@ -170,7 +170,7 @@ func TestClearInterval(t *testing.T) {
 		}, 10);
 	`
 	r := New(script)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Init
 	r.Tick(ctx)
@@ -206,7 +206,7 @@ func TestPromiseHandling(t *testing.T) {
 		});
 	`
 	r := New(script)
-	ctx := context.Background()
+	ctx := t.Context()
 	more, err := r.Tick(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ func TestPromiseHandling(t *testing.T) {
 
 func TestContextCancel(t *testing.T) {
 	r := New("while(true);")
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // Cancel immediately
 
 	_, err := r.Tick(ctx)
@@ -260,7 +260,7 @@ func TestContextTimeout(t *testing.T) {
 	script := "while(true) {}"
 	r := New(script)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
 	defer cancel()
 
 	// Since Goja RunString is blocking, we need to ensure it respects the context cancellation.
