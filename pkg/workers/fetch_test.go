@@ -1,7 +1,6 @@
 package workers
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"

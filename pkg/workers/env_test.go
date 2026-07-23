@@ -1,7 +1,6 @@
 package workers_test
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"

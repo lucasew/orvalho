@@ -1,7 +1,6 @@
 package workers
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -267,4 +266,3 @@ func TestReadResponseRejectsNonResponse(t *testing.T) {
 		t.Fatalf("unexpected err: %v", err)
 	}
 }
-
