@@ -32,14 +32,14 @@ func (h timerHeap) Swap(i, j int) {
 	h[j].index = j
 }
 
-func (h *timerHeap) Push(x interface{}) {
+func (h *timerHeap) Push(x any) {
 	n := len(*h)
 	item := x.(*timer)
 	item.index = n
 	*h = append(*h, item)
 }
 
-func (h *timerHeap) Pop() interface{} {
+func (h *timerHeap) Pop() any {
 	old := *h
 	n := len(old)
 	item := old[n-1]

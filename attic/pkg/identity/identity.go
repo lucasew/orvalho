@@ -37,7 +37,7 @@ func DeriveIdentities(mnemonic, passphrase string) (*Identity, error) {
 	// Path: m / 44' / 59356' / 0' / 0'
 	sshKey, err := derivation.DeriveForPath(SSHPathBase, seed)
 	if err != nil {
-		return nil, fmt.Errorf("failed to derive SSH key: %w", err)
+		return nil, fmt.Errorf("derive SSH key: %w", err)
 	}
 
 	// The derived key is the seed for Ed25519
@@ -50,14 +50,14 @@ func DeriveIdentities(mnemonic, passphrase string) (*Identity, error) {
 	// Convert to SSH Public Key format
 	sshPub, err := ssh.NewPublicKey(sshPubKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create SSH public key: %w", err)
+		return nil, fmt.Errorf("create SSH public key: %w", err)
 	}
 	sshAuthorizedKey := string(ssh.MarshalAuthorizedKey(sshPub))
 
 	// Convert to PEM format (OpenSSH)
 	pemBlock, err := ssh.MarshalPrivateKey(sshPrivKey, "")
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal SSH private key: %w", err)
+		return nil, fmt.Errorf("marshal SSH private key: %w", err)
 	}
 	sshPemBytes := pem.EncodeToMemory(pemBlock)
 
@@ -65,7 +65,7 @@ func DeriveIdentities(mnemonic, passphrase string) (*Identity, error) {
 	// Path: m / 44' / 59356' / 1' / 0'
 	ageKey, err := derivation.DeriveForPath(AgePathBase, seed)
 	if err != nil {
-		return nil, fmt.Errorf("failed to derive Age key: %w", err)
+		return nil, fmt.Errorf("derive Age key: %w", err)
 	}
 
 	if len(ageKey.Key) != 32 {
@@ -81,12 +81,12 @@ func DeriveIdentities(mnemonic, passphrase string) (*Identity, error) {
 	// Convert bytes to 5-bit groups
 	converted, err := bech32.ConvertBits(ageKey.Key, 8, 5, true)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert bits for bech32: %w", err)
+		return nil, fmt.Errorf("convert bits for bech32: %w", err)
 	}
 
 	encoded, err := bech32.Encode("age-secret-key-", converted)
 	if err != nil {
-		return nil, fmt.Errorf("failed to encode bech32: %w", err)
+		return nil, fmt.Errorf("encode bech32: %w", err)
 	}
 
 	// age expects uppercase HRP for secret keys?
@@ -99,7 +99,7 @@ func DeriveIdentities(mnemonic, passphrase string) (*Identity, error) {
 
 	ageIdentity, err := age.ParseX25519Identity(encoded)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse generated Age identity: %w", err)
+		return nil, fmt.Errorf("parse generated Age identity: %w", err)
 	}
 
 	return &Identity{

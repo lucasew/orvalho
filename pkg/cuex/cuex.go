@@ -17,6 +17,8 @@ import (
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
 	cueerrors "cuelang.org/go/cue/errors"
+	"errors"
+	"io/fs"
 )
 
 // InstanceFilename is the fixed name for host and package CUE instances.
@@ -128,7 +130,7 @@ func LoadHost(instance []byte, filename string) (*Config, error) {
 func LoadHostFile(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return LoadHost(nil, path)
 		}
 		return nil, err
