@@ -277,8 +277,7 @@ func WriteWithOptions(w io.Writer, manifest []byte, files map[string][]byte, opt
 		method = zip.Store
 	}
 	if err := writeZipFile(zw, ManifestName, manifest, method); err != nil {
-		_ = zw.Close()
-		return err
+		return errors.Join(err, zw.Close())
 	}
 
 	names := make([]string, 0, len(files))
@@ -291,21 +290,20 @@ func WriteWithOptions(w io.Writer, manifest []byte, files map[string][]byte, opt
 	for _, name := range names {
 		clean, err := cleanArchivePath(name)
 		if err != nil {
-			_ = zw.Close()
-			return fmt.Errorf("%w: %q", err, name)
+			return errors.Join(fmt.Errorf("%w: %q", err, name), zw.Close())
 		}
 		if clean == ManifestName {
-			_ = zw.Close()
-			return fmt.Errorf("%w: %s must be passed as manifest, not files", ErrDuplicatePath, ManifestName)
+			return errors.Join(
+				fmt.Errorf("%w: %s must be passed as manifest, not files", ErrDuplicatePath, ManifestName),
+				zw.Close(),
+			)
 		}
 		if _, ok := seen[clean]; ok {
-			_ = zw.Close()
-			return fmt.Errorf("%w: %s", ErrDuplicatePath, clean)
+			return errors.Join(fmt.Errorf("%w: %s", ErrDuplicatePath, clean), zw.Close())
 		}
 		seen[clean] = struct{}{}
 		if err := writeZipFile(zw, clean, files[name], method); err != nil {
-			_ = zw.Close()
-			return err
+			return errors.Join(err, zw.Close())
 		}
 	}
 	if err := zw.Close(); err != nil {
@@ -341,7 +339,8 @@ func WriteDir(w io.Writer, dir string) error {
 	if err != nil {
 		return err
 	}
-	return Write(w, manifest, files)
+	err = Write(w, manifest, files)
+	return err
 }
 
 // ReadDir loads manifest + file map from a package directory (not a zip).

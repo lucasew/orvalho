@@ -31,7 +31,10 @@ export default {
 	if resp.StatusCode != 201 {
 		t.Fatalf("status=%d", resp.StatusCode)
 	}
-	b, _ := io.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(b) != "echo:POST:xyz" {
 		t.Fatalf("body=%q", b)
 	}

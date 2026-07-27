@@ -16,7 +16,9 @@ func TestOutboundFetchAllowlisted(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"fact":"cats are liquid","length":15}`)
+		if _, err := io.WriteString(w, `{"fact":"cats are liquid","length":15}`); err != nil {
+			t.Errorf("WriteString: %v", err)
+		}
 	}))
 	defer upstream.Close()
 
@@ -50,7 +52,9 @@ export default {
 
 func TestOutboundFetchDenied(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "secret")
+		if _, err := io.WriteString(w, "secret"); err != nil {
+			t.Errorf("WriteString: %v", err)
+		}
 	}))
 	defer upstream.Close()
 
@@ -83,7 +87,9 @@ export default {
 
 func TestOutboundFetchEmptyAllowlistDenies(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "nope")
+		if _, err := io.WriteString(w, "nope"); err != nil {
+			t.Errorf("WriteString: %v", err)
+		}
 	}))
 	defer upstream.Close()
 

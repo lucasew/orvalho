@@ -80,7 +80,7 @@ func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 	reqURL, method, headers, body, err := iso.parseFetchArgs(call)
 	if err != nil {
 		logGuestFetch(method, reqURL, 0, 0, start, err)
-		_ = reject(iso.vm.NewTypeError(err.Error()))
+		reject(iso.vm.NewTypeError(err.Error()))
 		return promise
 	}
 
@@ -88,7 +88,7 @@ func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 	if ctx == nil {
 		// Outbound fetch only runs while a host Fetch/Tick holds the isolate.
 		logGuestFetch(method, reqURL, 0, 0, start, ErrFetchRequiresURL)
-		_ = reject(iso.vm.NewTypeError("fetch outside host request context"))
+		reject(iso.vm.NewTypeError("fetch outside host request context"))
 		return promise
 	}
 	timeout := iso.opts.FetchTimeout
@@ -105,7 +105,7 @@ func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 	httpReq, err := http.NewRequestWithContext(ctx, method, reqURL, bodyReader)
 	if err != nil {
 		logGuestFetch(method, reqURL, 0, 0, start, err)
-		_ = reject(iso.vm.NewTypeError(err.Error()))
+		reject(iso.vm.NewTypeError(err.Error()))
 		return promise
 	}
 	for k, v := range headers {
@@ -118,7 +118,7 @@ func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 	resp, err := iso.opts.Fetch(ctx, httpReq)
 	if err != nil {
 		logGuestFetch(method, reqURL, 0, 0, start, fmt.Errorf("fetch failed: %w", err))
-		_ = reject(iso.vm.NewTypeError("fetch failed: " + err.Error()))
+		reject(iso.vm.NewTypeError("fetch failed: " + err.Error()))
 		return promise
 	}
 	defer resp.Body.Close()
@@ -132,12 +132,12 @@ func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 	raw, err := io.ReadAll(limited)
 	if err != nil {
 		logGuestFetch(method, finalURL, resp.StatusCode, 0, start, fmt.Errorf("read body: %w", err))
-		_ = reject(iso.vm.NewTypeError("fetch read body: " + err.Error()))
+		reject(iso.vm.NewTypeError("fetch read body: " + err.Error()))
 		return promise
 	}
 	if len(raw) > MaxOutboundBody {
 		logGuestFetch(method, finalURL, resp.StatusCode, len(raw), start, ErrResponseBodyTooLarge)
-		_ = reject(iso.vm.NewTypeError("fetch response body too large"))
+		reject(iso.vm.NewTypeError("fetch response body too large"))
 		return promise
 	}
 
@@ -148,7 +148,7 @@ func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 	logGuestFetch(method, logURL, resp.StatusCode, len(raw), start, nil)
 
 	resObj := iso.newResponseFromHTTPLocked(resp.StatusCode, resp.Status, resp.Header, string(raw))
-	_ = resolve(resObj)
+	resolve(resObj)
 	return promise
 }
 

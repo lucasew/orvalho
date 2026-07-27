@@ -50,7 +50,10 @@ func TestCatSSRExampleHandlerFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
 	s := string(body)
 	if !strings.Contains(s, "Cat fact") {
 		t.Fatalf("missing title: %s", truncate(s, 200))
@@ -64,10 +67,12 @@ func TestCatSSRExampleLiveViaAllowlist(t *testing.T) {
 	pkg, src := loadCatSSR(t)
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"fact":   "A group of cats is a clowder.",
 			"length": 28,
-		})
+		}); err != nil {
+			t.Errorf("encode: %v", err)
+		}
 	}))
 	defer upstream.Close()
 
@@ -94,7 +99,10 @@ func TestCatSSRExampleLiveViaAllowlist(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
 	s := string(body)
 	if !strings.Contains(s, "clowder") {
 		t.Fatalf("expected live fact in HTML: %s", truncate(s, 500))

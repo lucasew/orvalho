@@ -78,7 +78,10 @@ func TestAllocate_StableAndNoCollisions(t *testing.T) {
 
 	// Sequential first free: MinActorIID, +1, +2
 	for i, addr := range addrs {
-		iid, _ := InterfaceID(addr)
+		iid, err := InterfaceID(addr)
+		if err != nil {
+			t.Fatalf("InterfaceID[%d]: %v", i, err)
+		}
 		want := MinActorIID + uint64(i)
 		if iid != want {
 			t.Fatalf("iid[%d]=%d want %d", i, iid, want)
@@ -108,8 +111,14 @@ func TestAllocate_IndependentDevicesAndMeshes(t *testing.T) {
 
 	// Same actor name on different devices may reuse the same interface id
 	// (scope is mesh+device); addresses still differ by subnet.
-	iid1, _ := InterfaceID(a1)
-	iid2, _ := InterfaceID(a2)
+	iid1, err := InterfaceID(a1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iid2, err := InterfaceID(a2)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if iid1 != iid2 {
 		t.Fatalf("expected parallel iid allocation per device, got %d and %d", iid1, iid2)
 	}
@@ -130,7 +139,10 @@ func TestAllocate_FillsHolesAfterManualPut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	iid, _ := InterfaceID(z)
+	iid, err := InterfaceID(z)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if iid != 3 {
 		t.Fatalf("expected hole fill iid 3, got %d", iid)
 	}
@@ -138,7 +150,10 @@ func TestAllocate_FillsHolesAfterManualPut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	iid, _ = InterfaceID(w)
+	iid, err = InterfaceID(w)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if iid != 5 {
 		t.Fatalf("expected iid 5, got %d", iid)
 	}

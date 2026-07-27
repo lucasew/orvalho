@@ -75,7 +75,12 @@ func Handler(iso *Isolate) http.Handler {
 			status = http.StatusOK
 		}
 		w.WriteHeader(status)
-		n, _ := w.Write([]byte(res.Body))
+		n, err := w.Write([]byte(res.Body))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "workers: %s %s -> %d write error: %v (%s)\n",
+				r.Method, r.URL.RequestURI(), status, err, time.Since(start).Round(time.Millisecond))
+			return
+		}
 		fmt.Fprintf(os.Stderr, "workers: %s %s -> %d %dB %s\n",
 			r.Method, r.URL.RequestURI(), status, n, time.Since(start).Round(time.Millisecond))
 	})

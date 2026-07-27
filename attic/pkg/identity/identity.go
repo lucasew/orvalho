@@ -3,6 +3,7 @@ package identity
 import (
 	"crypto/ed25519"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -11,6 +12,11 @@ import (
 	"github.com/stellar/go/exp/crypto/derivation"
 	"github.com/tyler-smith/go-bip39"
 	"golang.org/x/crypto/ssh"
+)
+
+var (
+	ErrBadSSHKeyLength = errors.New("derived SSH key length is not 32")
+	ErrBadAgeKeyLength = errors.New("derived Age key length is not 32")
 )
 
 // Constants defined in requirements
@@ -42,7 +48,7 @@ func DeriveIdentities(mnemonic, passphrase string) (*Identity, error) {
 
 	// The derived key is the seed for Ed25519
 	if len(sshKey.Key) != 32 {
-		return nil, fmt.Errorf("derived SSH key length is %d, expected 32", len(sshKey.Key))
+		return nil, fmt.Errorf("%w: %d", ErrBadSSHKeyLength, len(sshKey.Key))
 	}
 	sshPrivKey := ed25519.NewKeyFromSeed(sshKey.Key)
 	sshPubKey := sshPrivKey.Public().(ed25519.PublicKey)
@@ -69,7 +75,7 @@ func DeriveIdentities(mnemonic, passphrase string) (*Identity, error) {
 	}
 
 	if len(ageKey.Key) != 32 {
-		return nil, fmt.Errorf("derived Age key length is %d, expected 32", len(ageKey.Key))
+		return nil, fmt.Errorf("%w: %d", ErrBadAgeKeyLength, len(ageKey.Key))
 	}
 
 	// Encode to Bech32 with HRP "AGE-SECRET-KEY-" to use age.ParseX25519Identity

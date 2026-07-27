@@ -31,13 +31,13 @@ func (iso *Isolate) bindConsole() {
 		}
 	}
 	con := iso.vm.NewObject()
-	_ = con.Set("log", logFn("log"))
-	_ = con.Set("info", logFn("info"))
-	_ = con.Set("warn", logFn("warn"))
-	_ = con.Set("error", logFn("error"))
-	_ = con.Set("debug", logFn("debug"))
-	_ = con.Set("trace", logFn("trace"))
-	_ = iso.vm.Set("console", con)
+	mustSet(con, "log", logFn("log"))
+	mustSet(con, "info", logFn("info"))
+	mustSet(con, "warn", logFn("warn"))
+	mustSet(con, "error", logFn("error"))
+	mustSet(con, "debug", logFn("debug"))
+	mustSet(con, "trace", logFn("trace"))
+	mustRuntimeSet(iso.vm, "console", con)
 }
 
 // hostPolyfillScript is injected into every isolate (before guest code).

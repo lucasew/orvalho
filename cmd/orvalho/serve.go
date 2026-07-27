@@ -201,7 +201,11 @@ func packageWorkDir(path string, pkg *ovpkg.Package) (dir string, cleanup func()
 	if err != nil {
 		return "", nil, err
 	}
-	cleanup = func() { _ = os.RemoveAll(tmp) }
+	cleanup = func() {
+		if err := os.RemoveAll(tmp); err != nil {
+			// Best-effort temp cleanup after serve materialize.
+		}
+	}
 	if err := os.WriteFile(filepath.Join(tmp, ovpkg.ManifestName), pkg.Manifest, 0o644); err != nil {
 		cleanup()
 		return "", nil, err

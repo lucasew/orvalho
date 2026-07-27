@@ -64,19 +64,19 @@ func (iso *Isolate) installWebTypes() {
 	headersProto.Set("append", iso.headersAppend)
 
 	reqProto := iso.vm.Get("Request").ToObject(iso.vm).Get("prototype").ToObject(iso.vm)
-	_ = reqProto.DefineAccessorProperty("method", iso.vm.ToValue(iso.requestGetMethod), nil, goja.FLAG_FALSE, goja.FLAG_TRUE)
-	_ = reqProto.DefineAccessorProperty("url", iso.vm.ToValue(iso.requestGetURL), nil, goja.FLAG_FALSE, goja.FLAG_TRUE)
-	_ = reqProto.DefineAccessorProperty("headers", iso.vm.ToValue(iso.requestGetHeaders), nil, goja.FLAG_FALSE, goja.FLAG_TRUE)
-	reqProto.Set("text", iso.requestText)
+	mustAccessor(reqProto, "method", iso.vm.ToValue(iso.requestGetMethod))
+	mustAccessor(reqProto, "url", iso.vm.ToValue(iso.requestGetURL))
+	mustAccessor(reqProto, "headers", iso.vm.ToValue(iso.requestGetHeaders))
+	mustSet(reqProto, "text", iso.requestText)
 
 	resProto := iso.vm.Get("Response").ToObject(iso.vm).Get("prototype").ToObject(iso.vm)
-	_ = resProto.DefineAccessorProperty("status", iso.vm.ToValue(iso.responseGetStatus), nil, goja.FLAG_FALSE, goja.FLAG_TRUE)
-	_ = resProto.DefineAccessorProperty("statusText", iso.vm.ToValue(iso.responseGetStatusText), nil, goja.FLAG_FALSE, goja.FLAG_TRUE)
-	_ = resProto.DefineAccessorProperty("ok", iso.vm.ToValue(iso.responseGetOK), nil, goja.FLAG_FALSE, goja.FLAG_TRUE)
-	_ = resProto.DefineAccessorProperty("headers", iso.vm.ToValue(iso.responseGetHeaders), nil, goja.FLAG_FALSE, goja.FLAG_TRUE)
-	resProto.Set("text", iso.responseText)
-	resProto.Set("arrayBuffer", iso.responseArrayBuffer)
-	resProto.Set("json", iso.responseJSON)
+	mustAccessor(resProto, "status", iso.vm.ToValue(iso.responseGetStatus))
+	mustAccessor(resProto, "statusText", iso.vm.ToValue(iso.responseGetStatusText))
+	mustAccessor(resProto, "ok", iso.vm.ToValue(iso.responseGetOK))
+	mustAccessor(resProto, "headers", iso.vm.ToValue(iso.responseGetHeaders))
+	mustSet(resProto, "text", iso.responseText)
+	mustSet(resProto, "arrayBuffer", iso.responseArrayBuffer)
+	mustSet(resProto, "json", iso.responseJSON)
 }
 
 func newHeaderBag() *headerBag {
@@ -399,15 +399,15 @@ func (iso *Isolate) responseJSON(call goja.FunctionCall) goja.Value {
 	p, resolve, reject := iso.vm.NewPromise()
 	parse, ok := goja.AssertFunction(iso.vm.Get("JSON").ToObject(iso.vm).Get("parse"))
 	if !ok {
-		_ = reject(iso.vm.NewTypeError("JSON.parse unavailable"))
+		reject(iso.vm.NewTypeError("JSON.parse unavailable"))
 		return iso.vm.ToValue(p)
 	}
 	parsed, err := parse(goja.Undefined(), iso.vm.ToValue(r))
 	if err != nil {
-		_ = reject(iso.vm.NewTypeError(err.Error()))
+		reject(iso.vm.NewTypeError(err.Error()))
 		return iso.vm.ToValue(p)
 	}
-	_ = resolve(parsed)
+	resolve(parsed)
 	return iso.vm.ToValue(p)
 }
 
@@ -425,8 +425,9 @@ func (iso *Isolate) responseBodyString(call goja.FunctionCall) string {
 }
 
 func (iso *Isolate) resolvedValuePromise(v goja.Value) goja.Value {
-	p, resolve, _ := iso.vm.NewPromise()
-	_ = resolve(v)
+	p, resolve, reject := iso.vm.NewPromise()
+	_ = reject
+	resolve(v)
 	return iso.vm.ToValue(p)
 }
 
@@ -467,9 +468,7 @@ func bodyArgToString(iso *Isolate, v goja.Value) string {
 }
 
 func (iso *Isolate) resolvedStringPromise(s string) goja.Value {
-	p, resolve, _ := iso.vm.NewPromise()
-	_ = resolve(s)
-	return iso.vm.ToValue(p)
+	return iso.resolvedValuePromise(iso.vm.ToValue(s))
 }
 
 // MakeRequest builds a JS Request object from host data. Caller must not hold

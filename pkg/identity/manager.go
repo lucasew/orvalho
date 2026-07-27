@@ -103,9 +103,11 @@ func ParsePrivatePEM(pemBytes []byte) (*Manager, error) {
 	if block == nil {
 		return nil, ErrNoPEMBlock
 	}
-	if extra, _ := pem.Decode(rest); extra != nil {
+	extra, trailing := pem.Decode(rest)
+	if extra != nil {
 		return nil, ErrMultiplePEMBlocks
 	}
+	_ = trailing
 	if block.Type != PEMTypePrivate {
 		return nil, fmt.Errorf("%w %q, want %q", ErrUnexpectedPEMType, block.Type, PEMTypePrivate)
 	}
@@ -159,17 +161,19 @@ func (m *Manager) Save(path string, overwrite bool) error {
 	cleanup := true
 	defer func() {
 		if cleanup {
-			_ = os.Remove(tmpName)
+			if remErr := os.Remove(tmpName); remErr != nil && !errors.Is(remErr, os.ErrNotExist) {
+				// Best-effort cleanup after a failed install.
+			}
 		}
 	}()
 
 	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("chmod temp key file: %w", err)
+		closeErr := tmp.Close()
+		return errors.Join(fmt.Errorf("chmod temp key file: %w", err), closeErr)
 	}
 	if _, err := tmp.Write(pemBytes); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write temp key file: %w", err)
+		closeErr := tmp.Close()
+		return errors.Join(fmt.Errorf("write temp key file: %w", err), closeErr)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp key file: %w", err)
