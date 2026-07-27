@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
+	"cmp"
 
 	"github.com/spf13/cobra"
 
@@ -9,7 +11,6 @@ import (
 	"cuelang.org/go/cue/format"
 
 	"github.com/lucasew/orvalho/pkg/cuex"
-	"cmp"
 )
 
 var configCmd = &cobra.Command{
@@ -59,5 +60,5 @@ func init() {
 }
 
 func configDisplayPath() string {
-	return cmp.Or(configPath, filepath).Join(dataDir, cuex.InstanceFilename)
+	return cmp.Or(configPath, filepath.Join(dataDir, cuex.InstanceFilename))
 }
