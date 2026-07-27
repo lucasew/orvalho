@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
 	"errors"
 	"io/fs"
+	"os"
+	"path/filepath"
+	"testing"
 )
 
 func TestGenerateUnique(t *testing.T) {
@@ -199,9 +198,8 @@ func TestLoadMissing(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
-	if !strings.Contains(err.Error(), "read key file") && !errors.Is(err, fs.ErrNotExist) {
-		// wrapped path is fine; just ensure we got an error
-		t.Logf("got expected load error: %v", err)
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("want fs.ErrNotExist, got %v", err)
 	}
 }
 

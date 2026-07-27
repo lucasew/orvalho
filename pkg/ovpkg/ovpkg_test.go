@@ -137,9 +137,9 @@ func TestWriteDir_BadManifest(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
-	if !strings.Contains(err.Error(), "validate") && !strings.Contains(err.Error(), "cuex") {
-		// still ok if raw cue error
-		t.Logf("bad manifest err: %v", err)
+	// Validation failures surface as cuex-wrapped errors (message still mentions validate/cuex).
+	if err.Error() == "" {
+		t.Fatal("empty error from bad manifest")
 	}
 }
 

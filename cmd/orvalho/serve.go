@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -21,7 +22,7 @@ import (
 )
 
 var (
-	serveListen  string
+	serveListen   string
 	serveVarFlags []string
 	serveEnvFile  string
 )
@@ -115,7 +116,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	srv := &http.Server{
@@ -138,12 +139,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
+		shutErr := srv.Shutdown(shutdownCtx)
 		err := <-errCh
-		if err == http.ErrServerClosed {
-			return nil
+		if err == nil || err == http.ErrServerClosed {
+			return shutErr
+		}
+		if shutErr != nil {
+			return errors.Join(err, shutErr)
 		}
 		return err
 	case err := <-errCh:
@@ -240,7 +244,7 @@ func collectServeRuntimeEnv(varFlags []string, envFile string) (map[string]strin
 	for _, flag := range varFlags {
 		k, v, ok := strings.Cut(flag, "=")
 		if !ok || k == "" {
-			return nil, fmt.Errorf("invalid --var %q (want NAME=value)", flag)
+			return nil, fmt.Errorf("%w: %q", ErrInvalidVarFlag, flag)
 		}
 		out[k] = v
 	}
@@ -267,7 +271,7 @@ func parseEnvFile(path string) (map[string]string, error) {
 		}
 		k, v, ok := strings.Cut(line, "=")
 		if !ok {
-			return nil, fmt.Errorf("env-file %s:%d: want KEY=value", path, lineNo)
+			return nil, fmt.Errorf("%w: %s:%d", ErrEnvFileFormat, path, lineNo)
 		}
 		k = strings.TrimSpace(k)
 		v = strings.TrimSpace(v)
@@ -277,7 +281,7 @@ func parseEnvFile(path string) (map[string]string, error) {
 			}
 		}
 		if k == "" {
-			return nil, fmt.Errorf("env-file %s:%d: empty key", path, lineNo)
+			return nil, fmt.Errorf("%w: %s:%d", ErrEnvFileEmptyKey, path, lineNo)
 		}
 		out[k] = v
 	}

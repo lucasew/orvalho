@@ -13,12 +13,12 @@ import (
 // Unsupported types fail (never-allocate).
 func materializeAgentBindings(pkg *ovpkg.Package, agent *ovpkg.Agent) (map[string]workers.Binding, error) {
 	if agent == nil {
-		return nil, fmt.Errorf("serve: nil agent")
+		return nil, ErrNilAgent
 	}
 	out := make(map[string]workers.Binding, len(agent.Bindings))
 	for name, spec := range agent.Bindings {
 		if _, ok := agent.Env[name]; ok {
-			return nil, fmt.Errorf("serve: env name %q used as both string and binding", name)
+			return nil, fmt.Errorf("%w: %q", ErrEnvNameClash, name)
 		}
 		b, err := materializeSpec(pkg, name, spec)
 		if err != nil {
@@ -34,14 +34,14 @@ func materializeSpec(pkg *ovpkg.Package, name string, spec ovpkg.BindingSpec) (w
 	case "assets":
 		return materializeAssets(pkg, name, spec.Value)
 	default:
-		return nil, fmt.Errorf("unsupported binding type %q on %s (available: assets)", spec.Type, name)
+		return nil, fmt.Errorf("%w %q on %s (available: assets)", ErrUnsupportedBind, spec.Type, name)
 	}
 }
 
 func materializeAssets(pkg *ovpkg.Package, name string, v cue.Value) (workers.Binding, error) {
 	rootV := v.LookupPath(cue.ParsePath("root"))
 	if !rootV.Exists() {
-		return nil, fmt.Errorf("assets binding %q: missing root", name)
+		return nil, fmt.Errorf("%w: %q", ErrAssetsMissingRoot, name)
 	}
 	root, err := rootV.String()
 	if err != nil {

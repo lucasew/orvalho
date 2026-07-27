@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -57,10 +58,24 @@ var versionCmd = &cobra.Command{
 	},
 }
 
+// CLI sentinel errors (Err* names so errors.Is / error tables stay consistent).
+var (
+	ErrDataDirRequired   = errors.New("--data-dir is required")
+	ErrNilAgent          = errors.New("serve: nil agent")
+	ErrManagerSkeleton   = errors.New("no manager subcommand yet (skeleton)")
+	ErrWorkerSkeleton    = errors.New("no worker subcommand yet (skeleton)")
+	ErrEnvNameClash      = errors.New("serve: env name used as both string and binding")
+	ErrUnsupportedBind   = errors.New("unsupported binding type")
+	ErrAssetsMissingRoot = errors.New("assets binding missing root")
+	ErrInvalidVarFlag    = errors.New("invalid --var (want NAME=value)")
+	ErrEnvFileFormat     = errors.New("env-file: want KEY=value")
+	ErrEnvFileEmptyKey   = errors.New("env-file: empty key")
+)
+
 // requireDataDir returns an error if --data-dir was not set.
 func requireDataDir() error {
 	if dataDir == "" {
-		return fmt.Errorf("--data-dir is required")
+		return ErrDataDirRequired
 	}
 	return nil
 }

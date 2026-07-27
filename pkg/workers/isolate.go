@@ -75,16 +75,8 @@ func (iso *Isolate) Tick(ctx context.Context) (bool, error) {
 	iso.activeCtx = ctx
 	defer func() { iso.activeCtx = nil }()
 
-	iso.vm.ClearInterrupt()
-	stopWatch := make(chan struct{})
-	defer close(stopWatch)
-	go func() {
-		select {
-		case <-ctx.Done():
-			iso.vm.Interrupt(ctx.Err())
-		case <-stopWatch:
-		}
-	}()
+	stopWatch := iso.watchInterrupt(ctx)
+	defer stopWatch()
 
 	if !iso.initialized {
 		iso.initialized = true
@@ -183,6 +175,22 @@ func (iso *Isolate) scheduleFromJS(call goja.FunctionCall, repeating bool) goja.
 
 	id := iso.timers.schedule(fn, args, delay, interval, iso.now())
 	return iso.vm.ToValue(id)
+}
+
+// watchInterrupt clears any prior VM interrupt and starts a goroutine that
+// interrupts the VM when ctx is done. Call the returned stop func (typically
+// via defer) to end the watcher.
+func (iso *Isolate) watchInterrupt(ctx context.Context) (stop func()) {
+	iso.vm.ClearInterrupt()
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			iso.vm.Interrupt(ctx.Err())
+		case <-done:
+		}
+	}()
+	return func() { close(done) }
 }
 
 func mapJSError(ctx context.Context, err error) error {

@@ -45,13 +45,13 @@ func DeriveMeshPrefix(meshContext string) netip.Prefix {
 // producing a device /64.
 func DevicePrefix(mesh netip.Prefix, deviceID uint16) (netip.Prefix, error) {
 	if !mesh.IsValid() || !mesh.Addr().Is6() {
-		return netip.Prefix{}, fmt.Errorf("ula: mesh prefix must be IPv6")
+		return netip.Prefix{}, ErrMeshMustIPv6
 	}
 	if mesh.Bits() != 48 {
-		return netip.Prefix{}, fmt.Errorf("ula: mesh prefix must be /48, got /%d", mesh.Bits())
+		return netip.Prefix{}, fmt.Errorf("%w: mesh /48 required, got /%d", ErrMeshMustIPv6, mesh.Bits())
 	}
 	if !isULA(mesh.Addr()) {
-		return netip.Prefix{}, fmt.Errorf("ula: mesh prefix %s is not ULA (fd00::/8)", mesh)
+		return netip.Prefix{}, fmt.Errorf("%w: mesh prefix %s is not ULA (fd00::/8)", ErrMeshMustIPv6, mesh)
 	}
 	b := mesh.Addr().As16()
 	// Clear host bits past /48 before writing subnet.
@@ -66,10 +66,10 @@ func DevicePrefix(mesh netip.Prefix, deviceID uint16) (netip.Prefix, error) {
 // HostAddress returns the /128 for a given interface ID under a device /64.
 func HostAddress(device netip.Prefix, iid uint64) (netip.Addr, error) {
 	if !device.IsValid() || !device.Addr().Is6() {
-		return netip.Addr{}, fmt.Errorf("ula: device prefix must be IPv6")
+		return netip.Addr{}, ErrDeviceMustIPv6
 	}
 	if device.Bits() != 64 {
-		return netip.Addr{}, fmt.Errorf("ula: device prefix must be /64, got /%d", device.Bits())
+		return netip.Addr{}, fmt.Errorf("%w: /64 required, got /%d", ErrDeviceMustIPv6, device.Bits())
 	}
 	b := device.Addr().As16()
 	// Zero interface id then write iid.
@@ -89,7 +89,7 @@ func DeviceHostAddress(device netip.Prefix) (netip.Addr, error) {
 // iid must be >= MinActorIID.
 func ActorAddress(device netip.Prefix, iid uint64) (netip.Addr, error) {
 	if iid < MinActorIID {
-		return netip.Addr{}, fmt.Errorf("ula: actor interface id %d is reserved (min %d)", iid, MinActorIID)
+		return netip.Addr{}, fmt.Errorf("%w: actor interface id %d (min %d)", ErrReservedIID, iid, MinActorIID)
 	}
 	return HostAddress(device, iid)
 }
@@ -97,7 +97,7 @@ func ActorAddress(device netip.Prefix, iid uint64) (netip.Addr, error) {
 // InterfaceID extracts the 64-bit interface identifier from an IPv6 address.
 func InterfaceID(addr netip.Addr) (uint64, error) {
 	if !addr.IsValid() || !addr.Is6() {
-		return 0, fmt.Errorf("ula: need IPv6 address")
+		return 0, ErrNeedIPv6
 	}
 	b := addr.As16()
 	return binary.BigEndian.Uint64(b[8:]), nil
@@ -106,10 +106,10 @@ func InterfaceID(addr netip.Addr) (uint64, error) {
 // PrefixOf returns the /n containing addr (addr must be IPv6).
 func PrefixOf(addr netip.Addr, bits int) (netip.Prefix, error) {
 	if !addr.IsValid() || !addr.Is6() {
-		return netip.Prefix{}, fmt.Errorf("ula: need IPv6 address")
+		return netip.Prefix{}, ErrNeedIPv6
 	}
 	if bits < 0 || bits > 128 {
-		return netip.Prefix{}, fmt.Errorf("ula: invalid prefix length %d", bits)
+		return netip.Prefix{}, fmt.Errorf("%w: invalid prefix length %d", ErrNeedIPv6, bits)
 	}
 	p := netip.PrefixFrom(addr, bits)
 	return p.Masked(), nil

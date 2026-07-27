@@ -3,6 +3,7 @@ package bundle
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,9 @@ import (
 	"regexp"
 	"strings"
 )
+
+// ErrBundleOptions means PackageDir or Entry was empty.
+var ErrBundleOptions = errors.New("bundle: BundleEntry requires PackageDir and Entry")
 
 //go:embed stubs/*
 var stubFS embed.FS
@@ -29,7 +33,7 @@ type BundleOptions struct {
 // Stubs cloudflare:workers and common node:* imports used by Astro/CF builds.
 func BundleEntry(opts BundleOptions) (string, error) {
 	if opts.PackageDir == "" || opts.Entry == "" {
-		return "", fmt.Errorf("bundle: BundleEntry requires PackageDir and Entry")
+		return "", ErrBundleOptions
 	}
 	pkgDir, err := filepath.Abs(opts.PackageDir)
 	if err != nil {

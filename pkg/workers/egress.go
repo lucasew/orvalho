@@ -128,13 +128,13 @@ func (e EgressList) CheckURL(rawURL string) error {
 	}
 	scheme := strings.ToLower(u.Scheme)
 	if scheme != "http" && scheme != "https" {
-		return fmt.Errorf("egress denied: scheme %q not allowed", u.Scheme)
+		return fmt.Errorf("%w: scheme %q not allowed", ErrEgressDenied, u.Scheme)
 	}
 	if u.Hostname() == "" {
-		return fmt.Errorf("egress denied: missing host")
+		return ErrEgressMissingHost
 	}
 	if !e.AllowsURL(u) {
-		return fmt.Errorf("egress denied: host %q not in allowlist", u.Hostname())
+		return fmt.Errorf("%w: host %q not in allowlist", ErrEgressDenied, u.Hostname())
 	}
 	return nil
 }

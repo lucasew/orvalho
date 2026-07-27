@@ -1,6 +1,7 @@
 package workers
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -52,7 +53,7 @@ func TestFetchMissingDefault(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "default") {
+	if !errors.Is(err, ErrMissingDefaultExport) {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -68,7 +69,7 @@ export default {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "boom") {
+	if !errors.Is(err, ErrFetchRejected) {
 		t.Fatalf("err=%v", err)
 	}
 }

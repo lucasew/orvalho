@@ -1,8 +1,22 @@
 package ula
 
 import (
+	"errors"
 	"fmt"
 	"sync"
+)
+
+var (
+	ErrMeshRequired   = errors.New("ula: mesh context is required")
+	ErrActorRequired  = errors.New("ula: actor identity is required")
+	ErrNeedIPv6       = errors.New("ula: need IPv6 address")
+	ErrMeshMustIPv6   = errors.New("ula: mesh prefix must be IPv6")
+	ErrDeviceMustIPv6 = errors.New("ula: device prefix must be IPv6")
+	ErrNoFreeIID      = errors.New("ula: no free interface ids")
+	ErrReservedIID    = errors.New("ula: cannot record reserved interface id")
+	ErrActorHasIID    = errors.New("ula: actor already has interface id")
+	ErrIIDInUse       = errors.New("ula: interface id already used")
+	ErrMinIIDBelow    = errors.New("ula: min interface id is below MinActorIID")
 )
 
 // AllocationKey identifies a logical actor within a mesh device.
@@ -16,10 +30,10 @@ type AllocationKey struct {
 
 func (k AllocationKey) validate() error {
 	if k.Mesh == "" {
-		return fmt.Errorf("ula: mesh context is required")
+		return ErrMeshRequired
 	}
 	if k.Actor == "" {
-		return fmt.Errorf("ula: actor identity is required")
+		return ErrActorRequired
 	}
 	return nil
 }
@@ -87,7 +101,7 @@ func (s *MemoryStore) ClaimNext(key AllocationKey, min uint64) (uint64, error) {
 		return 0, err
 	}
 	if min < MinActorIID {
-		return 0, fmt.Errorf("ula: min interface id %d is below MinActorIID (%d)", min, MinActorIID)
+		return 0, fmt.Errorf("%w: %d < %d", ErrMinIIDBelow, min, MinActorIID)
 	}
 
 	s.mu.Lock()
@@ -110,7 +124,7 @@ func (s *MemoryStore) ClaimNext(key AllocationKey, min uint64) (uint64, error) {
 			break
 		}
 		if next == ^uint64(0) {
-			return 0, fmt.Errorf("ula: no free interface ids under mesh %q device %d", key.Mesh, key.Device)
+			return 0, fmt.Errorf("%w under mesh %q device %d", ErrNoFreeIID, key.Mesh, key.Device)
 		}
 		next++
 	}
@@ -126,7 +140,7 @@ func (s *MemoryStore) Put(key AllocationKey, iid uint64) error {
 		return err
 	}
 	if iid < MinActorIID {
-		return fmt.Errorf("ula: cannot record reserved interface id %d", iid)
+		return fmt.Errorf("%w %d", ErrReservedIID, iid)
 	}
 
 	s.mu.Lock()
@@ -134,7 +148,7 @@ func (s *MemoryStore) Put(key AllocationKey, iid uint64) error {
 
 	if existing, ok := s.byActor[key]; ok {
 		if existing != iid {
-			return fmt.Errorf("ula: actor %q already has interface id %d", key.Actor, existing)
+			return fmt.Errorf("%w: actor %q has %d", ErrActorHasIID, key.Actor, existing)
 		}
 		return nil // idempotent
 	}
@@ -146,7 +160,7 @@ func (s *MemoryStore) Put(key AllocationKey, iid uint64) error {
 		s.byIID[scope] = iids
 	}
 	if owner, taken := iids[iid]; taken {
-		return fmt.Errorf("ula: interface id %d already used by actor %q on device %d", iid, owner, key.Device)
+		return fmt.Errorf("%w: %d by actor %q on device %d", ErrIIDInUse, iid, owner, key.Device)
 	}
 
 	s.byActor[key] = iid
@@ -157,7 +171,7 @@ func (s *MemoryStore) Put(key AllocationKey, iid uint64) error {
 // ListIIDs implements Store.
 func (s *MemoryStore) ListIIDs(mesh string, device uint16) ([]uint64, error) {
 	if mesh == "" {
-		return nil, fmt.Errorf("ula: mesh context is required")
+		return nil, ErrMeshRequired
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

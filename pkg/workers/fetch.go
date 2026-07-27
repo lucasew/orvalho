@@ -63,7 +63,11 @@ func (iso *Isolate) fetchLocked(ctx context.Context, req HTTPRequest) (HTTPRespo
 	}
 	result, err := fetchFn(goja.Undefined(), iso.vm.ToValue(reqObj), env, exCtx)
 	if err != nil {
-		return HTTPResponse{}, mapJSError(ctx, err)
+		err = mapJSError(ctx, err)
+		if ctx.Err() != nil {
+			return HTTPResponse{}, err
+		}
+		return HTTPResponse{}, fmt.Errorf("%w: %v", ErrFetchRejected, err)
 	}
 
 	result, err = iso.awaitPromiseLocked(ctx, result, defaultFetchWait)
@@ -118,16 +122,8 @@ func (iso *Isolate) ensureInitializedLocked(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	iso.vm.ClearInterrupt()
-	stopWatch := make(chan struct{})
-	defer close(stopWatch)
-	go func() {
-		select {
-		case <-ctx.Done():
-			iso.vm.Interrupt(ctx.Err())
-		case <-stopWatch:
-		}
-	}()
+	stopWatch := iso.watchInterrupt(ctx)
+	defer stopWatch()
 
 	iso.initialized = true
 	_, err := iso.vm.RunString(iso.script)
@@ -142,13 +138,13 @@ func (iso *Isolate) ensureInitializedLocked(ctx context.Context) error {
 func (iso *Isolate) lookupDefaultFetchLocked() (goja.Callable, error) {
 	def := iso.vm.Get("default")
 	if def == nil || goja.IsUndefined(def) || goja.IsNull(def) {
-		return nil, fmt.Errorf("workers: missing global default export (expected default.fetch)")
+		return nil, ErrMissingDefaultExport
 	}
 	obj := def.ToObject(iso.vm)
 	fetchVal := obj.Get("fetch")
 	fn, ok := goja.AssertFunction(fetchVal)
 	if !ok {
-		return nil, fmt.Errorf("workers: default.fetch is not a function")
+		return nil, ErrDefaultFetchNotFunc
 	}
 	return fn, nil
 }
@@ -172,15 +168,15 @@ func (iso *Isolate) awaitPromiseLocked(ctx context.Context, v goja.Value, maxWai
 				// Prefer Exception stack when guest rejects with an Error.
 				if obj, ok := reason.(*goja.Object); ok {
 					if stack := obj.Get("stack"); stack != nil && !goja.IsUndefined(stack) {
-						return nil, fmt.Errorf("workers: fetch rejected: %s\n%s", reason.String(), stack.String())
+						return nil, fmt.Errorf("%w: %s\n%s", ErrFetchRejected, reason.String(), stack.String())
 					}
 				}
-				return nil, fmt.Errorf("workers: fetch rejected: %s", reason.String())
+				return nil, fmt.Errorf("%w: %s", ErrFetchRejected, reason.String())
 			}
-			return nil, fmt.Errorf("workers: fetch rejected")
+			return nil, ErrFetchRejected
 		case goja.PromiseStatePending:
 			if !iso.now().Before(deadline) {
-				return nil, fmt.Errorf("workers: fetch promise timed out after %s", maxWait)
+				return nil, fmt.Errorf("%w after %s", ErrFetchTimeout, maxWait)
 			}
 			// Advance host-driven timers; also re-enter the VM so microtasks can run.
 			if err := iso.drainOneTickLocked(ctx); err != nil {
@@ -205,16 +201,8 @@ func (iso *Isolate) drainOneTickLocked(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	iso.vm.ClearInterrupt()
-	stopWatch := make(chan struct{})
-	defer close(stopWatch)
-	go func() {
-		select {
-		case <-ctx.Done():
-			iso.vm.Interrupt(ctx.Err())
-		case <-stopWatch:
-		}
-	}()
+	stopWatch := iso.watchInterrupt(ctx)
+	defer stopWatch()
 
 	now := iso.now()
 	executed := 0

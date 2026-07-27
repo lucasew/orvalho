@@ -31,7 +31,7 @@ func HTTPFetch(egress EgressList, client *http.Client, timeout time.Duration) Fe
 			Timeout: timeout,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 10 {
-					return fmt.Errorf("stopped after 10 redirects")
+					return ErrTooManyRedirects
 				}
 				if err := egress.CheckURL(req.URL.String()); err != nil {
 					return err
@@ -86,7 +86,10 @@ func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 
 	ctx := iso.activeCtx
 	if ctx == nil {
-		ctx = context.Background()
+		// Outbound fetch only runs while a host Fetch/Tick holds the isolate.
+		logGuestFetch(method, reqURL, 0, 0, start, ErrFetchRequiresURL)
+		_ = reject(iso.vm.NewTypeError("fetch outside host request context"))
+		return promise
 	}
 	timeout := iso.opts.FetchTimeout
 	if timeout <= 0 {
@@ -133,7 +136,7 @@ func (iso *Isolate) jsFetch(call goja.FunctionCall) goja.Value {
 		return promise
 	}
 	if len(raw) > MaxOutboundBody {
-		logGuestFetch(method, finalURL, resp.StatusCode, len(raw), start, fmt.Errorf("response body too large"))
+		logGuestFetch(method, finalURL, resp.StatusCode, len(raw), start, ErrResponseBodyTooLarge)
 		_ = reject(iso.vm.NewTypeError("fetch response body too large"))
 		return promise
 	}
@@ -167,7 +170,7 @@ func logGuestFetch(method, url string, status, bodyBytes int, start time.Time, e
 
 func (iso *Isolate) parseFetchArgs(call goja.FunctionCall) (url, method string, headers map[string]string, body string, err error) {
 	if len(call.Arguments) < 1 {
-		return "", "", nil, "", fmt.Errorf("fetch requires a URL or Request")
+		return "", "", nil, "", ErrFetchRequiresURL
 	}
 	method = http.MethodGet
 	headers = make(map[string]string)
@@ -209,7 +212,7 @@ func (iso *Isolate) parseFetchArgs(call goja.FunctionCall) (url, method string, 
 	}
 
 	if url == "" {
-		return "", "", nil, "", fmt.Errorf("fetch URL is empty")
+		return "", "", nil, "", ErrFetchURLEmpty
 	}
 	if method == "" {
 		method = http.MethodGet
@@ -219,8 +222,8 @@ func (iso *Isolate) parseFetchArgs(call goja.FunctionCall) (url, method string, 
 
 func (iso *Isolate) newResponseFromHTTPLocked(status int, statusLine string, hdr http.Header, body string) *goja.Object {
 	statusText := ""
-	if parts := strings.SplitN(statusLine, " ", 2); len(parts) == 2 {
-		statusText = parts[1]
+	if _, text, ok := strings.Cut(statusLine, " "); ok {
+		statusText = text
 	}
 	h := newHeaderBag()
 	for k, vals := range hdr {

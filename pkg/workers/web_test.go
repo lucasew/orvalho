@@ -1,7 +1,7 @@
 package workers
 
 import (
-	"strings"
+	"errors"
 	"testing"
 
 	"github.com/dop251/goja"
@@ -262,7 +262,7 @@ func TestReadResponseRejectsNonResponse(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for plain object")
 	}
-	if !strings.Contains(err.Error(), "Response") {
+	if !errors.Is(err, ErrNotAResponse) {
 		t.Fatalf("unexpected err: %v", err)
 	}
 }

@@ -26,6 +26,18 @@ const (
 	DefaultKeyFile = "manager.key"
 )
 
+// Sentinel errors for identity key material.
+var (
+	ErrNoPEMBlock        = errors.New("no PEM block found")
+	ErrMultiplePEMBlocks = errors.New("multiple PEM blocks found")
+	ErrEmptyPath         = errors.New("path is empty")
+	ErrKeyFileExists     = errors.New("refusing to overwrite existing key file")
+	ErrBadSeedLength     = errors.New("seed length wrong")
+	ErrUnexpectedPEMType = errors.New("unexpected PEM type")
+	ErrWrongKeyType      = errors.New("private key is not ed25519")
+	ErrBadKeyLength      = errors.New("ed25519 private key length wrong")
+)
+
 // Manager is a manager authority keypair.
 type Manager struct {
 	privateKey ed25519.PrivateKey
@@ -44,7 +56,7 @@ func Generate() (*Manager, error) {
 // Useful for deterministic tests; production callers should use Generate.
 func FromSeed(seed []byte) (*Manager, error) {
 	if len(seed) != ed25519.SeedSize {
-		return nil, fmt.Errorf("seed length %d, want %d", len(seed), ed25519.SeedSize)
+		return nil, fmt.Errorf("%w: %d, want %d", ErrBadSeedLength, len(seed), ed25519.SeedSize)
 	}
 	return &Manager{privateKey: ed25519.NewKeyFromSeed(seed)}, nil
 }
@@ -89,13 +101,13 @@ func (m *Manager) MarshalPrivatePEM() ([]byte, error) {
 func ParsePrivatePEM(pemBytes []byte) (*Manager, error) {
 	block, rest := pem.Decode(pemBytes)
 	if block == nil {
-		return nil, errors.New("no PEM block found")
+		return nil, ErrNoPEMBlock
 	}
 	if extra, _ := pem.Decode(rest); extra != nil {
-		return nil, errors.New("multiple PEM blocks found")
+		return nil, ErrMultiplePEMBlocks
 	}
 	if block.Type != PEMTypePrivate {
-		return nil, fmt.Errorf("unexpected PEM type %q, want %q", block.Type, PEMTypePrivate)
+		return nil, fmt.Errorf("%w %q, want %q", ErrUnexpectedPEMType, block.Type, PEMTypePrivate)
 	}
 	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
@@ -103,10 +115,10 @@ func ParsePrivatePEM(pemBytes []byte) (*Manager, error) {
 	}
 	priv, ok := key.(ed25519.PrivateKey)
 	if !ok {
-		return nil, fmt.Errorf("private key is %T, want ed25519.PrivateKey", key)
+		return nil, fmt.Errorf("%w: %T", ErrWrongKeyType, key)
 	}
 	if len(priv) != ed25519.PrivateKeySize {
-		return nil, fmt.Errorf("ed25519 private key length %d, want %d", len(priv), ed25519.PrivateKeySize)
+		return nil, fmt.Errorf("%w: %d, want %d", ErrBadKeyLength, len(priv), ed25519.PrivateKeySize)
 	}
 	return &Manager{privateKey: priv}, nil
 }
@@ -116,11 +128,11 @@ func ParsePrivatePEM(pemBytes []byte) (*Manager, error) {
 // Refuses to overwrite an existing file unless overwrite is true.
 func (m *Manager) Save(path string, overwrite bool) error {
 	if path == "" {
-		return errors.New("path is empty")
+		return ErrEmptyPath
 	}
 	if !overwrite {
 		if _, err := os.Stat(path); err == nil {
-			return fmt.Errorf("refusing to overwrite existing key file %q", path)
+			return fmt.Errorf("%w %q", ErrKeyFileExists, path)
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("stat key file: %w", err)
 		}
@@ -177,7 +189,7 @@ func (m *Manager) Save(path string, overwrite bool) error {
 // Load reads a manager identity from a PKCS#8 PEM file.
 func Load(path string) (*Manager, error) {
 	if path == "" {
-		return nil, errors.New("path is empty")
+		return nil, ErrEmptyPath
 	}
 	pemBytes, err := os.ReadFile(path)
 	if err != nil {

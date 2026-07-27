@@ -24,6 +24,14 @@ import (
 // InstanceFilename is the fixed name for host and package CUE instances.
 const InstanceFilename = "orvalho.cue"
 
+// Sentinel errors for cuex load/validate.
+var (
+	ErrMissingAgents   = errors.New("cuex: validate: missing agents")
+	ErrEmptyAgents     = errors.New("cuex: validate: agents must declare at least one agent")
+	ErrDataDirRequired = errors.New("cuex: data dir is required")
+	ErrNilConfig       = errors.New("cuex: nil config")
+)
+
 //go:embed prelude_common.cue prelude_host.cue prelude_package.cue
 var preludeFS embed.FS
 
@@ -73,7 +81,7 @@ func LoadPackageWithEnv(instance []byte, filename string, env map[string]string)
 func requireAtLeastOneAgent(v cue.Value) error {
 	agents := v.LookupPath(cue.ParsePath("agents"))
 	if !agents.Exists() {
-		return fmt.Errorf("cuex: validate: missing agents")
+		return ErrMissingAgents
 	}
 	iter, err := agents.Fields()
 	if err != nil {
@@ -84,7 +92,7 @@ func requireAtLeastOneAgent(v cue.Value) error {
 		n++
 	}
 	if n == 0 {
-		return fmt.Errorf("cuex: validate: agents must declare at least one agent")
+		return ErrEmptyAgents
 	}
 	return nil
 }
@@ -141,7 +149,7 @@ func LoadHostFile(path string) (*Config, error) {
 // LoadHostDataDir loads orvalho.cue from dataDir (must be provided by caller).
 func LoadHostDataDir(dataDir string) (*Config, error) {
 	if dataDir == "" {
-		return nil, fmt.Errorf("cuex: data dir is required")
+		return nil, ErrDataDirRequired
 	}
 	return LoadHostFile(filepath.Join(dataDir, InstanceFilename))
 }
@@ -163,7 +171,7 @@ func (c *Config) UnifyOverlay(overlay string, filename string) (*Config, error) 
 
 func (c *Config) unifyOverlayRaw(overlay string, filename string) (*Config, error) {
 	if c == nil {
-		return nil, fmt.Errorf("cuex: nil config")
+		return nil, ErrNilConfig
 	}
 	if overlay == "" {
 		return c, nil
@@ -233,7 +241,8 @@ func formatErr(err error) error {
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("%s", cueerrors.Details(err, nil))
+	// Preserve the original for errors.Is/As; Details is for the message only.
+	return fmt.Errorf("%v: %w", cueerrors.Details(err, nil), err)
 }
 
 // LookupString returns a string field at path, or ("", false) if absent.

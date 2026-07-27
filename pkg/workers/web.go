@@ -497,7 +497,7 @@ func (iso *Isolate) makeRequestLocked(req HTTPRequest) (*goja.Object, error) {
 	}
 	ctor, ok := goja.AssertConstructor(iso.vm.Get("Request"))
 	if !ok {
-		return nil, fmt.Errorf("Request constructor not installed")
+		return nil, ErrRequestCtorMissing
 	}
 	// Construct with URL only, then overwrite registry entry with full state.
 	obj, err := ctor(nil, iso.vm.ToValue(req.URL))
@@ -517,12 +517,12 @@ func (iso *Isolate) ReadResponse(v goja.Value) (HTTPResponse, error) {
 
 func (iso *Isolate) readResponseLocked(v goja.Value) (HTTPResponse, error) {
 	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
-		return HTTPResponse{}, fmt.Errorf("response is null or undefined")
+		return HTTPResponse{}, ErrResponseNull
 	}
 	obj := v.ToObject(iso.vm)
 	r, ok := iso.responseReg[obj]
 	if !ok {
-		return HTTPResponse{}, fmt.Errorf("value is not a Response")
+		return HTTPResponse{}, ErrNotAResponse
 	}
 	return HTTPResponse{
 		Status:     r.status,

@@ -36,7 +36,7 @@ func (iso *Isolate) buildEnvLocked() (*goja.Object, error) {
 
 	for k, v := range iso.opts.Env {
 		if k == "" {
-			return nil, fmt.Errorf("workers: empty env string key")
+			return nil, ErrEmptyEnvKey
 		}
 		if err := env.Set(k, v); err != nil {
 			return nil, err
@@ -46,10 +46,10 @@ func (iso *Isolate) buildEnvLocked() (*goja.Object, error) {
 
 	for name, b := range iso.opts.Bindings {
 		if name == "" {
-			return nil, fmt.Errorf("workers: empty binding name")
+			return nil, ErrEmptyBindingName
 		}
 		if prev, ok := seen[name]; ok {
-			return nil, fmt.Errorf("workers: env name %q clashes (%s vs binding)", name, prev)
+			return nil, fmt.Errorf("%w: %q (%s vs binding)", ErrEnvNameClash, name, prev)
 		}
 		obj, err := b.Materialize(iso)
 		if err != nil {
@@ -92,7 +92,7 @@ func NewAssetBinding(fsys fs.FS, root string, paths ...string) *AssetBinding {
 
 func (a *AssetBinding) Materialize(iso *Isolate) (*goja.Object, error) {
 	if a == nil || a.FS == nil {
-		return nil, fmt.Errorf("assets: missing FS")
+		return nil, ErrAssetsMissingFS
 	}
 	root := strings.Trim(strings.ReplaceAll(a.Root, "\\", "/"), "/")
 	allow := map[string]struct{}{}

@@ -42,6 +42,16 @@ var (
 	ErrNotFound = errors.New("ovpkg: file not found")
 	// ErrDuplicatePath means the same path appears more than once when writing.
 	ErrDuplicatePath = errors.New("ovpkg: duplicate path")
+	// ErrNotLoaded means Config/agents helpers ran before the package was opened.
+	ErrNotLoaded = errors.New("ovpkg: package not loaded")
+	// ErrMissingAgents means the validated config has no agents field.
+	ErrMissingAgents = errors.New("ovpkg: missing agents")
+	// ErrEmptyAgents means agents exists but has zero entries.
+	ErrEmptyAgents = errors.New("ovpkg: agents is empty (need exactly one)")
+	// ErrNotDirectory means ReadDir was given a non-directory path.
+	ErrNotDirectory = errors.New("ovpkg: path is not a directory")
+	// ErrMultipleAgents means serve-style APIs require exactly one agent.
+	ErrMultipleAgents = errors.New("ovpkg: multiple agents (serve requires exactly one; supervisor is backlog)")
 )
 
 // Package is an in-memory Orvalho zip package: CUE manifest plus payload files.
@@ -341,7 +351,7 @@ func ReadDir(dir string) (manifest []byte, files map[string][]byte, err error) {
 		return nil, nil, err
 	}
 	if !st.IsDir() {
-		return nil, nil, fmt.Errorf("ovpkg: %s is not a directory", dir)
+		return nil, nil, fmt.Errorf("%w: %s", ErrNotDirectory, dir)
 	}
 
 	files = make(map[string][]byte)
@@ -510,11 +520,11 @@ type BindingSpec struct {
 // (multi-agent supervisor is backlog).
 func (p *Package) SingleAgent() (*Agent, error) {
 	if p == nil || p.Config == nil {
-		return nil, fmt.Errorf("ovpkg: package not loaded")
+		return nil, ErrNotLoaded
 	}
 	agents := p.Value().LookupPath(cue.ParsePath("agents"))
 	if !agents.Exists() {
-		return nil, fmt.Errorf("ovpkg: missing agents")
+		return nil, ErrMissingAgents
 	}
 	iter, err := agents.Fields()
 	if err != nil {
@@ -527,11 +537,11 @@ func (p *Package) SingleAgent() (*Agent, error) {
 		values = append(values, iter.Value())
 	}
 	if len(names) == 0 {
-		return nil, fmt.Errorf("ovpkg: agents is empty (need exactly one)")
+		return nil, ErrEmptyAgents
 	}
 	if len(names) > 1 {
 		sort.Strings(names)
-		return nil, fmt.Errorf("ovpkg: multiple agents %v (serve requires exactly one; supervisor is backlog)", names)
+		return nil, fmt.Errorf("%w %v", ErrMultipleAgents, names)
 	}
 	return decodeAgent(names[0], values[0])
 }
@@ -603,7 +613,7 @@ func (p *Package) WithRuntimeEnv(env map[string]string) (*Package, error) {
 // Port returns the optional package port, or 0 if unset.
 func (p *Package) Port() (int, error) {
 	if p == nil || p.Config == nil {
-		return 0, fmt.Errorf("ovpkg: package not loaded")
+		return 0, ErrNotLoaded
 	}
 	// Prefer top-level port, then publish.port.
 	for _, path := range []string{"port", "publish.port"} {
@@ -624,7 +634,7 @@ func (p *Package) Port() (int, error) {
 // manifest. Missing egress yields a nil slice (deny-all for host fetch).
 func (p *Package) Egress() ([]string, error) {
 	if p == nil || p.Config == nil {
-		return nil, fmt.Errorf("ovpkg: package not loaded")
+		return nil, ErrNotLoaded
 	}
 	v := p.Value().LookupPath(cue.ParsePath("egress"))
 	if !v.Exists() {

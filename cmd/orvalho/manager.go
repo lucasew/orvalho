@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
@@ -13,6 +11,6 @@ var managerCmd = &cobra.Command{
 
 Skeleton: no daemon or deploy yet. Use global --data-dir for host state.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("no manager subcommand yet (skeleton)")
+		return ErrManagerSkeleton
 	},
 }

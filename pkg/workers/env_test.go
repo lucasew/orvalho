@@ -1,6 +1,7 @@
 package workers_test
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -80,7 +81,7 @@ func TestEnvNameClash(t *testing.T) {
 		},
 	})
 	_, err := iso.Fetch(t.Context(), workers.HTTPRequest{URL: "http://x/"})
-	if err == nil || !strings.Contains(err.Error(), "clash") {
+	if err == nil || !errors.Is(err, workers.ErrEnvNameClash) {
 		t.Fatalf("want clash error, got %v", err)
 	}
 }
