@@ -5,7 +5,7 @@ go 1.25
 require (
 	cuelang.org/go v0.14.1
 	filippo.io/age v1.3.1
-	github.com/btcsuite/btcd/btcutil v1.1.6
+	github.com/btcsuite/btcd/btcutil v1.2.0
 	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9
 	github.com/spf13/cobra v1.10.2
 	github.com/stellar/go v0.0.0-20251023205731-8cd5ab33bcdd
