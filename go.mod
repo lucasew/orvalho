@@ -1,16 +1,16 @@
 module github.com/lucasew/orvalho
 
-go 1.25
+go 1.25.0
 
 require (
 	cuelang.org/go v0.14.1
-	filippo.io/age v1.3.1
+	filippo.io/age v1.3.2
 	github.com/btcsuite/btcd/btcutil v1.1.6
 	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9
 	github.com/spf13/cobra v1.10.2
 	github.com/stellar/go v0.0.0-20251023205731-8cd5ab33bcdd
 	github.com/tyler-smith/go-bip39 v1.1.0
-	golang.org/x/crypto v0.46.0
+	golang.org/x/crypto v0.55.0
 )
 
 require (
@@ -26,8 +26,8 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/protocolbuffers/txtpbfmt v0.0.0-20250627152318-f293424e46b5 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
-	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
