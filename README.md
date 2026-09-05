@@ -13,6 +13,7 @@ Product vision and constraints: [`SPEC.md`](./SPEC.md).
 | [`pkg/ovpkg`](./pkg/ovpkg) | Zip packages with root **`orvalho.cue`** |
 | [`pkg/identity`](./pkg/identity) | Manager key material |
 | [`pkg/workers`](./pkg/workers) | Embeddable goja Workers host (core) |
+| [`pkg/hostobject`](./pkg/hostobject) | Guest-object recipes for a goja runtime (not WinterTC) |
 | [`pkg/workers/bundle`](./pkg/workers/bundle) | Optional esbuild + stubs for multi-file guests |
 | [`pkg/actor`](./pkg/actor) | Host-driven `Tick` step interface |
 | [`pkg/ula`](./pkg/ula) | ULA IPv6 actor address allocator |

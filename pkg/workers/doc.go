@@ -41,4 +41,11 @@
 // Outbound guest `fetch` exists only when [Options.Fetch] is set (e.g.
 // [HTTPFetch] with an allowlist). Guest env is built from Options.Env and
 // Options.Bindings.
+//
+// # Bindings
+//
+// Implement [Binding], or build a [hostobject.Object] and wrap it with [Bind]:
+//
+//	workers.Bind(hostobject.New().Set("ping", func() string { return "pong" }))
+//	workers.Bind(hostobject.New().Methods(myPtr)) // methods only; fields stay hidden
 package workers
