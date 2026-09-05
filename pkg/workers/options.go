@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"time"
+
+	"github.com/lucasew/orvalho/pkg/imports"
 )
 
 // Default resource caps. Documented for hosts and enforced in the isolate.
@@ -25,8 +27,8 @@ type FetchFunc func(ctx context.Context, req *http.Request) (*http.Response, err
 // Zero-valued fields receive the documented defaults in [New].
 //
 // Capability rule: what is not injected is not allowed. Outbound network,
-// bindings, and string env are all host-provided; the Workers kernel
-// (Request/Response/Headers, timers) is ambient.
+// bindings, string env, and import specifiers are all host-provided; the
+// Workers kernel (Request/Response/Headers, timers) is ambient.
 type Options struct {
 	// MaxPendingTimers is the hard cap on concurrent scheduled timers.
 	// Scheduling past this limit throws a JS TypeError from setTimeout /
@@ -54,7 +56,17 @@ type Options struct {
 
 	// Bindings are named host objects on guest env (assets drivers, later HAL).
 	// Materialized on each Fetch into the env object passed to default.fetch.
+	// They are not visible to require; add an Imports handler that
+	// returns a Binding to expose a specifier.
 	Bindings map[string]Binding
+
+	// Imports is the require / getBuiltinModule resolve chain. Handlers
+	// run in order on first require of a specifier; later requires hit
+	// the isolate cache. Use imports.Map for exact names, imports.Scheme
+	// for a lazy family (node:*, orvalho:*). Not claimed means not found.
+	// Guest JS MUST NOT reach host I/O except by requiring a specifier
+	// whose Binding implements that capability.
+	Imports []imports.Handler[Binding]
 }
 
 func (o Options) withDefaults() Options {
@@ -66,6 +78,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.FetchTimeout <= 0 {
 		o.FetchTimeout = DefaultFetchTimeout
+	}
+	if o.Imports != nil {
+		o.Imports = append([]imports.Handler[Binding](nil), o.Imports...)
 	}
 	return o
 }
