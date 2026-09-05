@@ -33,6 +33,9 @@ type Isolate struct {
 	// activeCtx is the context of the current host Fetch/Tick; outbound
 	// fetch inherits it for cancellation.
 	activeCtx context.Context
+
+	// moduleCache is the per-isolate require cache (specifier → exports).
+	moduleCache map[string]goja.Value
 }
 
 // Ensure Isolate implements actor.Actor.
@@ -52,6 +55,7 @@ func New(script string, opts Options) *Isolate {
 	iso.installWebTypes()
 	iso.installOutboundFetch()
 	iso.installHostPolyfills()
+	iso.installModules()
 	return iso
 }
 

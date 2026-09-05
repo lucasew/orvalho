@@ -24,4 +24,6 @@ var (
 	ErrEgressMissingHost    = errors.New("egress denied: missing host")
 	ErrBindNilIsolate       = errors.New("workers: bind needs isolate runtime")
 	ErrBindNilObject        = errors.New("workers: bind needs RuntimeObject")
+	ErrModuleNotFound       = errors.New("workers: module not found")
+	ErrModuleSpecifier      = errors.New("workers: invalid module specifier")
 )

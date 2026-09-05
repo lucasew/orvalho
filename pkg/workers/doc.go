@@ -47,4 +47,14 @@
 // Implement [Binding] for isolate-aware host objects (assets, later devices).
 // For a goja-only recipe, implement [RuntimeObject] (see hostobject.Object)
 // and pass it to [Bind]. workers does not import hostobject.
+//
+// # Imports
+//
+// [Options.Imports] is a [imports.Handler] chain for guest require and
+// getBuiltinModule. Handlers run on first require; the isolate caches the
+// result. [imports.Map] is exact names; [imports.Scheme] is a lazy family.
+// [NewScriptBinding] evaluates CommonJS that may only require specifiers
+// the chain resolves. Relative paths, bare names, and unclaimed specifiers
+// miss. Guest JS never sees host filesystem or network except through an
+// injected Binding.
 package workers
