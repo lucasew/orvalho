@@ -22,4 +22,6 @@ var (
 	ErrResponseBodyTooLarge = errors.New("response body too large")
 	ErrEgressDenied         = errors.New("egress denied")
 	ErrEgressMissingHost    = errors.New("egress denied: missing host")
+	ErrBindNilIsolate       = errors.New("workers: bind needs isolate runtime")
+	ErrBindNilObject        = errors.New("workers: bind needs RuntimeObject")
 )

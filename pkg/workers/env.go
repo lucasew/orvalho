@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"github.com/dop251/goja"
-
-	"github.com/lucasew/orvalho/pkg/hostobject"
 )
 
 // buildExecutionContextLocked builds the Workers executionContext (third arg to fetch).
@@ -105,9 +103,13 @@ func (a *AssetBinding) Materialize(iso *Isolate) (*goja.Object, error) {
 		}
 	}
 
-	return hostobject.New().Set("fetch", func(call goja.FunctionCall) goja.Value {
+	obj := iso.vm.NewObject()
+	if err := obj.Set("fetch", func(call goja.FunctionCall) goja.Value {
 		return iso.assetsFetch(call, a.FS, root, allow)
-	}).Build(iso.vm)
+	}); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 func (iso *Isolate) assetsFetch(call goja.FunctionCall, fsys fs.FS, root string, allow map[string]struct{}) goja.Value {

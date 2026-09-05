@@ -44,8 +44,7 @@
 //
 // # Bindings
 //
-// Implement [Binding], or build a [hostobject.Object] and wrap it with [Bind]:
-//
-//	workers.Bind(hostobject.New().Set("ping", func() string { return "pong" }))
-//	workers.Bind(hostobject.New().Methods(myPtr)) // methods only; fields stay hidden
+// Implement [Binding] for isolate-aware host objects (assets, later devices).
+// For a goja-only recipe, implement [RuntimeObject] (see hostobject.Object)
+// and pass it to [Bind]. workers does not import hostobject.
 package workers

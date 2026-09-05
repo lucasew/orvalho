@@ -1,25 +1,29 @@
 package workers
 
-import (
-	"github.com/dop251/goja"
+import "github.com/dop251/goja"
 
-	"github.com/lucasew/orvalho/pkg/hostobject"
-)
-
-// Bind adapts a [hostobject.Object] recipe into a [Binding] for this isolate.
-// The recipe is not global; Materialize builds a new guest object on this
-// isolate's runtime.
-func Bind(o *hostobject.Object) Binding {
-	return hostObjectBinding{o: o}
+// RuntimeObject builds a guest object on a goja runtime. hostobject.Object
+// satisfies this; workers does not import that package.
+type RuntimeObject interface {
+	Build(rt *goja.Runtime) (*goja.Object, error)
 }
 
-type hostObjectBinding struct {
-	o *hostobject.Object
+// Bind adapts a RuntimeObject into a Binding. Materialize calls Build on
+// this isolate's runtime. The recipe is not installed globally.
+func Bind(o RuntimeObject) Binding {
+	return runtimeBinding{o: o}
 }
 
-func (b hostObjectBinding) Materialize(iso *Isolate) (*goja.Object, error) {
-	if iso == nil {
-		return nil, hostobject.ErrNoRuntime
+type runtimeBinding struct {
+	o RuntimeObject
+}
+
+func (b runtimeBinding) Materialize(iso *Isolate) (*goja.Object, error) {
+	if iso == nil || iso.vm == nil {
+		return nil, ErrBindNilIsolate
+	}
+	if b.o == nil {
+		return nil, ErrBindNilObject
 	}
 	return b.o.Build(iso.vm)
 }
