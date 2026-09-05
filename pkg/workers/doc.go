@@ -52,9 +52,9 @@
 //
 // [Options.Imports] is a [imports.Handler] chain for guest require and
 // getBuiltinModule. Handlers run on first require; the isolate caches the
-// result. [imports.Map] is exact names; [imports.Scheme] is a lazy family.
+// result. [imports.Map] is exact names; [imports.Scheme] is a lazy family;
+// [NodeModules] resolves bare names against an injected fs.FS.
 // [NewScriptBinding] evaluates CommonJS that may only require specifiers
-// the chain resolves. Relative paths, bare names, and unclaimed specifiers
-// miss. Guest JS never sees host filesystem or network except through an
-// injected Binding.
+// the chain resolves. Unclaimed specifiers miss. Guest JS never sees host
+// filesystem or network except through an injected Binding or FS.
 package workers

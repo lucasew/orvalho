@@ -12,7 +12,7 @@ import (
 var (
 	// ErrNotFound means no handler claimed the specifier.
 	ErrNotFound = errors.New("imports: not found")
-	// ErrSpecifier means the name is not a scheme:rest specifier.
+	// ErrSpecifier means the name is empty, absolute, or a broken scheme.
 	ErrSpecifier = errors.New("imports: invalid specifier")
 )
 
@@ -21,7 +21,60 @@ type Resolver[T any] func(specifier string) (T, error)
 
 // Handler is one step in a resolve chain. Call next to pass the specifier
 // on (or a rewritten one). First handler that does not call next wins.
-type Handler[T any] func(specifier string, next Resolver[T]) (T, error)
+type Handler[T any] interface {
+	Resolve(specifier string, next Resolver[T]) (T, error)
+}
+
+// Func adapts a function to a Handler.
+type Func[T any] func(specifier string, next Resolver[T]) (T, error)
+
+func (f Func[T]) Resolve(specifier string, next Resolver[T]) (T, error) {
+	if f == nil {
+		return next(specifier)
+	}
+	return f(specifier, next)
+}
+
+// Map claims exact specifiers. A missing key calls next.
+type Map[T any] map[string]T
+
+func (m Map[T]) Resolve(specifier string, next Resolver[T]) (T, error) {
+	v, ok := m[specifier]
+	if !ok {
+		return next(specifier)
+	}
+	return v, nil
+}
+
+// Scheme claims specifiers whose scheme matches Name (node, orvalho, …).
+// Load is called only for those specifiers. ErrNotFound continues the chain.
+type Scheme[T any] struct {
+	Name string
+	Load func(specifier string) (T, error)
+}
+
+func (s Scheme[T]) Resolve(specifier string, next Resolver[T]) (T, error) {
+	if s.Load == nil || !strings.HasPrefix(specifier, s.Name+":") {
+		return next(specifier)
+	}
+	v, err := s.Load(specifier)
+	if err != nil && errors.Is(err, ErrNotFound) {
+		return next(specifier)
+	}
+	return v, err
+}
+
+// Alias rewrites From to To and continues the chain.
+type Alias[T any] struct {
+	From, To string
+}
+
+func (a Alias[T]) Resolve(specifier string, next Resolver[T]) (T, error) {
+	if specifier == a.From {
+		specifier = a.To
+	}
+	return next(specifier)
+}
 
 // Resolve validates spec and runs handlers in order. Invalid specifiers
 // never reach a handler, so a chain cannot become a filesystem walk.
@@ -46,65 +99,70 @@ func Chain[T any](handlers ...Handler[T]) Resolver[T] {
 		}
 		n := next
 		next = func(spec string) (T, error) {
-			return h(spec, n)
+			return h.Resolve(spec, n)
 		}
 	}
 	return next
 }
 
-// Map claims exact specifiers. A missing key calls next.
-func Map[T any](m map[string]T) Handler[T] {
-	return func(spec string, next Resolver[T]) (T, error) {
-		v, ok := m[spec]
-		if !ok {
-			return next(spec)
-		}
-		return v, nil
-	}
-}
-
-// Scheme claims specifiers whose scheme matches (node, orvalho, …).
-// load is called only for those specifiers, with the full name.
-// ErrNotFound from load continues the chain.
-func Scheme[T any](scheme string, load func(specifier string) (T, error)) Handler[T] {
-	prefix := scheme + ":"
-	return func(spec string, next Resolver[T]) (T, error) {
-		if load == nil || !strings.HasPrefix(spec, prefix) {
-			return next(spec)
-		}
-		v, err := load(spec)
-		if err != nil && errors.Is(err, ErrNotFound) {
-			return next(spec)
-		}
-		return v, err
-	}
-}
-
-// Alias rewrites from to to and continues the chain.
-func Alias[T any](from, to string) Handler[T] {
-	return func(spec string, next Resolver[T]) (T, error) {
-		if spec == from {
-			spec = to
-		}
-		return next(spec)
-	}
-}
-
-// Valid reports whether spec is a scheme:rest name. Relative paths,
-// absolute paths, and bare names are rejected.
+// Valid reports whether spec may reach a handler. Scheme names, bare
+// package names, and relative paths are allowed. Empty names and
+// absolute host paths (/…) are rejected so require is not a host walk.
 func Valid(spec string) bool {
+	if spec == "" || strings.ContainsRune(spec, 0) {
+		return false
+	}
+	if spec[0] == '/' {
+		return false
+	}
+	if isRelative(spec) {
+		return true
+	}
+	if colon := strings.IndexByte(spec, ':'); colon >= 1 {
+		if colon == len(spec)-1 || !validScheme(spec[:colon]) {
+			return false
+		}
+		rest := spec[colon+1:]
+		if rest[0] == '/' || rest[0] == '.' {
+			return false
+		}
+		for _, seg := range strings.Split(rest, "/") {
+			if seg == "" || seg == "." || seg == ".." {
+				return false
+			}
+		}
+		return true
+	}
+	return validBare(spec)
+}
+
+func isRelative(spec string) bool {
+	return spec == "." || spec == ".." ||
+		strings.HasPrefix(spec, "./") || strings.HasPrefix(spec, "../")
+}
+
+func isSchemeSpec(spec string) bool {
 	colon := strings.IndexByte(spec, ':')
-	if colon < 1 || colon == len(spec)-1 {
+	return colon >= 1 && validScheme(spec[:colon])
+}
+
+func validBare(spec string) bool {
+	if spec[0] == '@' {
+		rest := spec[1:]
+		slash := strings.IndexByte(rest, '/')
+		if slash < 1 || slash == len(rest)-1 {
+			return false
+		}
+		return validSegments(rest)
+	}
+	if spec[0] == '.' {
 		return false
 	}
-	if !validScheme(spec[:colon]) {
-		return false
-	}
-	rest := spec[colon+1:]
-	if rest[0] == '/' || rest[0] == '.' {
-		return false
-	}
-	for _, seg := range strings.Split(rest, "/") {
+	return validSegments(spec)
+}
+
+func validSegments(s string) bool {
+	for _, seg := range strings.Split(s, "/") {
 		if seg == "" || seg == "." || seg == ".." {
 			return false
 		}

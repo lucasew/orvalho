@@ -3,6 +3,9 @@ package workers
 import (
 	"errors"
 	"fmt"
+	"io/fs"
+	"path"
+	"strings"
 
 	"github.com/dop251/goja"
 	"github.com/lucasew/orvalho/pkg/imports"
@@ -15,8 +18,27 @@ func NewScriptBinding(source string) Binding {
 	return scriptBinding{source: source}
 }
 
+// NodeModules resolves bare specifiers against FS. Relative require()
+// calls are rewritten to a path inside FS using the current script file.
+type NodeModules struct {
+	FS fs.FS
+}
+
+func (n NodeModules) Resolve(spec string, next imports.Resolver[Binding]) (Binding, error) {
+	file, ok := (imports.NodeModules{FS: n.FS}).Lookup(spec)
+	if !ok {
+		return next(spec)
+	}
+	data, err := fs.ReadFile(n.FS, file)
+	if err != nil {
+		return nil, err
+	}
+	return scriptBinding{source: string(data), file: file}, nil
+}
+
 type scriptBinding struct {
 	source string
+	file   string
 }
 
 func (scriptBinding) Materialize(*Isolate) (*goja.Object, error) {
@@ -44,6 +66,7 @@ func (iso *Isolate) jsRequire(call goja.FunctionCall) goja.Value {
 }
 
 func (iso *Isolate) loadModule(spec string) (goja.Value, error) {
+	spec = iso.rewriteRelative(spec)
 	if v, ok := iso.moduleCache[spec]; ok {
 		return v, nil
 	}
@@ -61,7 +84,7 @@ func (iso *Isolate) loadModule(spec string) (goja.Value, error) {
 		return nil, fmt.Errorf("%w: %q", ErrModuleNotFound, spec)
 	}
 	if sb, isScript := b.(scriptBinding); isScript {
-		return iso.loadScript(spec, sb.source)
+		return iso.loadScript(spec, sb.source, sb.file)
 	}
 	obj, err := b.Materialize(iso)
 	if err != nil {
@@ -74,31 +97,47 @@ func (iso *Isolate) loadModule(spec string) (goja.Value, error) {
 	return obj, nil
 }
 
-func (iso *Isolate) loadScript(spec, source string) (goja.Value, error) {
+func (iso *Isolate) rewriteRelative(spec string) string {
+	if iso.importFrom == "" {
+		return spec
+	}
+	if spec == "." || spec == ".." || strings.HasPrefix(spec, "./") || strings.HasPrefix(spec, "../") {
+		return path.Clean(path.Join(path.Dir(iso.importFrom), spec))
+	}
+	return spec
+}
+
+func (iso *Isolate) loadScript(key, source, file string) (goja.Value, error) {
 	exports := iso.vm.NewObject()
 	module := iso.vm.NewObject()
 	if err := module.Set("exports", exports); err != nil {
 		return nil, err
 	}
-	iso.moduleCache[spec] = exports
+	iso.moduleCache[key] = exports
+
+	prev := iso.importFrom
+	if file != "" {
+		iso.importFrom = file
+	}
+	defer func() { iso.importFrom = prev }()
 
 	wrapped := "(function (require, module, exports) {\n" + source + "\n})"
 	v, err := iso.vm.RunString(wrapped)
 	if err != nil {
-		delete(iso.moduleCache, spec)
+		delete(iso.moduleCache, key)
 		return nil, err
 	}
 	fn, ok := goja.AssertFunction(v)
 	if !ok {
-		delete(iso.moduleCache, spec)
-		return nil, fmt.Errorf("workers: script binding %q is not a function", spec)
+		delete(iso.moduleCache, key)
+		return nil, fmt.Errorf("workers: script binding %q is not a function", key)
 	}
 	_, err = fn(goja.Undefined(), iso.vm.Get("require"), module, exports)
 	if err != nil {
-		delete(iso.moduleCache, spec)
+		delete(iso.moduleCache, key)
 		return nil, err
 	}
 	final := module.Get("exports")
-	iso.moduleCache[spec] = final
+	iso.moduleCache[key] = final
 	return final, nil
 }

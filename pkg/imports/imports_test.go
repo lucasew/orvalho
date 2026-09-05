@@ -13,6 +13,13 @@ func TestValid(t *testing.T) {
 		"orvalho:rebimboca-da-parafuseta",
 		"orvalho:host",
 		"cloudflare:workers",
+		"fs",
+		"events",
+		"lodash",
+		"@scope/pkg",
+		"@scope/pkg/sub",
+		"./secret",
+		"../etc/passwd",
 	}
 	for _, spec := range ok {
 		if !Valid(spec) {
@@ -21,10 +28,6 @@ func TestValid(t *testing.T) {
 	}
 	bad := []string{
 		"",
-		"fs",
-		"events",
-		"./secret",
-		"../etc/passwd",
 		"/etc/passwd",
 		"node:",
 		"Node:events",
@@ -43,11 +46,11 @@ func TestValid(t *testing.T) {
 func TestResolveInvalidNeverReachesHandler(t *testing.T) {
 	t.Parallel()
 	called := false
-	h := func(spec string, next Resolver[string]) (string, error) {
+	h := Func[string](func(spec string, next Resolver[string]) (string, error) {
 		called = true
 		return next(spec)
-	}
-	_, err := Resolve("./secret", h)
+	})
+	_, err := Resolve("/etc/passwd", h)
 	if !errors.Is(err, ErrSpecifier) {
 		t.Fatalf("want ErrSpecifier, got %v", err)
 	}
@@ -59,8 +62,8 @@ func TestResolveInvalidNeverReachesHandler(t *testing.T) {
 func TestChainFirstHandlerWins(t *testing.T) {
 	t.Parallel()
 	got, err := Resolve("orvalho:x",
-		Map(map[string]string{"orvalho:x": "first"}),
-		Map(map[string]string{"orvalho:x": "second"}),
+		Map[string]{"orvalho:x": "first"},
+		Map[string]{"orvalho:x": "second"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -73,8 +76,8 @@ func TestChainFirstHandlerWins(t *testing.T) {
 func TestChainPassThrough(t *testing.T) {
 	t.Parallel()
 	got, err := Resolve("orvalho:b",
-		Map(map[string]string{"orvalho:a": "A"}),
-		Map(map[string]string{"orvalho:b": "B"}),
+		Map[string]{"orvalho:a": "A"},
+		Map[string]{"orvalho:b": "B"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -87,13 +90,13 @@ func TestChainPassThrough(t *testing.T) {
 func TestSchemeLoadsLazily(t *testing.T) {
 	t.Parallel()
 	var seen []string
-	h := Scheme("orvalho", func(spec string) (string, error) {
+	h := Scheme[string]{Name: "orvalho", Load: func(spec string) (string, error) {
 		seen = append(seen, spec)
 		if spec == "orvalho:rebimboca-da-parafuseta" {
 			return "ok", nil
 		}
 		return "", ErrNotFound
-	})
+	}}
 	got, err := Resolve("orvalho:rebimboca-da-parafuseta", h)
 	if err != nil || got != "ok" {
 		t.Fatalf("got %q %v", got, err)
@@ -110,8 +113,8 @@ func TestSchemeLoadsLazily(t *testing.T) {
 func TestAliasThenMap(t *testing.T) {
 	t.Parallel()
 	got, err := Resolve("orvalho:buf",
-		Alias[string]("orvalho:buf", "orvalho:buffer"),
-		Map(map[string]string{"orvalho:buffer": "buf"}),
+		Alias[string]{From: "orvalho:buf", To: "orvalho:buffer"},
+		Map[string]{"orvalho:buffer": "buf"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -124,8 +127,8 @@ func TestAliasThenMap(t *testing.T) {
 func TestSchemeNotFoundContinuesChain(t *testing.T) {
 	t.Parallel()
 	got, err := Resolve("orvalho:x",
-		Scheme("orvalho", func(string) (string, error) { return "", ErrNotFound }),
-		Map(map[string]string{"orvalho:x": "fallback"}),
+		Scheme[string]{Name: "orvalho", Load: func(string) (string, error) { return "", ErrNotFound }},
+		Map[string]{"orvalho:x": "fallback"},
 	)
 	if err != nil {
 		t.Fatal(err)

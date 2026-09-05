@@ -36,6 +36,9 @@ type Isolate struct {
 
 	// moduleCache is the per-isolate require cache (specifier → exports).
 	moduleCache map[string]goja.Value
+
+	// importFrom is the FS path of the script currently evaluating.
+	importFrom string
 }
 
 // Ensure Isolate implements actor.Actor.
