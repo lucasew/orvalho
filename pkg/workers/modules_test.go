@@ -4,13 +4,14 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/dop251/goja"
 	"github.com/lucasew/orvalho/pkg/imports"
 )
 
 func importMap(m map[string]Binding) []imports.Handler[Binding] {
-	return []imports.Handler[Binding]{imports.Map(m)}
+	return []imports.Handler[Binding]{imports.Map[Binding](m)}
 }
 
 type pingObject struct{}
@@ -128,12 +129,8 @@ func TestEnvBindingIsNotAnImport(t *testing.T) {
 
 func TestRequireRejectsHostPathSpecifiers(t *testing.T) {
 	t.Parallel()
-	cases := []string{
+	invalid := []string{
 		"",
-		"fs",
-		"events",
-		"./secret",
-		"../etc/passwd",
 		"/etc/passwd",
 		"node:",
 		"Node:events",
@@ -142,17 +139,13 @@ func TestRequireRejectsHostPathSpecifiers(t *testing.T) {
 		"orvalho:foo/../bar",
 		"orvalho:foo//bar",
 	}
-	for _, spec := range cases {
-		t.Run(spec, func(t *testing.T) {
+	for _, spec := range invalid {
+		t.Run("invalid/"+spec, func(t *testing.T) {
 			t.Parallel()
 			if imports.Valid(spec) {
 				t.Fatalf("%q must not be a valid specifier", spec)
 			}
-			iso := New(`require(`+jsString(spec)+`);`, Options{
-				Imports: importMap(map[string]Binding{
-					spec: Bind(pingObject{}),
-				}),
-			})
+			iso := New(`require(`+jsString(spec)+`);`, Options{})
 			_, err := iso.Tick(t.Context())
 			if err == nil || !errors.Is(err, ErrModuleSpecifier) {
 				t.Fatalf("require(%q): want ErrModuleSpecifier, got %v", spec, err)
@@ -240,13 +233,13 @@ func TestRequireSchemeHandlerIsLazy(t *testing.T) {
 	var seen []string
 	iso := New(`var got = require("orvalho:rebimboca-da-parafuseta").ping();`, Options{
 		Imports: []imports.Handler[Binding]{
-			imports.Scheme("orvalho", func(spec string) (Binding, error) {
+			imports.Scheme[Binding]{Name: "orvalho", Load: func(spec string) (Binding, error) {
 				seen = append(seen, spec)
 				if spec != "orvalho:rebimboca-da-parafuseta" {
 					return nil, imports.ErrNotFound
 				}
 				return Bind(pingObject{}), nil
-			}),
+			}},
 		},
 	})
 	tickOK(t, iso)
@@ -261,15 +254,57 @@ func TestRequireSchemeHandlerIsLazy(t *testing.T) {
 func TestRequireAliasHandler(t *testing.T) {
 	iso := New(`var got = require("orvalho:buf").ping();`, Options{
 		Imports: []imports.Handler[Binding]{
-			imports.Alias[Binding]("orvalho:buf", "orvalho:rebimboca-da-parafuseta"),
-			imports.Map(map[string]Binding{
+			imports.Alias[Binding]{From: "orvalho:buf", To: "orvalho:rebimboca-da-parafuseta"},
+			imports.Map[Binding]{
 				"orvalho:rebimboca-da-parafuseta": Bind(pingObject{}),
-			}),
+			},
 		},
 	})
 	tickOK(t, iso)
 	if got := iso.vm.Get("got").String(); got != "pong" {
 		t.Fatalf("got=%q want pong", got)
+	}
+}
+
+func TestRequireNodeModules(t *testing.T) {
+	fsys := fstest.MapFS{
+		"leftpad/package.json": {Data: []byte(`{"main":"index.js"}`)},
+		"leftpad/index.js":     {Data: []byte(`exports.pad = function (s) { return "0" + s; };`)},
+	}
+	iso := New(`var got = require("leftpad").pad("1");`, Options{
+		Imports: []imports.Handler[Binding]{NodeModules{FS: fsys}},
+	})
+	tickOK(t, iso)
+	if got := iso.vm.Get("got").String(); got != "01" {
+		t.Fatalf("got=%q want 01", got)
+	}
+}
+
+func TestRequireNodeModulesRelativeInsidePackage(t *testing.T) {
+	fsys := fstest.MapFS{
+		"pkg/package.json": {Data: []byte(`{"main":"index.js"}`)},
+		"pkg/index.js":     {Data: []byte(`module.exports = require("./lib");`)},
+		"pkg/lib.js":       {Data: []byte(`module.exports = 4;`)},
+	}
+	iso := New(`var got = require("pkg");`, Options{
+		Imports: []imports.Handler[Binding]{NodeModules{FS: fsys}},
+	})
+	tickOK(t, iso)
+	if n := iso.vm.Get("got").ToInteger(); n != 4 {
+		t.Fatalf("got=%d want 4", n)
+	}
+}
+
+func TestRequireNodeModulesDir(t *testing.T) {
+	fsys := fstest.MapFS{
+		"node_modules/leftpad/index.js": {Data: []byte(`exports.n = 9;`)},
+	}
+	iso := New(`var got = require("leftpad").n;`, Options{
+		Imports: []imports.Handler[Binding]{NodeModules{FS: fsys}},
+	})
+	tickOK(t, iso)
+	if n := iso.vm.Get("got").ToInteger(); n != 9 {
+		t.Fatalf("got=%d want 9", n)
 	}
 }
 
