@@ -8,7 +8,7 @@ Bridge package for the [pesquisarr](https://github.com/lucasew/pesquisarr) Astro
 # from orvalho repo root; adjust PESQUISARR path
 export PESQUISARR=../pesquisarr
 ./examples/pesquisarr/assemble.sh
-orvalho serve ./examples/pesquisarr --listen 127.0.0.1:8788
+orvalho serve ./examples/pesquisarr --addr 127.0.0.1:8788
 ```
 
 Requires `esbuild` on `PATH` (mise tools) for multi-file ESM bundle-on-load.

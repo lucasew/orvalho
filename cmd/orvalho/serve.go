@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	serveListen   string
+	serveAddr     string
 	serveVarFlags []string
 	serveEnvFile  string
 )
@@ -50,7 +50,7 @@ Multi-file ESM entries (import/export) are bundled on load via esbuild (needs es
 }
 
 func init() {
-	serveCmd.Flags().StringVar(&serveListen, "listen", "", "listen address (default :8787, or :PORT from package port/publish.port)")
+	serveCmd.Flags().StringVar(&serveAddr, "addr", "", "listen address (default :8787, or :PORT from package port/publish.port)")
 	serveCmd.Flags().StringArrayVar(&serveVarFlags, "var", nil, "runtime.env entry NAME=value (repeatable; overrides env file and process env)")
 	serveCmd.Flags().StringVar(&serveEnvFile, "env-file", "", "path to .env / .dev.vars (KEY=value lines) for runtime.env")
 	rootCmd.AddCommand(serveCmd)
@@ -105,14 +105,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Fetch:    workers.HTTPFetch(workers.EgressList(egress), nil, 0),
 	})
 
-	listen := serveListen
-	if listen == "" {
+	addr := serveAddr
+	if addr == "" {
 		if port, err := pkg.Port(); err != nil {
 			return err
 		} else if port > 0 {
-			listen = fmt.Sprintf(":%d", port)
+			addr = fmt.Sprintf(":%d", port)
 		} else {
-			listen = ":8787"
+			addr = ":8787"
 		}
 	}
 
@@ -120,12 +120,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	defer stop()
 
 	srv := &http.Server{
-		Addr:              listen,
+		Addr:              addr,
 		Handler:           workers.Handler(iso),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	ln, err := net.Listen("tcp", listen)
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}

@@ -36,7 +36,7 @@ orvalho --data-dir /path/to/data identity show
 # Dev: serve one package (zip or directory) on loopback — no mesh/signing
 orvalho serve ./pkg/ovpkg/testdata/minimal
 orvalho serve ./examples/cat-ssr
-orvalho serve ./my-actor.ovpkg --listen 127.0.0.1:8787
+orvalho serve ./my-actor.ovpkg --addr 127.0.0.1:8787
 orvalho serve ./pkg --var SITE_TITLE=Cats --env-file .dev.vars
 ```
 
@@ -77,7 +77,7 @@ Modern actor JS is downleveled with **esbuild** to **ES2015** before it runs on 
 # sibling checkout with dist/ already built
 export PESQUISARR=../pesquisarr
 ./examples/pesquisarr/assemble.sh
-orvalho serve ./examples/pesquisarr --listen 127.0.0.1:8788
+orvalho serve ./examples/pesquisarr --addr 127.0.0.1:8788
 curl http://127.0.0.1:8788/
 ```
 
