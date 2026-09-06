@@ -98,7 +98,7 @@ Inherited C (cite the file):
 |------|------|--------|------------|-----------|
 | Language | Go | C | TEC-01–TEC-14 | `go.mod` |
 | Runtime | goja | C | TEC-01 | `go.mod` |
-| Persistence | files: `--data-dir` Identity; project Lockfile; content store at `--store-dir` when set, else `<project>/.orvalho/store` | C | TEC-06, TEC-16, Identity | this tree, fetchurl/spec |
+| Persistence | files: `--data-dir` Identity; project Lockfile; content store at `--store-dir` when set, else `<user cache>/orvalho` (`os.UserCacheDir`) | C | TEC-06, TEC-16, Identity | this tree, fetchurl/spec, stdlib:os |
 | UI | none | D | | |
 | Packaging | ZIP Package, self-contained binary | C | TEC-05, TEC-07 | path:pkg/ovpkg |
 | Identity | Ed25519 PEM | C | Identity generate | path:pkg/identity |
@@ -210,7 +210,7 @@ Grammar: `orvalho <noun> <action>`. Depth is two. `orvalho version` is the only 
 | `actor install` | `--data-dir` | later | fail closed, tabled error |
 | `actor list` | `--data-dir` | later | fail closed, tabled error |
 
-`--data-dir` is required for Identity, Configuration, Device, Manager, and Actor commands. `package`, `script`, and `dependency` commands do not use `--data-dir`. Dependency store is `--store-dir` when that flag is set. Otherwise the store is `<project>/.orvalho/store`.
+`--data-dir` is required for Identity, Configuration, Device, Manager, and Actor commands. `package`, `script`, and `dependency` commands do not use `--data-dir`. Dependency store is `--store-dir` when that flag is set. Otherwise the store is `<user cache>/orvalho` (`os.UserCacheDir`).
 
 ### Stored entities (CLI)
 
@@ -219,7 +219,7 @@ Grammar: `orvalho <noun> <action>`. Depth is two. `orvalho version` is the only 
 | Identity | entity | this data-dir, Ed25519 PublicID | Operator (0,\*) — Identity (1,1) per file | yes | INV-06 |
 | Lockfile | entity | project directory | Project (1,1) — Lockfile (0,1) | yes | INV-07, INV-19 |
 | Dependency | weak entity | (Lockfile, name, version) | Lockfile (1,\*) — Dependency (1,1) | no | INV-07, INV-18, INV-20 |
-| Store | entity | `--store-dir` when set, else `<project>/.orvalho/store` | Project (0,\*) — Store (0,1) | yes | INV-07 |
+| Store | entity | `--store-dir` when set, else `<user cache>/orvalho` | Operator (0,\*) — Store (0,1) | yes | INV-07 |
 
 ## Seams
 
@@ -364,7 +364,6 @@ Residual risk: goja defects, side channels, Operator compromise of `--data-dir`.
 16. `--prod` (omit `devDependencies`).
 17. npm optional try-and-skip. Peer auto-fetch.
 18. Hoisted linker.
-19. User-level XDG content store. Sharing is `FETCHURL_SERVER`.
 
 ## Assumptions
 
@@ -393,3 +392,4 @@ Residual risk: goja defects, side channels, Operator compromise of `--data-dir`.
 - ADR-0013: Optional Dependencies install only when packument `cpu` contains `wasm32`. Rejected: npm try-and-skip for platform addons.
 - ADR-0014: Peer Dependencies are satisfied from the existing graph. Rejected: npm 7 auto-fetch of a missing peer.
 - ADR-0015: Durable writes wrap lewkit `x/io/atomic`. Language is Go 1.27. Rejected: a second stage+rename helper beside that primitive.
+- ADR-0016: Default content store is `<user cache>/orvalho` (`os.UserCacheDir`). Rejected: project-local `.orvalho/store`. Sharing across machines is still `FETCHURL_SERVER`.
