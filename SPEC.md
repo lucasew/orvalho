@@ -34,7 +34,7 @@ Non-goals:
 
 Inherited C (cite the file):
 
-- Language: Go 1.25 — `go.mod`
+- Language: Go 1.27 — `go.mod`
 - Guest virtual machine: goja — `go.mod`, Isolate implementation
 - Configuration language: CUE, embedded preludes, no `cue.mod` — Configuration load package
 - Command-line parse: Cobra, single binary, `--data-dir` explicit — `cmd/orvalho`
@@ -76,7 +76,7 @@ Inherited C (cite the file):
 | TEC-05 | esbuild `pkg/api` | wrap | `esbuild` on `PATH`, `os/exec` of esbuild | github.com/evanw/esbuild/pkg/api |
 | TEC-06 | fetchurl `Fetcher` | adopt | a second download-and-hash client | github.com/fetchurl/fetchurl |
 | TEC-06 store | content store | implement | exec pnpm. Exec Aube. Import fetchurl `internal/repository` | fetchurl/spec store layout (`/:algo/:shard/:hash`) |
-| TEC-06 write | stage+rename | implement | in-place write of finals | stdlib:os.Rename (lewkit `x/io/atomic` requires Go 1.27; this tree is Go 1.25) |
+| TEC-06 write | lewkit `x/io/atomic` | wrap | in-place write of finals | lewtec/lewkit |
 | TEC-15 | isolated linker | implement | hoisted default. Virtual store named `.pnpm` or `.aube` | none |
 | TEC-16 | `package-lock.json` | implement | default `aube-lock.yaml`. Other lockfile writers in this version | none |
 | TEC-17 | Node.js CommonJS walk | implement | host Node.js as the resolver | path:pkg/imports |
@@ -231,7 +231,7 @@ Each row is an interface. One complete adapter at introduction. A second adapter
 | outbound Fetch | Options | allowlisted `net/http` | ambient Fetch |
 | Actor | host loop | Isolate mailbox | free-running guest thread |
 | overlay driver | mesh compose | loopback | assume host LAN |
-| atomic write | Package, Identity, Lockfile, Store | stage+rename | write finals in place |
+| atomic write | Package, Identity, Lockfile, Store | lewkit `x/io/atomic` | write finals in place |
 | Lockfile | `dependency install` | `package-lock.json` v2 read, v3 read and write | a second format without a new adapter |
 | primitive host ops | Isolate | Go funcs the JavaScript dispatcher calls | implement WinterTC as a Go function bag |
 
@@ -372,7 +372,7 @@ Residual risk: goja defects, side channels, Operator compromise of `--data-dir`.
 |----|------|----------|
 | AS-01 | The npm registry answers Dependency resolve | `dependency *` cannot complete; Package serve of a pre-resolved tree still can |
 | AS-02 | esbuild `pkg/api` stays pure Go | TEC-05 and INV-05 need a new adopted tool |
-| AS-03 | stage+rename remains the write primitive | wrap a replacement with the same contract |
+| AS-03 | lewkit `x/io/atomic` remains the write primitive | wrap a replacement with the same stage+rename contract |
 | AS-04 | fetchurl `Fetcher` honors `FETCHURL_SERVER` and verifies lowercase hex hashes | TEC-06 needs a new adopted fetch client |
 
 ## Decision history
@@ -392,3 +392,4 @@ Residual risk: goja defects, side channels, Operator compromise of `--data-dir`.
 - ADR-0012: `package serve` stays one IIFE. Embedders MAY inject `NodeModules`. Rejected: Isolate walks `node_modules` on serve.
 - ADR-0013: Optional Dependencies install only when packument `cpu` contains `wasm32`. Rejected: npm try-and-skip for platform addons.
 - ADR-0014: Peer Dependencies are satisfied from the existing graph. Rejected: npm 7 auto-fetch of a missing peer.
+- ADR-0015: Durable writes wrap lewkit `x/io/atomic`. Language is Go 1.27. Rejected: a second stage+rename helper beside that primitive.
