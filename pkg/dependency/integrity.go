@@ -14,7 +14,10 @@ func ParseIntegrity(sri string) (algo, hash string, err error) {
 	if sri == "" {
 		return "", "", fmt.Errorf("%w: empty", ErrIntegrity)
 	}
-	first, _, _ := strings.Cut(sri, " ")
+	first := sri
+	if i := strings.IndexByte(sri, ' '); i >= 0 {
+		first = sri[:i]
+	}
 	algo, rest, ok := strings.Cut(first, "-")
 	if !ok || rest == "" {
 		return "", "", fmt.Errorf("%w: %q", ErrIntegrity, sri)
