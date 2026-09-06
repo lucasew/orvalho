@@ -2,6 +2,7 @@ package dependency
 
 import (
 	"fmt"
+	"maps"
 	"path"
 )
 
@@ -39,10 +40,10 @@ func resolveGraph(reg registry, m *Manifest) (*Graph, error) {
 	g.Packages[""] = lockPackage{
 		Name:                 m.Name,
 		Version:              m.Version,
-		Dependencies:         copyMap(m.Dependencies),
-		DevDependencies:      copyMap(m.DevDependencies),
-		OptionalDependencies: copyMap(m.OptionalDependencies),
-		PeerDependencies:     copyMap(m.PeerDependencies),
+		Dependencies:         maps.Clone(m.Dependencies),
+		DevDependencies:      maps.Clone(m.DevDependencies),
+		OptionalDependencies: maps.Clone(m.OptionalDependencies),
+		PeerDependencies:     maps.Clone(m.PeerDependencies),
 	}
 
 	for len(q) > 0 {
@@ -82,9 +83,9 @@ func resolveGraph(reg registry, m *Manifest) (*Graph, error) {
 				Optional:             optOf(j, m),
 				CPU:                  pv.CPU,
 				OS:                   pv.OS,
-				Dependencies:         copyMap(pv.Dependencies),
-				PeerDependencies:     copyMap(pv.PeerDependencies),
-				OptionalDependencies: copyMap(pv.OptionalDependencies),
+				Dependencies:         maps.Clone(pv.Dependencies),
+				PeerDependencies:     maps.Clone(pv.PeerDependencies),
+				OptionalDependencies: maps.Clone(pv.OptionalDependencies),
 				Bin:                  pv.Bin,
 			}
 			g.Packages[lockPath] = ent
@@ -96,9 +97,9 @@ func resolveGraph(reg registry, m *Manifest) (*Graph, error) {
 				Dev:                  j.dev,
 				Optional:             ent.Optional,
 				CPU:                  pv.CPU,
-				Dependencies:         copyMap(pv.Dependencies),
-				PeerDependencies:     copyMap(pv.PeerDependencies),
-				OptionalDependencies: copyMap(pv.OptionalDependencies),
+				Dependencies:         maps.Clone(pv.Dependencies),
+				PeerDependencies:     maps.Clone(pv.PeerDependencies),
+				OptionalDependencies: maps.Clone(pv.OptionalDependencies),
 				Bin:                  parseBin(pv.Bin),
 				LockPath:             lockPath,
 			})
@@ -172,15 +173,4 @@ func npmLockPath(parentPath, name string, existing map[string]lockPackage) strin
 		return nested
 	}
 	return nested
-}
-
-func copyMap(m map[string]string) map[string]string {
-	if len(m) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
 }

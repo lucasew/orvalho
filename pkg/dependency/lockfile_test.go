@@ -63,7 +63,7 @@ func TestInstallRefusesYarnLock(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "yarn.lock"), []byte("# yarn\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := Install(t.Context(), Options{Dir: dir})
+	err := (Options{Dir: dir}).Install(t.Context())
 	if err == nil {
 		t.Fatal("expected lockfile error")
 	}

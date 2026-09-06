@@ -43,8 +43,8 @@ func (s Store) Open(algo, hash string) (*os.File, error) {
 	return os.Open(s.ObjectPath(algo, hash))
 }
 
-// Fetch writes the tarball into the store. URLs are the fetchurl source list
-// (registry resolved URL). Hash is lowercase hex.
+// Fetch writes the tarball into the store via fetchurl.Fetcher
+// (FETCHURL_SERVER, then the registry URL). Hash is lowercase hex.
 func (s Store) Fetch(ctx context.Context, algo, hash string, urls []string) (err error) {
 	if s.Has(algo, hash) {
 		return nil

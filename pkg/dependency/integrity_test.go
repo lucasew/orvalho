@@ -7,6 +7,25 @@ import (
 	"testing"
 )
 
+func TestSumStringMatchesSRI(t *testing.T) {
+	t.Parallel()
+	s := NewSum(sha512.New())
+	if _, err := s.Write([]byte("hel")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Write([]byte("lo")); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha512.Sum512([]byte("hello"))
+	want := "sha512-" + base64.StdEncoding.EncodeToString(sum[:])
+	if s.String() != want {
+		t.Fatalf("got %q want %q", s.String(), want)
+	}
+	if s.Algo() != "sha512" {
+		t.Fatalf("algo %q", s.Algo())
+	}
+}
+
 func TestParseIntegrity(t *testing.T) {
 	t.Parallel()
 	sum := sha512.Sum512([]byte("hello"))

@@ -10,6 +10,11 @@ import (
 
 const virtualStoreDir = ".orvalho"
 
+type linker struct {
+	root string
+	g    *Graph
+}
+
 func slotDir(name, version string) string {
 	return filepath.Join("node_modules", virtualStoreDir, name+"@"+version, "node_modules", filepath.FromSlash(name))
 }
@@ -18,15 +23,13 @@ func slotNodeModules(name, version string) string {
 	return filepath.Join("node_modules", virtualStoreDir, name+"@"+version, "node_modules")
 }
 
-// linkTree writes the isolated tree and .bin symlinks under root.
-func linkTree(root string, g *Graph) error {
-	nm := filepath.Join(root, "node_modules")
+func (l linker) run() error {
+	nm := filepath.Join(l.root, "node_modules")
 	if err := os.MkdirAll(nm, 0o755); err != nil {
 		return err
 	}
-	byPath := g.Packages
-	slots := map[string]Node{} // name@version -> node
-	for _, n := range g.Nodes {
+	slots := map[string]Node{}
+	for _, n := range l.g.Nodes {
 		if n.Optional && !keepOptional(n.CPU) {
 			continue
 		}
@@ -37,39 +40,39 @@ func linkTree(root string, g *Graph) error {
 	}
 
 	for _, n := range slots {
-		dest := filepath.Join(root, slotDir(n.Name, n.Version))
+		dest := filepath.Join(l.root, slotDir(n.Name, n.Version))
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return err
 		}
-		sib := filepath.Join(root, slotNodeModules(n.Name, n.Version))
+		sib := filepath.Join(l.root, slotNodeModules(n.Name, n.Version))
 		for depName := range n.Dependencies {
-			target := resolveVisible(byPath, n.LockPath, depName)
+			target := l.visible(n.LockPath, depName)
 			if target == nil {
 				continue
 			}
 			if err := symlinkRel(
 				filepath.Join(sib, filepath.FromSlash(depName)),
-				filepath.Join(root, slotDir(target.Name, target.Version)),
+				filepath.Join(l.root, slotDir(target.Name, target.Version)),
 			); err != nil {
 				return err
 			}
 		}
 		for peerName := range n.PeerDependencies {
-			target := peerInGraph(g, peerName)
+			target := l.peer(peerName)
 			if target == nil {
 				continue
 			}
 			if err := symlinkRel(
 				filepath.Join(sib, filepath.FromSlash(peerName)),
-				filepath.Join(root, slotDir(target.Name, target.Version)),
+				filepath.Join(l.root, slotDir(target.Name, target.Version)),
 			); err != nil {
 				return err
 			}
 		}
 	}
 
-	for name := range g.Root {
-		n := nodeAt(byPath, "node_modules/"+name)
+	for name := range l.g.Root {
+		n := l.nodeAt("node_modules/" + name)
 		if n == nil {
 			continue
 		}
@@ -78,17 +81,17 @@ func linkTree(root string, g *Graph) error {
 		}
 		if err := symlinkRel(
 			filepath.Join(nm, filepath.FromSlash(name)),
-			filepath.Join(root, slotDir(n.Name, n.Version)),
+			filepath.Join(l.root, slotDir(n.Name, n.Version)),
 		); err != nil {
 			return err
 		}
 	}
 
-	return linkBins(root, g)
+	return l.bins()
 }
 
-func nodeAt(packages map[string]lockPackage, lockPath string) *Node {
-	ent, ok := packages[lockPath]
+func (l linker) nodeAt(lockPath string) *Node {
+	ent, ok := l.g.Packages[lockPath]
 	if !ok || ent.Link {
 		return nil
 	}
@@ -111,12 +114,11 @@ func nodeAt(packages map[string]lockPackage, lockPath string) *Node {
 	return &n
 }
 
-func resolveVisible(packages map[string]lockPackage, fromPath, name string) *Node {
-	// Walk from fromPath/node_modules/name up to node_modules/name.
+func (l linker) visible(fromPath, name string) *Node {
 	cur := fromPath
 	for {
 		cand := path.Join(cur, "node_modules", name)
-		if n := nodeAt(packages, cand); n != nil {
+		if n := l.nodeAt(cand); n != nil {
 			return n
 		}
 		if cur == "" || cur == "." {
@@ -128,33 +130,33 @@ func resolveVisible(packages map[string]lockPackage, fromPath, name string) *Nod
 		}
 		cur = parent
 	}
-	return nodeAt(packages, "node_modules/"+name)
+	return l.nodeAt("node_modules/" + name)
 }
 
-func peerInGraph(g *Graph, name string) *Node {
-	for i := range g.Nodes {
-		if g.Nodes[i].Name == name {
-			n := g.Nodes[i]
+func (l linker) peer(name string) *Node {
+	for i := range l.g.Nodes {
+		if l.g.Nodes[i].Name == name {
+			n := l.g.Nodes[i]
 			return &n
 		}
 	}
 	return nil
 }
 
-func linkBins(root string, g *Graph) error {
-	binDir := filepath.Join(root, "node_modules", ".bin")
+func (l linker) bins() error {
+	binDir := filepath.Join(l.root, "node_modules", ".bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err
 	}
-	for name := range g.Root {
-		n := nodeAt(g.Packages, "node_modules/"+name)
+	for name := range l.g.Root {
+		n := l.nodeAt("node_modules/" + name)
 		if n == nil || len(n.Bin) == 0 {
 			continue
 		}
 		if n.Optional && !keepOptional(n.CPU) {
 			continue
 		}
-		pkgDir := filepath.Join(root, slotDir(n.Name, n.Version))
+		pkgDir := filepath.Join(l.root, slotDir(n.Name, n.Version))
 		for binName, rel := range n.Bin {
 			if err := symlinkRel(filepath.Join(binDir, binName), filepath.Join(pkgDir, filepath.FromSlash(rel))); err != nil {
 				return err

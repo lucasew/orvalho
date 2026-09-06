@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha512"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -16,10 +15,12 @@ import (
 	"testing"
 )
 
-func npmTarball(t *testing.T, files map[string]string) []byte {
+func npmTarball(t *testing.T, files map[string]string) (data []byte, sri string) {
 	t.Helper()
 	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
+	sum := NewSum(sha512.New())
+	w := io.MultiWriter(&buf, sum)
+	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
 	for name, body := range files {
 		hdr := &tar.Header{
@@ -40,23 +41,17 @@ func npmTarball(t *testing.T, files map[string]string) []byte {
 	if err := gz.Close(); err != nil {
 		t.Fatal(err)
 	}
-	return buf.Bytes()
-}
-
-func sri512(b []byte) string {
-	sum := sha512.Sum512(b)
-	return "sha512-" + base64.StdEncoding.EncodeToString(sum[:])
+	return buf.Bytes(), sum.String()
 }
 
 func TestInstallIsolatedTree(t *testing.T) {
 	t.Parallel()
 	leftpadJS := "module.exports = function (s) { return s; }\n"
 	leftpadJSON := `{"name":"leftpad","version":"1.3.0","main":"index.js"}`
-	tg := npmTarball(t, map[string]string{
+	tg, integrity := npmTarball(t, map[string]string{
 		"package.json": leftpadJSON,
 		"index.js":     leftpadJS,
 	})
-	integrity := sri512(tg)
 
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -98,12 +93,12 @@ func TestInstallIsolatedTree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := Install(t.Context(), Options{
+	err := (Options{
 		Dir:      dir,
 		StoreDir: filepath.Join(dir, ".orvalho", "store"),
 		Registry: srv.URL,
 		HTTP:     srv.Client(),
-	})
+	}).Install(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
