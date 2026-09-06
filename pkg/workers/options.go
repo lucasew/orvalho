@@ -4,8 +4,6 @@ import (
 	"context"
 	"net/http"
 	"time"
-
-	"github.com/lucasew/orvalho/pkg/imports"
 )
 
 // Default resource caps. Documented for hosts and enforced in the isolate.
@@ -60,13 +58,11 @@ type Options struct {
 	// returns a Binding to expose a specifier.
 	Bindings map[string]Binding
 
-	// Imports is the require / getBuiltinModule resolve chain. Handlers
-	// run in order on first require of a specifier; later requires hit
-	// the isolate cache. Use imports.Map for exact names, imports.Scheme
-	// for a lazy family (node:*, orvalho:*). Not claimed means not found.
-	// Guest JS MUST NOT reach host I/O except by requiring a specifier
-	// whose Binding implements that capability.
-	Imports []imports.Handler[Binding]
+	// Imports is the require / getBuiltinModule resolve chain. Each
+	// Import returns a Binding. Later requires hit the isolate cache.
+	// Not claimed means not found. Guest JS MUST NOT reach host I/O
+	// except through a Binding the chain returned.
+	Imports []Import
 }
 
 func (o Options) withDefaults() Options {
@@ -80,7 +76,7 @@ func (o Options) withDefaults() Options {
 		o.FetchTimeout = DefaultFetchTimeout
 	}
 	if o.Imports != nil {
-		o.Imports = append([]imports.Handler[Binding](nil), o.Imports...)
+		o.Imports = append([]Import(nil), o.Imports...)
 	}
 	return o
 }

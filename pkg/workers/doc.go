@@ -44,17 +44,13 @@
 //
 // # Bindings
 //
-// Implement [Binding] for isolate-aware host objects (assets, later devices).
-// For a goja-only recipe, implement [RuntimeObject] (see hostobject.Object)
-// and pass it to [Bind]. workers does not import hostobject.
+// [Binding] is a factory for a guest JS object. [AssetBinding] is env.NAME;
+// [Bind] wraps a [RuntimeObject]; [NewScriptBinding] is CommonJS source.
+// Materialize runs when the isolate first needs the object.
 //
 // # Imports
 //
-// [Options.Imports] is a [imports.Handler] chain for guest require and
-// getBuiltinModule. Handlers run on first require; the isolate caches the
-// result. [imports.Map] is exact names; [imports.Scheme] is a lazy family;
-// [NodeModules] resolves bare names against an injected fs.FS.
-// [NewScriptBinding] evaluates CommonJS that may only require specifiers
-// the chain resolves. Unclaimed specifiers miss. Guest JS never sees host
-// filesystem or network except through an injected Binding or FS.
+// [Options.Imports] is a chain of [Import] values. Each Resolve returns a
+// Binding. [Map] is exact names; [Scheme] is a family (node:*, orvalho:*);
+// [NodeModules] reads an injected fs.FS. Unclaimed specifiers miss.
 package workers
