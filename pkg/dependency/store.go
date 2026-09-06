@@ -18,8 +18,15 @@ type Store struct {
 	Client *fetchurl.Fetcher
 }
 
-// DefaultStoreDir is the project-local content store when --store-dir is unset.
-const DefaultStoreDir = ".orvalho/store"
+// DefaultStoreDir is the user cache content store when --store-dir is unset.
+// It is <os.UserCacheDir>/orvalho (on Linux, $XDG_CACHE_HOME/orvalho or ~/.cache/orvalho).
+func DefaultStoreDir() (string, error) {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cache, "orvalho"), nil
+}
 
 // ObjectPath is {dir}/{algo}/{shard}/{hash}.
 func (s Store) ObjectPath(algo, hash string) string {

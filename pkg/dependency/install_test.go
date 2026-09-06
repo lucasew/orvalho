@@ -43,6 +43,45 @@ func npmTarball(t *testing.T, files map[string]string) (data []byte, sri string)
 	return buf.Bytes(), sum.String()
 }
 
+func TestDefaultStoreDir(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", dir)
+	got, err := DefaultStoreDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "orvalho")
+	if got != want {
+		t.Fatalf("DefaultStoreDir() = %q; want %q", got, want)
+	}
+}
+
+func TestStoreUsesUserCache(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", dir)
+	st, err := (Options{}).store()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "orvalho")
+	if st.Dir != want {
+		t.Fatalf("store().Dir = %q; want %q", st.Dir, want)
+	}
+}
+
+func TestStoreDirFlagWins(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(dir, "cache"))
+	flag := filepath.Join(dir, "explicit")
+	st, err := (Options{StoreDir: flag}).store()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Dir != flag {
+		t.Fatalf("store().Dir = %q; want %q", st.Dir, flag)
+	}
+}
+
 func TestInstallIsolatedTree(t *testing.T) {
 	t.Parallel()
 	leftpadJS := "module.exports = function (s) { return s; }\n"

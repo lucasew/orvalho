@@ -38,7 +38,7 @@ var dependencyRemoveCmd = &cobra.Command{
 }
 
 func init() {
-	dependencyCmd.PersistentFlags().StringVar(&storeDir, "store-dir", "", "content store directory (default: <project>/.orvalho/store)")
+	dependencyCmd.PersistentFlags().StringVar(&storeDir, "store-dir", "", "content store directory (default: <user-cache>/orvalho)")
 	dependencyCmd.AddCommand(dependencyInstallCmd, dependencyAddCmd, dependencyRemoveCmd)
 }
 

@@ -1,7 +1,6 @@
 package dependency
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -25,12 +24,21 @@ func (o Options) project() string {
 	return "."
 }
 
-func (o Options) store() Store {
+func (o Options) store() (Store, error) {
 	s := o.Store
-	if s.Dir == "" {
-		s.Dir = cmp.Or(o.StoreDir, filepath.Join(o.project(), DefaultStoreDir))
+	if s.Dir != "" {
+		return s, nil
 	}
-	return s
+	if o.StoreDir != "" {
+		s.Dir = o.StoreDir
+		return s, nil
+	}
+	dir, err := DefaultStoreDir()
+	if err != nil {
+		return Store{}, err
+	}
+	s.Dir = dir
+	return s, nil
 }
 
 func (o Options) registry() registry {
@@ -172,7 +180,10 @@ func splitNameRange(spec string) (name, rng string, ok bool) {
 }
 
 func (o Options) materialize(ctx context.Context, g *Graph) error {
-	st := o.store()
+	st, err := o.store()
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(st.Dir, 0o755); err != nil {
 		return err
 	}
