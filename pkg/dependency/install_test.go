@@ -7,6 +7,7 @@ import (
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -57,31 +58,16 @@ func TestInstallIsolatedTree(t *testing.T) {
 	})
 	integrity := sri512(tg)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/leftpad", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"name":      "leftpad",
-			"dist-tags": map[string]string{"latest": "1.3.0"},
-			"versions": map[string]any{
-				"1.3.0": map[string]any{
-					"name":    "leftpad",
-					"version": "1.3.0",
-					"dist": map[string]string{
-						"tarball":   "", // filled after server URL known — see below
-						"integrity": integrity,
-					},
-				},
-			},
-		})
-	})
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/leftpad/-/leftpad-1.3.0.tgz" {
-			_, _ = w.Write(tg)
+			if _, err := w.Write(tg); err != nil {
+				t.Errorf("write tarball: %v", err)
+			}
 			return
 		}
 		if r.URL.Path == "/leftpad" {
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			if err := json.NewEncoder(w).Encode(map[string]any{
 				"name":      "leftpad",
 				"dist-tags": map[string]string{"latest": "1.3.0"},
 				"versions": map[string]any{
@@ -94,13 +80,14 @@ func TestInstallIsolatedTree(t *testing.T) {
 						},
 					},
 				},
-			})
+			}); err != nil {
+				t.Errorf("encode packument: %v", err)
+			}
 			return
 		}
 		http.NotFound(w, r)
 	}))
 	defer srv.Close()
-	_ = mux
 
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{
@@ -186,5 +173,28 @@ func TestSatisfiesCaret(t *testing.T) {
 	}
 	if Satisfies("2.0.0", "^1.0.0") {
 		t.Fatal("2.0.0 must not satisfy ^1.0.0")
+	}
+}
+
+func TestSatisfiesHyphen(t *testing.T) {
+	t.Parallel()
+	if !Satisfies("1.5.0", "1.0.0 - 2.0.0") {
+		t.Fatal("1.5.0 should satisfy 1.0.0 - 2.0.0")
+	}
+	if Satisfies("2.0.1", "1.0.0 - 2.0.0") {
+		t.Fatal("2.0.1 must not satisfy 1.0.0 - 2.0.0")
+	}
+}
+
+func TestReadManifestBadField(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "package.json")
+	if err := os.WriteFile(path, []byte(`{"name":"app","dependencies":"nope"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := readManifest(path)
+	if !errors.Is(err, ErrManifest) {
+		t.Fatalf("got %v", err)
 	}
 }

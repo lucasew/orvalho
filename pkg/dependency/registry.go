@@ -2,6 +2,7 @@ package dependency
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -72,8 +73,8 @@ func (r registry) packument(name string) (*packument, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil, fmt.Errorf("%w: %s: %s", ErrRegistry, name, resp.Status)
+		_, drainErr := io.Copy(io.Discard, resp.Body)
+		return nil, errors.Join(fmt.Errorf("%w: %s: %s", ErrRegistry, name, resp.Status), drainErr)
 	}
 	var p packument
 	if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {

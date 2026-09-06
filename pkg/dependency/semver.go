@@ -88,8 +88,7 @@ func Satisfies(ver, rng string) bool {
 		}
 		return false
 	}
-	if strings.Contains(rng, " - ") {
-		a, b, _ := strings.Cut(rng, " - ")
+	if a, b, ok := strings.Cut(rng, " - "); ok {
 		lo, err1 := parseVersion(strings.TrimSpace(a))
 		hi, err2 := parseVersion(strings.TrimSpace(b))
 		return err1 == nil && err2 == nil && v.cmp(lo) >= 0 && v.cmp(hi) <= 0

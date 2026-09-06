@@ -29,3 +29,19 @@ func TestParseIntegrityEmpty(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestParseIntegrityFirstWins(t *testing.T) {
+	t.Parallel()
+	sum := sha512.Sum512([]byte("hello"))
+	first := "sha512-" + base64.StdEncoding.EncodeToString(sum[:])
+	algo, hash, err := ParseIntegrity(first + " sha256-deadbeef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if algo != "sha512" {
+		t.Fatalf("algo %q", algo)
+	}
+	if hash != hex.EncodeToString(sum[:]) {
+		t.Fatalf("hash %q", hash)
+	}
+}

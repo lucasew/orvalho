@@ -29,12 +29,21 @@ func readManifest(path string) (*Manifest, error) {
 		return nil, fmt.Errorf("%w: %v", ErrManifest, err)
 	}
 	m := &Manifest{raw: raw}
-	_ = decodeField(raw, "name", &m.Name)
-	_ = decodeField(raw, "version", &m.Version)
-	_ = decodeField(raw, "dependencies", &m.Dependencies)
-	_ = decodeField(raw, "devDependencies", &m.DevDependencies)
-	_ = decodeField(raw, "optionalDependencies", &m.OptionalDependencies)
-	_ = decodeField(raw, "peerDependencies", &m.PeerDependencies)
+	for _, f := range []struct {
+		key  string
+		dest any
+	}{
+		{"name", &m.Name},
+		{"version", &m.Version},
+		{"dependencies", &m.Dependencies},
+		{"devDependencies", &m.DevDependencies},
+		{"optionalDependencies", &m.OptionalDependencies},
+		{"peerDependencies", &m.PeerDependencies},
+	} {
+		if err := decodeField(raw, f.key, f.dest); err != nil {
+			return nil, fmt.Errorf("%w: %s: %v", ErrManifest, f.key, err)
+		}
+	}
 	if m.Dependencies == nil {
 		m.Dependencies = map[string]string{}
 	}
@@ -81,13 +90,11 @@ func writeManifest(path string, m *Manifest) error {
 	if err := put("devDependencies", m.DevDependencies, len(m.DevDependencies) == 0); err != nil {
 		return err
 	}
-	keys := make([]string, 0, len(raw))
-	// Preserve a stable order: marshal via map (sorted by encoding/json).
+	// encoding/json sorts map keys, so the written file is stable.
 	data, err := json.MarshalIndent(jsonKeyed(raw), "", "  ")
 	if err != nil {
 		return err
 	}
-	_ = keys
 	data = append(data, '\n')
 	return writeFileAtomic(path, data, 0o644)
 }
