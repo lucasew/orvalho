@@ -7,23 +7,11 @@ import (
 	"strings"
 )
 
-// NodeModules resolves bare specifiers against FS. If FS has a
-// node_modules directory, packages are loaded from there; otherwise
-// the root is the package tree. Specifiers that already name a file
-// inside FS are returned as-is. Scheme specifiers call next.
+// NodeModules looks up package files in FS. If FS has a node_modules
+// directory, packages are loaded from there; otherwise the root is the
+// package tree. Specifiers that already name a file are returned as-is.
 type NodeModules struct {
 	FS fs.FS
-}
-
-func (n NodeModules) Resolve(spec string, next Resolver[string]) (string, error) {
-	if n.FS == nil || isSchemeSpec(spec) {
-		return next(spec)
-	}
-	file, ok := n.Lookup(spec)
-	if !ok {
-		return next(spec)
-	}
-	return file, nil
 }
 
 // Lookup returns the file path inside FS for spec, or false if this
