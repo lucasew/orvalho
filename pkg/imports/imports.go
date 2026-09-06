@@ -1,19 +1,110 @@
-// Package imports validates specifiers and looks up files in an
-// injected tree. It does not know about Isolates or Bindings.
+// Package imports is a specifier resolve chain and a file lookup for
+// an injected tree. It does not know about Isolates or Bindings.
 package imports
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 )
 
 var (
-	// ErrNotFound means the tree has no file for the specifier.
+	// ErrNotFound means no handler claimed the specifier.
 	ErrNotFound = errors.New("imports: not found")
 	// ErrSpecifier means the name is empty, absolute, or a broken scheme.
 	ErrSpecifier = errors.New("imports: invalid specifier")
 )
+
+// Resolver looks up one specifier.
+type Resolver[T any] func(specifier string) (T, error)
+
+// Handler is one step in a resolve chain. Call next to pass the specifier
+// on (or a rewritten one). The list is tried in order.
+type Handler[T any] interface {
+	Resolve(specifier string, next Resolver[T]) (T, error)
+}
+
+// Func adapts a function to a Handler.
+type Func[T any] func(specifier string, next Resolver[T]) (T, error)
+
+func (f Func[T]) Resolve(specifier string, next Resolver[T]) (T, error) {
+	if f == nil {
+		return next(specifier)
+	}
+	return f(specifier, next)
+}
+
+// Map claims exact specifiers. A missing key calls next.
+type Map[T any] map[string]T
+
+func (m Map[T]) Resolve(specifier string, next Resolver[T]) (T, error) {
+	v, ok := m[specifier]
+	if !ok {
+		return next(specifier)
+	}
+	return v, nil
+}
+
+// Scheme claims specifiers whose scheme matches Name (node, orvalho, …).
+// Load is called only for those specifiers. ErrNotFound continues the chain.
+type Scheme[T any] struct {
+	Name string
+	Load func(specifier string) (T, error)
+}
+
+func (s Scheme[T]) Resolve(specifier string, next Resolver[T]) (T, error) {
+	if s.Load == nil || !strings.HasPrefix(specifier, s.Name+":") {
+		return next(specifier)
+	}
+	v, err := s.Load(specifier)
+	if err != nil && errors.Is(err, ErrNotFound) {
+		return next(specifier)
+	}
+	return v, err
+}
+
+// Alias rewrites From to To and continues the chain. Put it before
+// the handler that defines To.
+type Alias[T any] struct {
+	From, To string
+}
+
+func (a Alias[T]) Resolve(specifier string, next Resolver[T]) (T, error) {
+	if specifier == a.From {
+		specifier = a.To
+	}
+	return next(specifier)
+}
+
+// Resolve validates spec and runs handlers in order. Invalid specifiers
+// never reach a handler, so a chain cannot become a filesystem walk.
+func Resolve[T any](spec string, handlers ...Handler[T]) (T, error) {
+	var zero T
+	if !Valid(spec) {
+		return zero, fmt.Errorf("%w: %q", ErrSpecifier, spec)
+	}
+	return Chain(handlers...)(spec)
+}
+
+// Chain composes handlers. Earlier entries wrap later ones.
+func Chain[T any](handlers ...Handler[T]) Resolver[T] {
+	next := func(spec string) (T, error) {
+		var zero T
+		return zero, fmt.Errorf("%w: %q", ErrNotFound, spec)
+	}
+	for i := len(handlers) - 1; i >= 0; i-- {
+		h := handlers[i]
+		if h == nil {
+			continue
+		}
+		n := next
+		next = func(spec string) (T, error) {
+			return h.Resolve(spec, n)
+		}
+	}
+	return next
+}
 
 // Valid reports whether spec may be resolved. Scheme names, bare
 // package names, and relative paths are allowed. Empty names and

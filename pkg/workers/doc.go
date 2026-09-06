@@ -51,6 +51,7 @@
 // # Imports
 //
 // [Options.Imports] is a chain of [Import] values. Each Resolve returns a
-// Binding. [Map] is exact names; [Scheme] is a family (node:*, orvalho:*);
+// Binding. [imports.Map], [imports.Scheme], and [imports.Alias] are the
+// generic resolvers (also available as Binding-pinned aliases here);
 // [NodeModules] reads an injected fs.FS. Unclaimed specifiers miss.
 package workers

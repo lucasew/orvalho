@@ -236,7 +236,7 @@ func TestRequireSchemeHandlerIsLazy(t *testing.T) {
 			Scheme{Name: "orvalho", Load: func(spec string) (Binding, error) {
 				seen = append(seen, spec)
 				if spec != "orvalho:rebimboca-da-parafuseta" {
-					return nil, ErrModuleNotFound
+					return nil, imports.ErrNotFound
 				}
 				return Bind(pingObject{}), nil
 			}},
