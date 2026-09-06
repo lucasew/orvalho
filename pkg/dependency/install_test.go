@@ -198,3 +198,39 @@ func TestReadManifestBadField(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestParseVersionWraps(t *testing.T) {
+	t.Parallel()
+	_, err := parseVersion("nope")
+	if !errors.Is(err, ErrVersion) {
+		t.Fatalf("got %v", err)
+	}
+	_, err = parseVersion("1.2.x")
+	if !errors.Is(err, ErrVersion) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestUnpackRejectsEscape(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	body := []byte("x")
+	if err := tw.WriteHeader(&tar.Header{Name: "package/../../etc/passwd", Mode: 0o644, Size: int64(len(body))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err := unpackTarball(bytes.NewReader(buf.Bytes()), t.TempDir())
+	if !errors.Is(err, ErrTarPath) {
+		t.Fatalf("got %v", err)
+	}
+}

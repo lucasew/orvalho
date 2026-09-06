@@ -15,4 +15,8 @@ var (
 	ErrManifest = errors.New("dependency: manifest")
 	// ErrSpecifier means the Dependency name is empty or invalid.
 	ErrSpecifier = errors.New("dependency: specifier")
+	// ErrVersion means a version string is not a dotted triple.
+	ErrVersion = errors.New("dependency: version")
+	// ErrTarPath means a tarball member escapes the extract root.
+	ErrTarPath = errors.New("dependency: unsafe tar path")
 )
