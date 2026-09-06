@@ -11,14 +11,20 @@ import (
 	"strings"
 )
 
+type (
+	sha1Hash   struct{ hash.Hash }
+	sha256Hash struct{ hash.Hash }
+	sha512Hash struct{ hash.Hash }
+)
+
 // Sum is a streaming SRI hasher. Write feeds the digest. String is algo-base64.
 type Sum struct {
 	hash.Hash
 }
 
-func NewSum(h hash.Hash) *Sum {
-	return &Sum{h}
-}
+func SHA1() *Sum   { return &Sum{sha1Hash{sha1.New()}} }
+func SHA256() *Sum { return &Sum{sha256Hash{sha256.New()}} }
+func SHA512() *Sum { return &Sum{sha512Hash{sha512.New()}} }
 
 func (s *Sum) String() string {
 	return s.Algo() + "-" + base64.StdEncoding.EncodeToString(s.Sum(nil))
@@ -29,15 +35,15 @@ func (s *Sum) Hex() string {
 }
 
 func (s *Sum) Algo() string {
-	switch s.Size() {
-	case sha512.Size:
+	switch s.Hash.(type) {
+	case sha512Hash:
 		return "sha512"
-	case sha256.Size:
+	case sha256Hash:
 		return "sha256"
-	case sha1.Size:
+	case sha1Hash:
 		return "sha1"
 	default:
-		return fmt.Sprintf("sha%d", 8*s.Size())
+		return ""
 	}
 }
 

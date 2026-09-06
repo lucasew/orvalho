@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"crypto/sha512"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,7 +17,7 @@ import (
 func npmTarball(t *testing.T, files map[string]string) (data []byte, sri string) {
 	t.Helper()
 	var buf bytes.Buffer
-	sum := NewSum(sha512.New())
+	sum := SHA512()
 	w := io.MultiWriter(&buf, sum)
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
