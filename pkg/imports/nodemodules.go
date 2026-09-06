@@ -7,11 +7,11 @@ import (
 	"strings"
 )
 
-// NodeModules looks up package files in FS. If FS has a node_modules
-// directory, packages are loaded from there; otherwise the root is the
-// package tree. Specifiers that already name a file are returned as-is.
+// NodeModules looks up package files in FS using a Node.js CommonJS walk
+// (TEC-17). From is the requiring file inside FS; empty means the FS root.
 type NodeModules struct {
-	FS fs.FS
+	FS   fs.FS
+	From string
 }
 
 // Resolve implements Handler[any]. A hit is a Script; a miss calls next.
@@ -33,8 +33,8 @@ func (n NodeModules) Lookup(spec string) (string, bool) {
 	if n.FS == nil {
 		return "", false
 	}
-	if file, ok := n.file(spec); ok {
-		return file, true
+	if p := path.Clean(spec); p != ".." && !strings.HasPrefix(p, "../") && n.isFile(p) {
+		return p, true
 	}
 	name, sub, ok := splitPackage(spec)
 	if !ok {
@@ -48,8 +48,18 @@ func (n NodeModules) Lookup(spec string) (string, bool) {
 }
 
 func (n NodeModules) packageDir(name string) (string, bool) {
-	if n.isDir(path.Join("node_modules", name)) {
-		return path.Join("node_modules", name), true
+	start := "."
+	if n.From != "" {
+		start = path.Dir(n.From)
+	}
+	for dir := start; ; dir = path.Dir(dir) {
+		cand := path.Join(dir, "node_modules", name)
+		if n.isDir(cand) {
+			return cand, true
+		}
+		if dir == "." || dir == "/" {
+			break
+		}
 	}
 	if n.isDir(name) {
 		return name, true
@@ -58,19 +68,29 @@ func (n NodeModules) packageDir(name string) (string, bool) {
 }
 
 func (n NodeModules) packageFile(pkgDir, sub string) (string, bool) {
+	data, err := fs.ReadFile(n.FS, path.Join(pkgDir, "package.json"))
+	if err == nil {
+		if file, ok := resolveExports(data, sub); ok {
+			return n.file(path.Join(pkgDir, file))
+		}
+		if exportMiss(data, sub) {
+			return "", false
+		}
+		if sub == "" {
+			var meta struct {
+				Main string `json:"main"`
+			}
+			main := "index.js"
+			if json.Unmarshal(data, &meta) == nil && meta.Main != "" {
+				main = meta.Main
+			}
+			return n.file(path.Join(pkgDir, main))
+		}
+	}
 	if sub != "" {
 		return n.file(path.Join(pkgDir, sub))
 	}
-	main := "index.js"
-	if data, err := fs.ReadFile(n.FS, path.Join(pkgDir, "package.json")); err == nil {
-		var meta struct {
-			Main string `json:"main"`
-		}
-		if json.Unmarshal(data, &meta) == nil && meta.Main != "" {
-			main = meta.Main
-		}
-	}
-	return n.file(path.Join(pkgDir, main))
+	return n.file(path.Join(pkgDir, "index.js"))
 }
 
 func (n NodeModules) file(p string) (string, bool) {

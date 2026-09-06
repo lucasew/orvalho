@@ -26,6 +26,11 @@ Non-goals:
 9. Replacing goja.
 10. CGO.
 11. A god Runtime type that owns Isolate, Package, overlay, and Identity.
+12. Host Node.js as a guest runtime or as a shebang target.
+13. Lifecycle scripts (`preinstall`, `install`, `postinstall`).
+14. Native Node.js addons (`.node`). Guest native code is WASM.
+15. Workspaces in this version.
+16. Hoisted `node_modules` as the default linker.
 
 Inherited C (cite the file):
 
@@ -35,6 +40,7 @@ Inherited C (cite the file):
 - Command-line parse: Cobra, single binary, `--data-dir` explicit — `cmd/orvalho`
 - Package encoding: directory authoring form and ZIP deploy form, root `orvalho.cue` — Package implementation
 - `attic/` is not product — `attic/README.md`
+- Tarball fetch: fetchurl `Fetcher` — TEC-06
 
 ## Technique
 
@@ -45,7 +51,11 @@ Inherited C (cite the file):
 | TEC-03 | Guest throw | Wrap in a tabled sentinel so `errors.Is` works. The JavaScript string is context, not identity | Go error |
 | TEC-04 | Host CUE instance, Package CUE instance | Unify with embedded prelude. Validate. On failure never allocate an Isolate. Never listen | Configuration |
 | TEC-05 | Package directory | esbuild Go API downlevels and bundles to one IIFE. No child process. Product binary is self-contained | Guest script string |
-| TEC-06 | `package.json` + lockfile | Resolve a tree into a content store. Durable writes use atomic stage+rename | Store + lockfile |
+| TEC-06 | `package.json` + Lockfile + registry tarball URL + integrity | Fetch through fetchurl (`FETCHURL_SERVER` when set, then the `resolved` URL). Verify the hash. Store the tarball at `{store}/{algo}/{shard}/{hash}` (shard is the first two hex characters). Durable writes use atomic stage+rename | Content store |
+| TEC-15 | Lockfile + content store | Unpack each Dependency into `node_modules/.orvalho/<name>@<version>/node_modules/<name>`. Symlink each root Dependency at `node_modules/<name>`. Inside a slot, symlink that package's declared Dependencies and each peer Dependency that already exists in the graph | Isolated tree |
+| TEC-16 | `package.json` + existing Lockfile bytes | Parse through the Lockfile seam. The first adapter is `package-lock.json` lockfileVersion 2 and 3. The writer emits lockfileVersion 3. `packages` keys are npm paths (`node_modules/<name>`). An unrecognized Lockfile is an error. A new project receives `package-lock.json` | Lockfile |
+| TEC-17 | specifier + requiring file | Node.js CommonJS walk: parent `node_modules` climb, isolated nested slots, `exports` with conditions `node` and `require`, then `main`, then `index.js` / `.js` / `.json`. No `.node` | File path inside the tree |
+| TEC-18 | package `bin` field | Symlink `node_modules/.bin/<name>` to the package file. When Script run executes a bin or a `package.json` script, prepend a directory whose `node` entry is this CLI | Process with Orvalho as `node` |
 | TEC-07 | Package tree | Write a ZIP with root `orvalho.cue`. Do not enroll a Device | Package ZIP |
 | TEC-08 | WinterTC entrypoint | Host maps HTTP to `default.fetch(request, env, ctx)` | HTTP response |
 | TEC-09 | Script entrypoint | Host evaluates the Script target (file path, `package.json` script name) as main. `default.fetch` is not required | Process exit |
@@ -64,8 +74,13 @@ Inherited C (cite the file):
 | TEC-03 | `errors` sentinels | implement | string-match guest text | path:pkg/workers/errors.go, stdlib:errors |
 | TEC-04 | CUE | adopt | a second schema, JSON/YAML config | path:pkg/cuex, org:CUE |
 | TEC-05 | esbuild `pkg/api` | wrap | `esbuild` on `PATH`, `os/exec` of esbuild | github.com/evanw/esbuild/pkg/api |
-| TEC-06 | content store | implement | exec pnpm. Exec Aube | none |
-| TEC-06 write | lewkit `x/io/atomic` | wrap | in-place write of finals | lewtec/lewkit |
+| TEC-06 | fetchurl `Fetcher` | adopt | a second download-and-hash client | github.com/fetchurl/fetchurl |
+| TEC-06 store | content store | implement | exec pnpm. Exec Aube. Import fetchurl `internal/repository` | fetchurl/spec store layout (`/:algo/:shard/:hash`) |
+| TEC-06 write | stage+rename | implement | in-place write of finals | stdlib:os.Rename (lewkit `x/io/atomic` requires Go 1.27; this tree is Go 1.25) |
+| TEC-15 | isolated linker | implement | hoisted default. Virtual store named `.pnpm` or `.aube` | none |
+| TEC-16 | `package-lock.json` | implement | default `aube-lock.yaml`. Other lockfile writers in this version | none |
+| TEC-17 | Node.js CommonJS walk | implement | host Node.js as the resolver | path:pkg/imports |
+| TEC-18 | scoped `PATH` `node` trampoline | implement | rewrite store shebangs. Install a global `node` | none |
 | TEC-07 | `archive/zip` | wrap | a second archive format | path:pkg/ovpkg, stdlib:archive/zip |
 | TEC-08 | `net/http` | adopt | a second HTTP stack | path:pkg/workers, stdlib:net/http |
 | TEC-09 | Isolate | implement | require `default.fetch` on Script | path:pkg/workers |
@@ -83,7 +98,7 @@ Inherited C (cite the file):
 |------|------|--------|------------|-----------|
 | Language | Go | C | TEC-01–TEC-14 | `go.mod` |
 | Runtime | goja | C | TEC-01 | `go.mod` |
-| Persistence | files: `--data-dir` Identity, project lockfile + store | D | TEC-06, Identity | |
+| Persistence | files: `--data-dir` Identity; project Lockfile; content store at `--store-dir` when set, else `<project>/.orvalho/store` | C | TEC-06, TEC-16, Identity | this tree, fetchurl/spec |
 | UI | none | D | | |
 | Packaging | ZIP Package, self-contained binary | C | TEC-05, TEC-07 | path:pkg/ovpkg |
 | Identity | Ed25519 PEM | C | Identity generate | path:pkg/identity |
@@ -98,6 +113,9 @@ Inherited C (cite the file):
 | Script program start | Script | bun main, node main |
 | Deploy unit | Package | ovpkg (as a type), bundle (as the unit), app |
 | Registry module in the store | Dependency | pkg, dep, npm package (as our type) |
+| Isolated `node_modules` projection | isolated tree | hoisted tree (as the default), flat node_modules (as the type) |
+| Hidden isolated slots | virtual store | `.pnpm`, `.aube` (as our directory name) |
+| Hash-addressed tarball directory | content store | cache (as the type), CAS |
 | Host CUE instance | Configuration | config (as a type), settings |
 | Manager keypair | Identity | manager (as the key type), keypair (as the type name) |
 | Recorded ULA /128 | Allocation | address (alone), IP (as the type) |
@@ -145,7 +163,7 @@ Only these short forms MAY appear as tokens in law and in new exported names. An
 | FS | Go `fs.FS` only |
 | JSON | JavaScript Object Notation |
 
-Proper names (not shortenings): Orvalho, WinterTC, Cloudflare, Node.js, goja, wazero, Cobra, esbuild, lewkit.
+Proper names (not shortenings): Orvalho, WinterTC, Cloudflare, Node.js, goja, wazero, Cobra, esbuild, lewkit, fetchurl.
 
 Banned in new exported identifiers and new import paths: `cfg`, `pkg`, `util`, `helpers`, `misc`, `mgr`, `iso`, `dep`, `impl`, `svc`, `dev`, `vm`, `opts` as a type, `ovpkg` as a type, `cuex` as a type, `HAL`, `RPC`, `CAS`, `XDG`, `SSR`, `CF`, `KV`, `SQL`, `APK`, `SDK`, `LAN`, `WAN`, `UI`, `NAT`, `DI`.
 
@@ -166,6 +184,7 @@ Legacy import paths (MAY remain on disk; new types use the approved word): Confi
 | Allocation | yes | identity (recorded ULA) | store records it | bad plan → error | Invent a /128 outside the allocator |
 | Actor | yes (interface) | identity | host-driven | `Tick` error on cancel. `Tick` error on fail | Start a free-running guest loop |
 | Dependency | yes | identity (name + version in the store) | store mutates | resolve fail → error | Treat it as a Package |
+| Store | yes | identity (directory of hashed tarballs) | yes (atomic writes) | hash mismatch → error; fetch fail → error | Share it with `--data-dir`. Write finals in place |
 
 ### Command-line interface
 
@@ -191,15 +210,16 @@ Grammar: `orvalho <noun> <action>`. Depth is two. `orvalho version` is the only 
 | `actor install` | `--data-dir` | later | fail closed, tabled error |
 | `actor list` | `--data-dir` | later | fail closed, tabled error |
 
-`--data-dir` is required for Identity, Configuration, Device, Manager, and Actor commands. `package`, `script`, and `dependency` commands do not use `--data-dir`. Dependency store is `--store-dir` when that flag is set. Otherwise the store is project-local.
+`--data-dir` is required for Identity, Configuration, Device, Manager, and Actor commands. `package`, `script`, and `dependency` commands do not use `--data-dir`. Dependency store is `--store-dir` when that flag is set. Otherwise the store is `<project>/.orvalho/store`.
 
 ### Stored entities (CLI)
 
 | Entity | Kind | Identity authority | A/B rels `(min,max)` | Root | Invariant IDs |
 |--------|------|--------------------|----------------------|------|---------------|
 | Identity | entity | this data-dir, Ed25519 PublicID | Operator (0,\*) — Identity (1,1) per file | yes | INV-06 |
-| Lockfile | entity | project directory | Project (1,1) — Lockfile (0,1) | yes | INV-07 |
-| Dependency | weak entity | (Lockfile, name, version) | Lockfile (1,\*) — Dependency (1,1) | no | INV-07 |
+| Lockfile | entity | project directory | Project (1,1) — Lockfile (0,1) | yes | INV-07, INV-19 |
+| Dependency | weak entity | (Lockfile, name, version) | Lockfile (1,\*) — Dependency (1,1) | no | INV-07, INV-18, INV-20 |
+| Store | entity | `--store-dir` when set, else `<project>/.orvalho/store` | Project (0,\*) — Store (0,1) | yes | INV-07 |
 
 ## Seams
 
@@ -211,7 +231,8 @@ Each row is an interface. One complete adapter at introduction. A second adapter
 | outbound Fetch | Options | allowlisted `net/http` | ambient Fetch |
 | Actor | host loop | Isolate mailbox | free-running guest thread |
 | overlay driver | mesh compose | loopback | assume host LAN |
-| atomic write | Package, Identity, lockfile | lewkit `x/io/atomic` | write finals in place |
+| atomic write | Package, Identity, Lockfile, Store | stage+rename | write finals in place |
+| Lockfile | `dependency install` | `package-lock.json` v2 read, v3 read and write | a second format without a new adapter |
 | primitive host ops | Isolate | Go funcs the JavaScript dispatcher calls | implement WinterTC as a Go function bag |
 
 Not interfaces: goja, esbuild, CUE, Cobra.
@@ -234,11 +255,19 @@ Not interfaces: goja, esbuild, CUE, Cobra.
 | INV-12 | CGO is absent | module | cgo import |
 | INV-13 | `serve` requires exactly one agent in the Package | `package serve` | silent first-agent pick |
 | INV-14 | Overlay addresses are not host LAN addresses | overlay | bind product traffic on the host interface as the model |
+| INV-15 | Only root Dependencies appear as `node_modules/<name>`. Transitive Dependencies live under the virtual store | isolated tree | hoist every transitive name to the project top level |
+| INV-16 | Script run and bin execution do not invoke host Node.js | Script, `.bin` | `#!/usr/bin/env node` reaching a host `node` |
+| INV-17 | Lifecycle scripts do not run. `.node` files are not loaded | Dependency | `postinstall`, `node-gyp`, `process.dlopen` |
+| INV-18 | An optional Dependency is installed only when its packument `cpu` list contains `wasm32` | Dependency | fetch `fsevents` or a platform `os`/`cpu` optional |
+| INV-19 | An unrecognized Lockfile is refused. A second Lockfile is not written beside it | Lockfile | write `package-lock.json` next to `yarn.lock` |
+| INV-20 | A peer Dependency is linked when a node with that name is already in the graph. A missing peer is not fetched | isolated tree | auto-install a missing peer from the registry |
 
 ## Errors
 
 | Public operation | Bad input | One reaction |
 |------------------|-----------|--------------|
+| Store fetch | integrity mismatch, all sources fail | tabled error; no store object |
+| Lockfile parse | unrecognized format, invalid JSON | tabled error; no tree |
 | Isolate.New / Fetch / Tick | missing `default.fetch` on WinterTC path, thrown guest, cancelled context | return tabled error; no panic |
 | Isolate outbound Fetch | host missing, allowlist miss | tabled deny; no request |
 | Binding.Materialize | unknown type, missing FS | never-allocate; tabled error |
@@ -251,7 +280,7 @@ Not interfaces: goja, esbuild, CUE, Cobra.
 | `orvalho version` | extra args | exit 1 |
 | `package serve` | bad Package, agent count ≠ 1 | exit 1, no listen |
 | `script run` | missing file, guest throw | exit 1 |
-| `dependency *` | resolve fail, unknown name | exit 1, store unchanged |
+| `dependency *` | resolve fail, unknown name, unrecognized Lockfile, integrity mismatch | exit 1, store unchanged |
 | `package build` | bundle fail | exit 1, no partial artifact |
 | `package create` | validate fail | exit 1, no ZIP |
 | `device` / `manager` / `actor` | invoked before later work | exit 1, tabled skeleton error |
@@ -309,6 +338,11 @@ Residual risk: goja defects, side channels, Operator compromise of `--data-dir`.
 - [ ] `identity generate` refuses to overwrite without force.
 - [ ] `go.mod` has no CGO requirement.
 - [ ] A listed WPT directory is executed in continuous integration. Failures are counted, not ignored.
+- [ ] `dependency install` on a `package.json` with one registry Dependency writes `package-lock.json`, a content-store object, and an isolated tree whose top level contains only that name.
+- [ ] `script run` of a file that `require`s that Dependency loads it through `exports` / `main` without host Node.js.
+- [ ] `package serve` of a Package that has `node_modules` still evaluates one IIFE and does not walk the isolated tree.
+- [ ] An optional Dependency whose packument `cpu` lacks `wasm32` is absent from the isolated tree and does not fail install.
+- [ ] A `yarn.lock` in the project directory makes `dependency install` exit 1 with the store and `node_modules` unchanged.
 
 ## Later work
 
@@ -322,6 +356,15 @@ Residual risk: goja defects, side channels, Operator compromise of `--data-dir`.
 8. Rename legacy import paths to glossary words.
 9. Switch the WPT pin to the official WinterTC cut when that cut exists.
 10. Durable storage Bindings, device Bindings, Actor-to-Actor messages through the host.
+11. Workspaces and `workspace:` specifiers.
+12. Lockfile adapters after `package-lock.json` (pnpm, Yarn, bun, aube).
+13. Registries other than `registry.npmjs.org`. `git:`, `file:`, `link:` specifiers.
+14. `package.json` `#imports`.
+15. Live `require` inside `package serve`.
+16. `--prod` (omit `devDependencies`).
+17. npm optional try-and-skip. Peer auto-fetch.
+18. Hoisted linker.
+19. User-level XDG content store. Sharing is `FETCHURL_SERVER`.
 
 ## Assumptions
 
@@ -329,7 +372,8 @@ Residual risk: goja defects, side channels, Operator compromise of `--data-dir`.
 |----|------|----------|
 | AS-01 | The npm registry answers Dependency resolve | `dependency *` cannot complete; Package serve of a pre-resolved tree still can |
 | AS-02 | esbuild `pkg/api` stays pure Go | TEC-05 and INV-05 need a new adopted tool |
-| AS-03 | lewkit `x/io/atomic` remains the write primitive | wrap a replacement with the same stage+rename contract |
+| AS-03 | stage+rename remains the write primitive | wrap a replacement with the same contract |
+| AS-04 | fetchurl `Fetcher` honors `FETCHURL_SERVER` and verifies lowercase hex hashes | TEC-06 needs a new adopted fetch client |
 
 ## Decision history
 
@@ -342,3 +386,9 @@ Residual risk: goja defects, side channels, Operator compromise of `--data-dir`.
 - ADR-0006: goja is not an interface. Rejected: swappable guest engines.
 - ADR-0007: WPT directories plus per-module Node.js tests are the compatibility bar. Rejected: full Node.js test tree as a gate. Rejected: first-party tests only.
 - ADR-0008: Dependency store is not `--data-dir`. Rejected: one directory for mesh state and the content store.
+- ADR-0009: Isolated linker under `node_modules/.orvalho/`. Rejected: npm hoisted default. Rejected: virtual store named `.pnpm` or `.aube`.
+- ADR-0010: Lockfile is `package-lock.json` with a named seam. Rejected: `aube-lock.yaml` as the default. Rejected: polyglot writers in this version. Rejected: exec aube.
+- ADR-0011: Orvalho is the Node.js-compatible runtime. Rejected: host `node` for `require` or `.bin`. Rejected: rewrite shebangs in the store. Script run prepends a scoped `PATH` `node` (bun `--bun`, always on).
+- ADR-0012: `package serve` stays one IIFE. Embedders MAY inject `NodeModules`. Rejected: Isolate walks `node_modules` on serve.
+- ADR-0013: Optional Dependencies install only when packument `cpu` contains `wasm32`. Rejected: npm try-and-skip for platform addons.
+- ADR-0014: Peer Dependencies are satisfied from the existing graph. Rejected: npm 7 auto-fetch of a missing peer.

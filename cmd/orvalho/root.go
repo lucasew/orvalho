@@ -48,6 +48,7 @@ func init() {
 	rootCmd.AddCommand(managerCmd)
 	rootCmd.AddCommand(workerCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(dependencyCmd)
 }
 
 var versionCmd = &cobra.Command{

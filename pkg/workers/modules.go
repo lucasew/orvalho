@@ -33,7 +33,7 @@ func (iso *Isolate) loadModule(spec string) (goja.Value, error) {
 	if v, ok := iso.moduleCache[spec]; ok {
 		return v, nil
 	}
-	v, err := imports.Resolve(spec, iso.opts.Imports...)
+	v, err := imports.Resolve(spec, withImportFrom(iso.opts.Imports, iso.importFrom)...)
 	if err != nil {
 		if errors.Is(err, imports.ErrSpecifier) {
 			return nil, fmt.Errorf("%w: %q", ErrModuleSpecifier, spec)
@@ -62,6 +62,27 @@ func (iso *Isolate) loadModule(spec string) (goja.Value, error) {
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrModuleNotFound, spec)
 	}
+}
+
+func withImportFrom(handlers []imports.Handler[any], from string) []imports.Handler[any] {
+	if from == "" || len(handlers) == 0 {
+		return handlers
+	}
+	out := make([]imports.Handler[any], len(handlers))
+	for i, h := range handlers {
+		switch n := h.(type) {
+		case imports.NodeModules:
+			n.From = from
+			out[i] = n
+		case *imports.NodeModules:
+			cp := *n
+			cp.From = from
+			out[i] = cp
+		default:
+			out[i] = h
+		}
+	}
+	return out
 }
 
 func (iso *Isolate) rewriteRelative(spec string) string {
