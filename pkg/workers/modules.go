@@ -24,7 +24,7 @@ type NodeModules struct {
 	FS fs.FS
 }
 
-func (n NodeModules) Resolve(spec string, next func(string) (Binding, error)) (Binding, error) {
+func (n NodeModules) Resolve(spec string, next imports.Resolver[Binding]) (Binding, error) {
 	file, ok := (imports.NodeModules{FS: n.FS}).Lookup(spec)
 	if !ok {
 		return next(spec)
