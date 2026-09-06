@@ -1,6 +1,6 @@
 module github.com/lucasew/orvalho
 
-go 1.25.12
+go 1.27.0
 
 require (
 	cuelang.org/go v0.14.1
@@ -8,6 +8,7 @@ require (
 	github.com/btcsuite/btcd/btcutil v1.1.6
 	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9
 	github.com/fetchurl/fetchurl v0.0.0-20260824103541-49881a25d469
+	github.com/lewtec/lewkit v0.0.0-20260903000910-52886154b6dd
 	github.com/spf13/cobra v1.10.2
 	github.com/stellar/go v0.0.0-20251023205731-8cd5ab33bcdd
 	github.com/tyler-smith/go-bip39 v1.1.0
@@ -29,6 +30,7 @@ require (
 	github.com/shogo82148/go-sfv v0.3.3 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	golang.org/x/net v0.47.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
