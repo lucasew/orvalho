@@ -67,7 +67,10 @@ func (iso *Isolate) buildEnvLocked() (*goja.Object, error) {
 	return env, nil
 }
 
-// Binding is a host-side env object factory (goja-native DI).
+// Binding is a factory for one guest JS object. The isolate calls
+// Materialize the first time the object is needed (env on Fetch, or
+// require of a specifier). Implementors must not touch host I/O except
+// through values the embedder already put on the Binding.
 type Binding interface {
 	Materialize(iso *Isolate) (*goja.Object, error)
 }

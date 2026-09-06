@@ -24,7 +24,7 @@ type NodeModules struct {
 	FS fs.FS
 }
 
-func (n NodeModules) Resolve(spec string, next imports.Resolver[Binding]) (Binding, error) {
+func (n NodeModules) Resolve(spec string, next func(string) (Binding, error)) (Binding, error) {
 	file, ok := (imports.NodeModules{FS: n.FS}).Lookup(spec)
 	if !ok {
 		return next(spec)
@@ -70,7 +70,7 @@ func (iso *Isolate) loadModule(spec string) (goja.Value, error) {
 	if v, ok := iso.moduleCache[spec]; ok {
 		return v, nil
 	}
-	b, err := imports.Resolve(spec, iso.opts.Imports...)
+	b, err := resolveImport(spec, iso.opts.Imports)
 	if err != nil {
 		if errors.Is(err, imports.ErrSpecifier) {
 			return nil, fmt.Errorf("%w: %q", ErrModuleSpecifier, spec)

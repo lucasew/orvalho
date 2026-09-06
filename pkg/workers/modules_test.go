@@ -10,8 +10,8 @@ import (
 	"github.com/lucasew/orvalho/pkg/imports"
 )
 
-func importMap(m map[string]Binding) []imports.Handler[Binding] {
-	return []imports.Handler[Binding]{imports.Map[Binding](m)}
+func importMap(m map[string]Binding) []Import {
+	return []Import{Map(m)}
 }
 
 type pingObject struct{}
@@ -232,11 +232,11 @@ export default {
 func TestRequireSchemeHandlerIsLazy(t *testing.T) {
 	var seen []string
 	iso := New(`var got = require("orvalho:rebimboca-da-parafuseta").ping();`, Options{
-		Imports: []imports.Handler[Binding]{
-			imports.Scheme[Binding]{Name: "orvalho", Load: func(spec string) (Binding, error) {
+		Imports: []Import{
+			Scheme{Name: "orvalho", Load: func(spec string) (Binding, error) {
 				seen = append(seen, spec)
 				if spec != "orvalho:rebimboca-da-parafuseta" {
-					return nil, imports.ErrNotFound
+					return nil, ErrModuleNotFound
 				}
 				return Bind(pingObject{}), nil
 			}},
@@ -253,9 +253,9 @@ func TestRequireSchemeHandlerIsLazy(t *testing.T) {
 
 func TestRequireAliasHandler(t *testing.T) {
 	iso := New(`var got = require("orvalho:buf").ping();`, Options{
-		Imports: []imports.Handler[Binding]{
-			imports.Alias[Binding]{From: "orvalho:buf", To: "orvalho:rebimboca-da-parafuseta"},
-			imports.Map[Binding]{
+		Imports: []Import{
+			Alias{From: "orvalho:buf", To: "orvalho:rebimboca-da-parafuseta"},
+			Map{
 				"orvalho:rebimboca-da-parafuseta": Bind(pingObject{}),
 			},
 		},
@@ -272,7 +272,7 @@ func TestRequireNodeModules(t *testing.T) {
 		"leftpad/index.js":     {Data: []byte(`exports.pad = function (s) { return "0" + s; };`)},
 	}
 	iso := New(`var got = require("leftpad").pad("1");`, Options{
-		Imports: []imports.Handler[Binding]{NodeModules{FS: fsys}},
+		Imports: []Import{NodeModules{FS: fsys}},
 	})
 	tickOK(t, iso)
 	if got := iso.vm.Get("got").String(); got != "01" {
@@ -287,7 +287,7 @@ func TestRequireNodeModulesRelativeInsidePackage(t *testing.T) {
 		"pkg/lib.js":       {Data: []byte(`module.exports = 4;`)},
 	}
 	iso := New(`var got = require("pkg");`, Options{
-		Imports: []imports.Handler[Binding]{NodeModules{FS: fsys}},
+		Imports: []Import{NodeModules{FS: fsys}},
 	})
 	tickOK(t, iso)
 	if n := iso.vm.Get("got").ToInteger(); n != 4 {
@@ -300,7 +300,7 @@ func TestRequireNodeModulesDir(t *testing.T) {
 		"node_modules/leftpad/index.js": {Data: []byte(`exports.n = 9;`)},
 	}
 	iso := New(`var got = require("leftpad").n;`, Options{
-		Imports: []imports.Handler[Binding]{NodeModules{FS: fsys}},
+		Imports: []Import{NodeModules{FS: fsys}},
 	})
 	tickOK(t, iso)
 	if n := iso.vm.Get("got").ToInteger(); n != 9 {
