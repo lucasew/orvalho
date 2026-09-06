@@ -9,7 +9,7 @@ import (
 
 func TestSumStringMatchesSRI(t *testing.T) {
 	t.Parallel()
-	s := NewSum(sha512.New())
+	s := SHA512()
 	if _, err := s.Write([]byte("hel")); err != nil {
 		t.Fatal(err)
 	}
