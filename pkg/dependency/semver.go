@@ -24,13 +24,16 @@ func parseVersion(s string) (version, error) {
 	}
 	parts := strings.Split(s, ".")
 	if len(parts) < 1 || len(parts) > 3 {
-		return version{}, fmt.Errorf("version %q", s)
+		return version{}, fmt.Errorf("%w: %q", ErrVersion, s)
 	}
 	nums := [3]int{}
 	for i, p := range parts {
 		n, err := strconv.Atoi(p)
-		if err != nil || n < 0 {
-			return version{}, fmt.Errorf("version %q", s)
+		if err != nil {
+			return version{}, fmt.Errorf("%w: %q: %w", ErrVersion, s, err)
+		}
+		if n < 0 {
+			return version{}, fmt.Errorf("%w: %q", ErrVersion, s)
 		}
 		nums[i] = n
 	}
