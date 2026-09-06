@@ -71,6 +71,46 @@ func TestNodeModulesExistingFilePath(t *testing.T) {
 	}), "pkg/lib.js", "pkg/lib.js")
 }
 
+func TestNodeModulesExportsRequire(t *testing.T) {
+	t.Parallel()
+	lookupOK(t, tree(map[string]string{
+		"pkg/package.json": `{"exports":{"require":"./cjs.js","import":"./esm.js"}}`,
+		"pkg/cjs.js":       `exports.n=1`,
+		"pkg/esm.js":       `export const n=2`,
+	}), "pkg", "pkg/cjs.js")
+}
+
+func TestNodeModulesExportsSubpathClosed(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"pkg/package.json": `{"exports":{".":"./index.js"}}`,
+		"pkg/index.js":     `exports.n=1`,
+		"pkg/secret.js":    `exports.n=2`,
+	})
+	if _, ok := (NodeModules{FS: fsys}).Lookup("pkg/secret"); ok {
+		t.Fatal("exports must hide secret.js")
+	}
+}
+
+func TestNodeModulesClimbFromNested(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"node_modules/.orvalho/foo@1.0.0/node_modules/foo/index.js": `require("bar")`,
+		"node_modules/.orvalho/foo@1.0.0/node_modules/bar/index.js": `exports.n=1`,
+		"node_modules/.orvalho/bar@2.0.0/node_modules/bar/index.js": `exports.n=2`,
+	})
+	got, ok := (NodeModules{
+		FS:   fsys,
+		From: "node_modules/.orvalho/foo@1.0.0/node_modules/foo/index.js",
+	}).Lookup("bar")
+	if !ok {
+		t.Fatal("miss")
+	}
+	if got != "node_modules/.orvalho/foo@1.0.0/node_modules/bar/index.js" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestNodeModulesMiss(t *testing.T) {
 	t.Parallel()
 	if _, ok := (NodeModules{FS: tree(nil)}).Lookup("lodash"); ok {
