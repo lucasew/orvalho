@@ -16,24 +16,8 @@ type Sum struct {
 	hash.Hash
 }
 
-type (
-	sha1Sum   struct{ hash.Hash }
-	sha256Sum struct{ hash.Hash }
-	sha512Sum struct{ hash.Hash }
-)
-
-// NewSum wraps h so Algo can type-switch (stdlib digest types are unexported).
 func NewSum(h hash.Hash) *Sum {
-	switch h.Size() {
-	case sha512.Size:
-		return &Sum{sha512Sum{h}}
-	case sha256.Size:
-		return &Sum{sha256Sum{h}}
-	case sha1.Size:
-		return &Sum{sha1Sum{h}}
-	default:
-		return &Sum{h}
-	}
+	return &Sum{h}
 }
 
 func (s *Sum) String() string {
@@ -45,12 +29,12 @@ func (s *Sum) Hex() string {
 }
 
 func (s *Sum) Algo() string {
-	switch s.Hash.(type) {
-	case sha512Sum:
+	switch s.Size() {
+	case sha512.Size:
 		return "sha512"
-	case sha256Sum:
+	case sha256.Size:
 		return "sha256"
-	case sha1Sum:
+	case sha1.Size:
 		return "sha1"
 	default:
 		return fmt.Sprintf("sha%d", 8*s.Size())
