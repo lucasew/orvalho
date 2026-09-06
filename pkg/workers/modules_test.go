@@ -10,8 +10,8 @@ import (
 	"github.com/lucasew/orvalho/pkg/imports"
 )
 
-func importMap(m map[string]Binding) []Import {
-	return []Import{Map(m)}
+func importMap(m map[string]any) []imports.Handler[any] {
+	return []imports.Handler[any]{imports.Map[any](m)}
 }
 
 type pingObject struct{}
@@ -46,7 +46,7 @@ func tickOK(t *testing.T, iso *Isolate) {
 
 func TestRequireHostBinding(t *testing.T) {
 	iso := New(`var got = require("orvalho:rebimboca-da-parafuseta").ping();`, Options{
-		Imports: importMap(map[string]Binding{
+		Imports: importMap(map[string]any{
 			"orvalho:rebimboca-da-parafuseta": Bind(pingObject{}),
 		}),
 	})
@@ -58,12 +58,12 @@ func TestRequireHostBinding(t *testing.T) {
 
 func TestRequireScriptUsesInjectedBinding(t *testing.T) {
 	iso := New(`var got = require("orvalho:shim").ping();`, Options{
-		Imports: importMap(map[string]Binding{
+		Imports: importMap(map[string]any{
 			"orvalho:rebimboca-da-parafuseta": Bind(pingObject{}),
-			"orvalho:shim": NewScriptBinding(`
+			"orvalho:shim": imports.Script{Source: `
 				var host = require("orvalho:rebimboca-da-parafuseta");
 				exports.ping = function () { return host.ping(); };
-			`),
+			`},
 		}),
 	})
 	tickOK(t, iso)
@@ -79,7 +79,7 @@ func TestRequireCacheIdentity(t *testing.T) {
 		var c = getBuiltinModule("orvalho:rebimboca-da-parafuseta");
 		var same = a === b && b === c;
 	`, Options{
-		Imports: importMap(map[string]Binding{
+		Imports: importMap(map[string]any{
 			"orvalho:rebimboca-da-parafuseta": Bind(pingObject{}),
 		}),
 	})
@@ -92,14 +92,14 @@ func TestRequireCacheIdentity(t *testing.T) {
 func TestImportNotMaterializedUntilRequire(t *testing.T) {
 	c := &countBinding{}
 	iso := New(`var ran = true;`, Options{
-		Imports: importMap(map[string]Binding{"orvalho:count": c}),
+		Imports: importMap(map[string]any{"orvalho:count": c}),
 	})
 	tickOK(t, iso)
 	if c.n != 0 {
 		t.Fatalf("Materialize ran at New/Tick without require: n=%d", c.n)
 	}
 	iso2 := New(`require("orvalho:count"); require("orvalho:count");`, Options{
-		Imports: importMap(map[string]Binding{"orvalho:count": c}),
+		Imports: importMap(map[string]any{"orvalho:count": c}),
 	})
 	tickOK(t, iso2)
 	if c.n != 1 {
@@ -159,15 +159,15 @@ func TestRequireCircularScripts(t *testing.T) {
 		var a = require("orvalho:a");
 		var ok = a.fromA === 1 && a.b.fromB === 2 && a.b.aSeen === 1;
 	`, Options{
-		Imports: importMap(map[string]Binding{
-			"orvalho:a": NewScriptBinding(`
+		Imports: importMap(map[string]any{
+			"orvalho:a": imports.Script{Source: `
 				exports.fromA = 1;
 				exports.b = require("orvalho:b");
-			`),
-			"orvalho:b": NewScriptBinding(`
+			`},
+			"orvalho:b": imports.Script{Source: `
 				exports.fromB = 2;
 				exports.aSeen = require("orvalho:a").fromA;
-			`),
+			`},
 		}),
 	})
 	tickOK(t, iso)
@@ -178,8 +178,8 @@ func TestRequireCircularScripts(t *testing.T) {
 
 func TestRequireScriptReplacesExports(t *testing.T) {
 	iso := New(`var got = require("orvalho:fn")();`, Options{
-		Imports: importMap(map[string]Binding{
-			"orvalho:fn": NewScriptBinding(`module.exports = function () { return 7; };`),
+		Imports: importMap(map[string]any{
+			"orvalho:fn": imports.Script{Source: `module.exports = function () { return 7; };`},
 		}),
 	})
 	tickOK(t, iso)
@@ -216,7 +216,7 @@ export default {
 };
 `)
 	iso := New(src, Options{
-		Imports: importMap(map[string]Binding{
+		Imports: importMap(map[string]any{
 			"orvalho:rebimboca-da-parafuseta": Bind(pingObject{}),
 		}),
 	})
@@ -232,8 +232,8 @@ export default {
 func TestRequireSchemeHandlerIsLazy(t *testing.T) {
 	var seen []string
 	iso := New(`var got = require("orvalho:rebimboca-da-parafuseta").ping();`, Options{
-		Imports: []Import{
-			Scheme{Name: "orvalho", Load: func(spec string) (Binding, error) {
+		Imports: []imports.Handler[any]{
+			imports.Scheme[any]{Name: "orvalho", Load: func(spec string) (any, error) {
 				seen = append(seen, spec)
 				if spec != "orvalho:rebimboca-da-parafuseta" {
 					return nil, imports.ErrNotFound
@@ -253,9 +253,9 @@ func TestRequireSchemeHandlerIsLazy(t *testing.T) {
 
 func TestRequireAliasHandler(t *testing.T) {
 	iso := New(`var got = require("orvalho:buf").ping();`, Options{
-		Imports: []Import{
-			Alias{From: "orvalho:buf", To: "orvalho:rebimboca-da-parafuseta"},
-			Map{
+		Imports: []imports.Handler[any]{
+			imports.Alias[any]{From: "orvalho:buf", To: "orvalho:rebimboca-da-parafuseta"},
+			imports.Map[any]{
 				"orvalho:rebimboca-da-parafuseta": Bind(pingObject{}),
 			},
 		},
@@ -272,7 +272,7 @@ func TestRequireNodeModules(t *testing.T) {
 		"leftpad/index.js":     {Data: []byte(`exports.pad = function (s) { return "0" + s; };`)},
 	}
 	iso := New(`var got = require("leftpad").pad("1");`, Options{
-		Imports: []Import{NodeModules{FS: fsys}},
+		Imports: []imports.Handler[any]{imports.NodeModules{FS: fsys}},
 	})
 	tickOK(t, iso)
 	if got := iso.vm.Get("got").String(); got != "01" {
@@ -287,7 +287,7 @@ func TestRequireNodeModulesRelativeInsidePackage(t *testing.T) {
 		"pkg/lib.js":       {Data: []byte(`module.exports = 4;`)},
 	}
 	iso := New(`var got = require("pkg");`, Options{
-		Imports: []Import{NodeModules{FS: fsys}},
+		Imports: []imports.Handler[any]{imports.NodeModules{FS: fsys}},
 	})
 	tickOK(t, iso)
 	if n := iso.vm.Get("got").ToInteger(); n != 4 {
@@ -300,7 +300,7 @@ func TestRequireNodeModulesDir(t *testing.T) {
 		"node_modules/leftpad/index.js": {Data: []byte(`exports.n = 9;`)},
 	}
 	iso := New(`var got = require("leftpad").n;`, Options{
-		Imports: []Import{NodeModules{FS: fsys}},
+		Imports: []imports.Handler[any]{imports.NodeModules{FS: fsys}},
 	})
 	tickOK(t, iso)
 	if n := iso.vm.Get("got").ToInteger(); n != 9 {

@@ -45,13 +45,12 @@
 // # Bindings
 //
 // [Binding] is a factory for a guest JS object. [AssetBinding] is env.NAME;
-// [Bind] wraps a [RuntimeObject]; [NewScriptBinding] is CommonJS source.
-// Materialize runs when the isolate first needs the object.
+// [Bind] wraps a [RuntimeObject]. Materialize runs when the isolate first
+// needs the object.
 //
 // # Imports
 //
-// [Options.Imports] is a chain of [Import] values. Each Resolve returns a
-// Binding. [imports.Map], [imports.Scheme], and [imports.Alias] are the
-// generic resolvers (also available as Binding-pinned aliases here);
-// [NodeModules] reads an injected fs.FS. Unclaimed specifiers miss.
+// [Options.Imports] is an [imports.Handler] chain. Hits are a Binding or
+// an [imports.Script]. [imports.Map], [imports.Scheme], [imports.Alias],
+// and [imports.NodeModules] live in that package. Unclaimed specifiers miss.
 package workers

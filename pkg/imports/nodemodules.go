@@ -14,6 +14,19 @@ type NodeModules struct {
 	FS fs.FS
 }
 
+// Resolve implements Handler[any]. A hit is a Script; a miss calls next.
+func (n NodeModules) Resolve(spec string, next Resolver[any]) (any, error) {
+	file, ok := n.Lookup(spec)
+	if !ok {
+		return next(spec)
+	}
+	data, err := fs.ReadFile(n.FS, file)
+	if err != nil {
+		return nil, err
+	}
+	return Script{Source: string(data), File: file}, nil
+}
+
 // Lookup returns the file path inside FS for spec, or false if this
 // tree does not contain it.
 func (n NodeModules) Lookup(spec string) (string, bool) {
