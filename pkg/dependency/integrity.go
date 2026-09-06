@@ -14,29 +14,30 @@ import (
 // Sum is a streaming SRI hasher. Write feeds the digest. String is algo-base64.
 type Sum struct {
 	hash.Hash
-	algo string
 }
 
-// NewSum wraps h. The algorithm name comes from a type switch on Size.
+type (
+	sha1Sum   struct{ hash.Hash }
+	sha256Sum struct{ hash.Hash }
+	sha512Sum struct{ hash.Hash }
+)
+
+// NewSum wraps h so Algo can type-switch (stdlib digest types are unexported).
 func NewSum(h hash.Hash) *Sum {
-	return &Sum{Hash: h, algo: algoOf(h)}
-}
-
-func algoOf(h hash.Hash) string {
 	switch h.Size() {
 	case sha512.Size:
-		return "sha512"
+		return &Sum{sha512Sum{h}}
 	case sha256.Size:
-		return "sha256"
+		return &Sum{sha256Sum{h}}
 	case sha1.Size:
-		return "sha1"
+		return &Sum{sha1Sum{h}}
 	default:
-		return fmt.Sprintf("sha%d", 8*h.Size())
+		return &Sum{h}
 	}
 }
 
 func (s *Sum) String() string {
-	return s.algo + "-" + base64.StdEncoding.EncodeToString(s.Sum(nil))
+	return s.Algo() + "-" + base64.StdEncoding.EncodeToString(s.Sum(nil))
 }
 
 func (s *Sum) Hex() string {
@@ -44,7 +45,16 @@ func (s *Sum) Hex() string {
 }
 
 func (s *Sum) Algo() string {
-	return s.algo
+	switch s.Hash.(type) {
+	case sha512Sum:
+		return "sha512"
+	case sha256Sum:
+		return "sha256"
+	case sha1Sum:
+		return "sha1"
+	default:
+		return fmt.Sprintf("sha%d", 8*s.Size())
+	}
 }
 
 // ParseIntegrity splits an npm SRI string into fetchurl algo + lowercase hex.
