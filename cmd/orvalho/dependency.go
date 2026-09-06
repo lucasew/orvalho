@@ -54,15 +54,15 @@ func runDependencyInstall(cmd *cobra.Command, args []string) error {
 	if len(args) == 1 {
 		dir = args[0]
 	}
-	return wrapDepErr(dependency.Install(cmd.Context(), dependencyOptions(dir)))
+	return wrapDepErr(dependencyOptions(dir).Install(cmd.Context()))
 }
 
 func runDependencyAdd(cmd *cobra.Command, args []string) error {
-	return wrapDepErr(dependency.Add(cmd.Context(), dependencyOptions("."), args[0]))
+	return wrapDepErr(dependencyOptions(".").Add(cmd.Context(), args[0]))
 }
 
 func runDependencyRemove(cmd *cobra.Command, args []string) error {
-	return wrapDepErr(dependency.Remove(cmd.Context(), dependencyOptions("."), args[0]))
+	return wrapDepErr(dependencyOptions(".").Remove(cmd.Context(), args[0]))
 }
 
 func wrapDepErr(err error) error {

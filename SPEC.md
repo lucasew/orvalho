@@ -34,7 +34,7 @@ Non-goals:
 
 Inherited C (cite the file):
 
-- Language: Go 1.27 — `go.mod`
+- Language: Go — `go.mod`
 - Guest virtual machine: goja — `go.mod`, Isolate implementation
 - Configuration language: CUE, embedded preludes, no `cue.mod` — Configuration load package
 - Command-line parse: Cobra, single binary, `--data-dir` explicit — `cmd/orvalho`

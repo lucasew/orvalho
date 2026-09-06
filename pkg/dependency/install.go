@@ -1,6 +1,7 @@
 package dependency
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -27,11 +28,7 @@ func (o Options) project() string {
 func (o Options) store() Store {
 	s := o.Store
 	if s.Dir == "" {
-		if o.StoreDir != "" {
-			s.Dir = o.StoreDir
-		} else {
-			s.Dir = filepath.Join(o.project(), DefaultStoreDir)
-		}
+		s.Dir = cmp.Or(o.StoreDir, filepath.Join(o.project(), DefaultStoreDir))
 	}
 	return s
 }
@@ -41,8 +38,8 @@ func (o Options) registry() registry {
 }
 
 // Install resolves the declared tree and writes the store, Lockfile, and isolated tree.
-func Install(ctx context.Context, opt Options) error {
-	dir := opt.project()
+func (o Options) Install(ctx context.Context) error {
+	dir := o.project()
 	lockPath, err := DetectLockfile(dir)
 	if err != nil {
 		return err
@@ -58,7 +55,7 @@ func Install(ctx context.Context, opt Options) error {
 			return err
 		}
 	} else {
-		g, err = resolveGraph(opt.registry(), man)
+		g, err = resolveGraph(o.registry(), man)
 		if err != nil {
 			return err
 		}
@@ -66,15 +63,15 @@ func Install(ctx context.Context, opt Options) error {
 			return err
 		}
 	}
-	return materialize(ctx, opt, g)
+	return o.materialize(ctx, g)
 }
 
 // Add puts name in dependencies, re-resolves, and materializes.
-func Add(ctx context.Context, opt Options, name string) error {
+func (o Options) Add(ctx context.Context, name string) error {
 	if name == "" {
 		return ErrSpecifier
 	}
-	dir := opt.project()
+	dir := o.project()
 	if _, err := DetectLockfile(dir); err != nil {
 		return err
 	}
@@ -86,7 +83,7 @@ func Add(ctx context.Context, opt Options, name string) error {
 	if n, r, ok := splitNameRange(name); ok {
 		name, rng = n, r
 	}
-	pm, err := opt.registry().packument(name)
+	pm, err := o.registry().packument(name)
 	if err != nil {
 		return err
 	}
@@ -102,22 +99,22 @@ func Add(ctx context.Context, opt Options, name string) error {
 	if err := writeManifest(manifestPath(dir), man); err != nil {
 		return err
 	}
-	g, err := resolveGraph(opt.registry(), man)
+	g, err := resolveGraph(o.registry(), man)
 	if err != nil {
 		return err
 	}
 	if err := WriteLockfile(filepath.Join(dir, LockfileName), g); err != nil {
 		return err
 	}
-	return materialize(ctx, opt, g)
+	return o.materialize(ctx, g)
 }
 
 // Remove drops name from the manifest, re-resolves, and materializes.
-func Remove(ctx context.Context, opt Options, name string) error {
+func (o Options) Remove(ctx context.Context, name string) error {
 	if name == "" {
 		return ErrSpecifier
 	}
-	dir := opt.project()
+	dir := o.project()
 	if _, err := DetectLockfile(dir); err != nil {
 		return err
 	}
@@ -135,14 +132,14 @@ func Remove(ctx context.Context, opt Options, name string) error {
 	if err := writeManifest(manifestPath(dir), man); err != nil {
 		return err
 	}
-	g, err := resolveGraph(opt.registry(), man)
+	g, err := resolveGraph(o.registry(), man)
 	if err != nil {
 		return err
 	}
 	if err := WriteLockfile(filepath.Join(dir, LockfileName), g); err != nil {
 		return err
 	}
-	return materialize(ctx, opt, g)
+	return o.materialize(ctx, g)
 }
 
 func splitNameRange(spec string) (name, rng string, ok bool) {
@@ -174,8 +171,8 @@ func splitNameRange(spec string) (name, rng string, ok bool) {
 	return spec, "latest", true
 }
 
-func materialize(ctx context.Context, opt Options, g *Graph) error {
-	st := opt.store()
+func (o Options) materialize(ctx context.Context, g *Graph) error {
+	st := o.store()
 	if err := os.MkdirAll(st.Dir, 0o755); err != nil {
 		return err
 	}
@@ -193,7 +190,7 @@ func materialize(ctx context.Context, opt Options, g *Graph) error {
 		if err := st.Fetch(ctx, algo, hash, []string{n.Resolved}); err != nil {
 			return err
 		}
-		dest := filepath.Join(opt.project(), slotDir(n.Name, n.Version))
+		dest := filepath.Join(o.project(), slotDir(n.Name, n.Version))
 		if err := os.MkdirAll(dest, 0o755); err != nil {
 			return err
 		}
@@ -209,5 +206,5 @@ func materialize(ctx context.Context, opt Options, g *Graph) error {
 			return err
 		}
 	}
-	return linkTree(opt.project(), g)
+	return (linker{root: o.project(), g: g}).run()
 }
