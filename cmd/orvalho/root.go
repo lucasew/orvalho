@@ -71,6 +71,7 @@ var (
 	ErrInvalidVarFlag    = errors.New("invalid --var (want NAME=value)")
 	ErrEnvFileFormat     = errors.New("env-file: want KEY=value")
 	ErrEnvFileEmptyKey   = errors.New("env-file: empty key")
+	ErrScriptMissing     = errors.New("script: missing file")
 )
 
 // requireDataDir returns an error if --data-dir was not set.

@@ -26,4 +26,5 @@ var (
 	ErrBindNilObject        = errors.New("workers: bind needs RuntimeObject")
 	ErrModuleNotFound       = errors.New("workers: module not found")
 	ErrModuleSpecifier      = errors.New("workers: invalid module specifier")
+	ErrScriptThrow          = errors.New("script: guest throw")
 )
