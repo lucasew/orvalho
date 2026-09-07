@@ -12,7 +12,8 @@ import (
 )
 
 // nodeOSBinding materializes guest require("os") / require("node:os").
-// Host facts only (GOOS, Hostname, TempDir, UserHomeDir, NumCPU).
+// Arch is process.arch (wasm32 unless Options.Arch). Other facts are
+// host (GOOS, Hostname, TempDir, UserHomeDir, NumCPU).
 type nodeOSBinding struct{}
 
 var _ Binding = nodeOSBinding{}
@@ -73,18 +74,11 @@ func (n *nodeOS) jsPlatform(goja.FunctionCall) goja.Value {
 }
 
 func (n *nodeOS) jsArch(goja.FunctionCall) goja.Value {
-	return n.iso.vm.ToValue(nodeArch())
-}
-
-func nodeArch() string {
-	switch runtime.GOARCH {
-	case "amd64":
-		return "x64"
-	case "386":
-		return "ia32"
-	default:
-		return runtime.GOARCH
+	arch := n.iso.opts.Arch
+	if arch == "" {
+		arch = "wasm32"
 	}
+	return n.iso.vm.ToValue(arch)
 }
 
 func (n *nodeOS) jsHomedir(goja.FunctionCall) goja.Value {

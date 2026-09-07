@@ -179,7 +179,7 @@ func (iso *Isolate) installProcess() {
 	}
 	arch := iso.opts.Arch
 	if arch == "" {
-		arch = runtime.GOARCH
+		arch = "wasm32"
 	}
 	iso.cwd = iso.opts.Cwd
 	if iso.cwd == "" {

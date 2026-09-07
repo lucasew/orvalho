@@ -108,7 +108,8 @@ type Options struct {
 	// Platform is process.platform. Empty means runtime.GOOS.
 	Platform string
 
-	// Arch is process.arch. Empty means runtime.GOARCH.
+	// Arch is process.arch and os.arch(). Empty means "wasm32"
+	// (INV-18). Native addons are not a goal.
 	Arch string
 
 	// PID is process.pid. Zero is a valid injected pid.

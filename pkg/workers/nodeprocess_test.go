@@ -53,6 +53,26 @@ func TestNodeProcessCwdInjected(t *testing.T) {
 	}
 }
 
+func TestNodeProcessArchDefault(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		if (process.arch !== "wasm32") throw new Error("arch " + process.arch);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeProcessArchInjected(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports(), Arch: "x64"})
+	err := iso.ScriptMain(t.Context(), `
+		if (process.arch !== "x64") throw new Error("arch " + process.arch);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeProcessPIDInjected(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports(), PID: 42})
 	err := iso.ScriptMain(t.Context(), `
