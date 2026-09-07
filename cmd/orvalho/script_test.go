@@ -99,8 +99,41 @@ func TestRunScriptFileSucceeds(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`var x = 1;`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runScriptFile(t.Context(), dir, path); err != nil {
+	if err := runScriptFile(t.Context(), dir, path, nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRunScriptFileShebang(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bin.js")
+	if err := os.WriteFile(path, []byte("#!/usr/bin/env node\nvar x = 1;\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runScriptFile(t.Context(), dir, path, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEvalFSRelFollowsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	slot := filepath.Join(dir, "node_modules", ".orvalho", "pkg@1.0.0", "node_modules", "pkg")
+	if err := os.MkdirAll(slot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(slot, "index.js"), []byte("exports.n=1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "node_modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(".orvalho", "pkg@1.0.0", "node_modules", "pkg"), filepath.Join(dir, "node_modules", "pkg")); err != nil {
+		t.Fatal(err)
+	}
+	got := evalFSRel(dir, "node_modules/pkg/index.js")
+	want := "node_modules/.orvalho/pkg@1.0.0/node_modules/pkg/index.js"
+	if got != want {
+		t.Fatalf("evalFSRel=%q want %q", got, want)
 	}
 }
 
@@ -120,7 +153,7 @@ func TestRunScriptFileRequire(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`var p = require("leftpad"); if (p.pad("1") !== "01") throw new Error("bad");`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runScriptFile(t.Context(), dir, path); err != nil {
+	if err := runScriptFile(t.Context(), dir, path, nil); err != nil {
 		t.Fatal(err)
 	}
 }

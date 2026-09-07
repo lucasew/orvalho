@@ -65,6 +65,13 @@ type Options struct {
 	// means not found. Guest JS MUST NOT reach host I/O except through
 	// a Binding the chain returned.
 	Imports []imports.Handler[any]
+
+	// Argv is process.argv for ScriptMain. Empty means []string{"orvalho"}.
+	Argv []string
+
+	// PrepareSource rewrites guest source after shebang strip and before
+	// the CommonJS wrap (ESM downlevel). Nil means no extra rewrite.
+	PrepareSource func(source, file string) (string, error)
 }
 
 func (o Options) withDefaults() Options {
@@ -79,6 +86,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.Imports != nil {
 		o.Imports = append([]imports.Handler[any](nil), o.Imports...)
+	}
+	if o.Argv != nil {
+		o.Argv = append([]string(nil), o.Argv...)
 	}
 	return o
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/lucasew/orvalho/pkg/dependency"
 	"github.com/lucasew/orvalho/pkg/imports"
 	"github.com/lucasew/orvalho/pkg/workers"
+	"github.com/lucasew/orvalho/pkg/workers/bundle"
 )
 
 var scriptCmd = &cobra.Command{
@@ -55,7 +56,7 @@ func runScriptRun(cmd *cobra.Command, args []string) error {
 	defer stop()
 
 	if file != "" {
-		return runScriptFile(ctx, dir, file)
+		return runScriptFile(ctx, dir, file, args[1:])
 	}
 	if len(args) > 1 {
 		shell = shell + " " + strings.Join(args[1:], " ")
@@ -103,7 +104,7 @@ func readPackageScripts(dir string) (map[string]string, error) {
 	return meta.Scripts, nil
 }
 
-func runScriptFile(ctx context.Context, dir, file string) error {
+func runScriptFile(ctx context.Context, dir, file string, extra []string) error {
 	src, err := os.ReadFile(file)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -112,12 +113,60 @@ func runScriptFile(ctx context.Context, dir, file string) error {
 		return err
 	}
 	root, rel := scriptTree(dir, file)
+	rel = evalFSRel(root, rel)
+	argv := append([]string{"node", file}, extra...)
 	iso := workers.New("", workers.Options{
+		Argv: argv,
 		Imports: []imports.Handler[any]{
-			imports.NodeModules{FS: os.DirFS(root), From: rel},
+			realpathScripts{root: root, inner: imports.NodeModules{FS: os.DirFS(root), From: rel}},
 		},
+		PrepareSource: prepareScriptSource,
 	})
 	return iso.ScriptMain(ctx, string(src), rel)
+}
+
+// evalFSRel resolves symlinks so require walks isolated slot siblings (TEC-17).
+func evalFSRel(root, rel string) string {
+	full := filepath.Join(root, filepath.FromSlash(rel))
+	real, err := filepath.EvalSymlinks(full)
+	if err != nil {
+		return rel
+	}
+	out, err := filepath.Rel(root, real)
+	if err != nil || strings.HasPrefix(out, "..") {
+		return rel
+	}
+	return filepath.ToSlash(out)
+}
+
+type realpathScripts struct {
+	root  string
+	inner imports.NodeModules
+}
+
+func (r realpathScripts) WithFrom(from string) imports.Handler[any] {
+	r.inner.From = from
+	return r
+}
+
+func (r realpathScripts) Resolve(spec string, next imports.Resolver[any]) (any, error) {
+	v, err := r.inner.Resolve(spec, next)
+	if err != nil {
+		return v, err
+	}
+	s, ok := v.(imports.Script)
+	if !ok || s.File == "" {
+		return v, nil
+	}
+	s.File = evalFSRel(r.root, s.File)
+	return s, nil
+}
+
+func prepareScriptSource(src, file string) (string, error) {
+	if !bundle.NeedsBundle(src) {
+		return src, nil
+	}
+	return bundle.TransformCJS(src, file)
 }
 
 func scriptTree(dir, file string) (root, rel string) {

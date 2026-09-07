@@ -80,6 +80,15 @@ func TestNodeModulesExportsRequire(t *testing.T) {
 	}), "pkg", "pkg/cjs.js")
 }
 
+func TestNodeModulesExportsArrayFallback(t *testing.T) {
+	t.Parallel()
+	lookupOK(t, tree(map[string]string{
+		"pkg/package.json": `{"exports":{".":[{"import":"./esm.js"},"./cjs.js"]}}`,
+		"pkg/cjs.js":       `exports.n=1`,
+		"pkg/esm.js":       `export const n=2`,
+	}), "pkg", "pkg/cjs.js")
+}
+
 func TestNodeModulesExportsSubpathClosed(t *testing.T) {
 	t.Parallel()
 	fsys := tree(map[string]string{

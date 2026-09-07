@@ -1,6 +1,9 @@
 package workers
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Sentinel errors for package workers. Prefer wrapping with %w so callers can
 // use errors.Is instead of matching error strings.
@@ -27,4 +30,16 @@ var (
 	ErrModuleNotFound       = errors.New("workers: module not found")
 	ErrModuleSpecifier      = errors.New("workers: invalid module specifier")
 	ErrScriptThrow          = errors.New("script: guest throw")
+	ErrScriptExit           = errors.New("script: exit")
 )
+
+// ScriptExitError is process.exit(code) from ScriptMain.
+type ScriptExitError struct {
+	Code int
+}
+
+func (e *ScriptExitError) Error() string {
+	return fmt.Sprintf("script: exit %d", e.Code)
+}
+
+func (e *ScriptExitError) Unwrap() error { return ErrScriptExit }

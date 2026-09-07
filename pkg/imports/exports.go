@@ -84,6 +84,13 @@ func pickTarget(v any) (string, bool) {
 		return x, true
 	case map[string]any:
 		return pickCondition(x)
+	case []any:
+		for _, item := range x {
+			if s, ok := pickTarget(item); ok {
+				return s, true
+			}
+		}
+		return "", false
 	default:
 		return "", false
 	}
