@@ -115,12 +115,18 @@ func runScriptFile(ctx context.Context, dir, file string, extra []string) error 
 	root, rel := scriptTree(dir, file)
 	rel = evalFSRel(root, rel)
 	argv := append([]string{"node", file}, extra...)
+	exe, err := os.Executable()
+	if err != nil {
+		exe = "orvalho"
+	}
 	iso := workers.New("", workers.Options{
 		Argv:       argv,
 		FS:         os.DirFS(root),
 		ProcessEnv: processEnvMap(),
 		Cwd:        dir,
 		PID:        os.Getpid(),
+		ExecPath:   exe,
+		Spawn:      hostSpawn,
 		Imports: append(workers.NodeScriptImports(),
 			realpathScripts{root: root, inner: imports.NodeModules{FS: os.DirFS(root), From: rel}},
 		),
@@ -168,6 +174,58 @@ func (r realpathScripts) Resolve(spec string, next imports.Resolver[any]) (any, 
 
 func prepareScriptSource(src, file string) (string, error) {
 	return bundle.CompileCJS(src, file)
+}
+
+func hostSpawn(ctx context.Context, req workers.SpawnReq) (workers.Spawned, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, req.File, req.Args...)
+	if req.Cwd != "" {
+		cmd.Dir = req.Cwd
+	}
+	if len(req.Env) > 0 {
+		cmd.Env = req.Env
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	done := make(chan workers.SpawnWait, 1)
+	go func() {
+		err := cmd.Wait()
+		code := 0
+		if err != nil {
+			var ee *exec.ExitError
+			if errors.As(err, &ee) {
+				code = ee.ExitCode()
+			} else {
+				code = 1
+			}
+		}
+		done <- workers.SpawnWait{Code: code}
+	}()
+	return hostSpawned{cmd: cmd, done: done}, nil
+}
+
+type hostSpawned struct {
+	cmd  *exec.Cmd
+	done chan workers.SpawnWait
+}
+
+func (h hostSpawned) PID() int {
+	if h.cmd.Process != nil {
+		return h.cmd.Process.Pid
+	}
+	return 0
+}
+
+func (h hostSpawned) Done() <-chan workers.SpawnWait { return h.done }
+
+func (h hostSpawned) Kill() error {
+	if h.cmd.Process == nil {
+		return nil
+	}
+	return h.cmd.Process.Kill()
 }
 
 func processEnvMap() map[string]string {

@@ -191,6 +191,11 @@ func (iso *Isolate) installProcess() {
 	mustSet(p, "arch", arch)
 	mustSet(p, "title", "orvalho")
 	mustSet(p, "pid", iso.opts.PID)
+	execPath := iso.opts.ExecPath
+	if execPath == "" {
+		execPath = "orvalho"
+	}
+	mustSet(p, "execPath", execPath)
 	versions := iso.vm.NewObject()
 	mustSet(versions, "node", "24.0.0")
 	mustSet(p, "versions", versions)

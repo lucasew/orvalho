@@ -31,6 +31,7 @@ var (
 	ErrModuleSpecifier      = errors.New("workers: invalid module specifier")
 	ErrScriptThrow          = errors.New("script: guest throw")
 	ErrScriptExit           = errors.New("script: exit")
+	ErrSpawnDenied          = errors.New("workers: child_process spawn not injected")
 )
 
 // ScriptExitError is process.exit(code) from ScriptMain.

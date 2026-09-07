@@ -9,6 +9,29 @@ import (
 	"github.com/lucasew/orvalho/pkg/imports"
 )
 
+// SpawnReq is one guest child_process spawn.
+type SpawnReq struct {
+	File string
+	Args []string
+	Cwd  string
+	Env  []string
+}
+
+// SpawnWait is the child's exit.
+type SpawnWait struct {
+	Code int
+}
+
+// Spawned is one running child. Done closes after Wait.
+type Spawned interface {
+	PID() int
+	Done() <-chan SpawnWait
+	Kill() error
+}
+
+// SpawnFunc starts a child. Nil Options.Spawn means spawn is denied.
+type SpawnFunc func(ctx context.Context, req SpawnReq) (Spawned, error)
+
 // Default resource caps. Documented for hosts and enforced in the isolate.
 const (
 	// DefaultMaxPendingTimers is the default hard cap on concurrent
@@ -90,6 +113,13 @@ type Options struct {
 
 	// PID is process.pid. Zero is a valid injected pid.
 	PID int
+
+	// ExecPath is process.execPath. Empty means "orvalho".
+	ExecPath string
+
+	// Spawn is child_process.spawn / exec / fork. Nil means the module
+	// exists and spawn fails (not injected).
+	Spawn SpawnFunc
 
 	// PrepareSource rewrites guest source after shebang strip and before
 	// the CommonJS wrap (ESM downlevel). Nil means no extra rewrite.
