@@ -2,6 +2,7 @@ package workers
 
 import (
 	"bufio"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,11 +13,11 @@ import (
 )
 
 func TestNodeClaims(t *testing.T) {
-	nodeRoot, claimsFile := nodeTestPaths()
+	nodeRoot, claimsFile, claimsDir := nodeTestPaths()
 	if _, err := os.Stat(filepath.Join(nodeRoot, "parallel")); err != nil {
 		t.Skip("testdata/node missing; workspaced codebase apply")
 	}
-	claims, err := readClaims(claimsFile)
+	claims, err := readAllClaims(claimsFile, claimsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,10 +50,38 @@ func runClaimedNodeTest(t *testing.T, nodeRoot, rel string) {
 	}
 }
 
-func nodeTestPaths() (nodeRoot, claimsFile string) {
+func nodeTestPaths() (nodeRoot, claimsFile, claimsDir string) {
 	_, file, _, _ := runtime.Caller(0)
 	repo := filepath.Join(filepath.Dir(file), "..", "..")
-	return filepath.Join(repo, "testdata", "node"), filepath.Join(repo, "testdata", "claims")
+	return filepath.Join(repo, "testdata", "node"),
+		filepath.Join(repo, "testdata", "claims"),
+		filepath.Join(repo, "testdata", "claims.d")
+}
+
+func readAllClaims(file, dir string) ([]string, error) {
+	var out []string
+	if _, err := os.Stat(file); err == nil {
+		got, err := readClaims(file)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, got...)
+	}
+	ents, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	for _, e := range ents {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		got, err := readClaims(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, got...)
+	}
+	return out, nil
 }
 
 func readClaims(path string) ([]string, error) {

@@ -16,9 +16,16 @@ func NodeScriptImports() []imports.Handler[any] {
 	return []imports.Handler[any]{
 		imports.Alias[any]{From: "node:util", To: "util"},
 		imports.Alias[any]{From: "node:assert", To: "assert"},
+		imports.Alias[any]{From: "node:path", To: "path"},
+		imports.Alias[any]{From: "path/posix", To: "path"},
+		imports.Alias[any]{From: "node:path/posix", To: "path"},
+		imports.Alias[any]{From: "node:path/win32", To: "path/win32"},
 		imports.Map[any]{
-			"util":   nodehostScript("nodehost/util.js"),
-			"assert": nodehostScript("nodehost/assert.js"),
+			"util":       nodehostScript("nodehost/util.js"),
+			"util/types": nodehostScript("nodehost/types.js"),
+			"assert":     nodehostScript("nodehost/assert.js"),
+			"path":       nodehostScript("nodehost/path.js"),
+			"path/win32": nodehostScript("nodehost/path_win32.js"),
 		},
 		imports.Func[any](func(spec string, next imports.Resolver[any]) (any, error) {
 			if spec == "common" || strings.HasSuffix(spec, "/common") || strings.HasSuffix(spec, "/common/index.js") {

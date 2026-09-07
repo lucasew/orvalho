@@ -51,6 +51,7 @@ function format() {
 module.exports = {
   inherits: inherits,
   format: format,
+  types: require("util/types"),
   inspect: {
     defaultOptions: {
       numericSeparator: false,
