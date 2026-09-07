@@ -97,6 +97,25 @@ func TestCompileCJSASCIICharset(t *testing.T) {
 	}
 }
 
+func TestCompileCJSImportMetaURL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "meta.mjs")
+	src := "import { createRequire } from 'module';\nexport const req = createRequire(import.meta.url);\n"
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := bundle.CompileCJS(src, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if regexp.MustCompile(`import_meta\d*\s*=\s*\{\s*\}`).MatchString(out) {
+		t.Fatalf("empty import_meta survived: %s", out)
+	}
+	if !strings.Contains(out, "__orvalhoFileURL(__filename)") {
+		t.Fatalf("expected file URL from __filename: %s", out)
+	}
+}
+
 func TestCompileCJSExportOnly(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "only.mjs")

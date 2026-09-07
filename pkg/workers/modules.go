@@ -160,6 +160,14 @@ func (iso *Isolate) loadScript(key, source, file string) (goja.Value, error) {
 
 	wrapped := "(function (require, module, exports, __filename, __dirname) {\n" +
 		"function __import(s){return Promise.resolve(require(s));}\n" +
+		"function __orvalhoFileURL(f){\n" +
+		"  if(!f) return 'file:///script.js';\n" +
+		"  f = String(f);\n" +
+		"  if(f.indexOf('file:')===0) return f;\n" +
+		"  f = f.replace(/\\\\/g,'/');\n" +
+		"  if(f.charAt(0)!=='/') f = '/'+f;\n" +
+		"  return 'file://'+f;\n" +
+		"}\n" +
 		source + "\n})"
 	name := file
 	if name == "" {

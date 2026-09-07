@@ -14,6 +14,7 @@ import (
 var (
 	es6UnicodeEscape  = regexp.MustCompile(`\\u\{([0-9a-fA-F]{1,6})\}`)
 	unicodePropEscape = regexp.MustCompile(`\\([pP])\{([^}]+)\}`)
+	emptyImportMeta   = regexp.MustCompile(`\b(import_meta\d*)\s*=\s*\{\s*\}`)
 )
 
 // pAtom maps property names regexp2 rejects under Unicode (the /u flag)
@@ -101,7 +102,15 @@ func buildCJS(source, file, dir string) (string, error) {
 }
 
 func finishCJS(src string) string {
-	return rewriteUnicodeProperties(rewriteES6UnicodeEscapes(src))
+	src = rewriteES6UnicodeEscapes(src)
+	src = rewriteUnicodeProperties(src)
+	return rewriteImportMeta(src)
+}
+
+// rewriteImportMeta fills esbuild's empty import_meta stub from __filename.
+// The CJS wrap defines __orvalhoFileURL.
+func rewriteImportMeta(src string) string {
+	return emptyImportMeta.ReplaceAllString(src, `$1 = { url: __orvalhoFileURL(__filename) }`)
 }
 
 // rewriteUnicodeProperties rewrites \p{…} names regexp2 rejects when /u is set.

@@ -6,6 +6,7 @@ import (
 	"testing/fstest"
 
 	"github.com/lucasew/orvalho/pkg/imports"
+	"github.com/lucasew/orvalho/pkg/workers/bundle"
 )
 
 func runNodeModule(t *testing.T, src string) {
@@ -90,4 +91,20 @@ func TestNodeModuleCreateRequireRelative(t *testing.T) {
 		var reqObj = createRequire({ href: "file:///app/pkg/index.js" });
 		if (reqObj("./lib.js").n !== 42) throw new Error("file url object");
 	`)
+}
+
+func TestNodeModuleCreateRequireImportMeta(t *testing.T) {
+	fsys := fstest.MapFS{
+		"app/pkg/lib.js": {Data: []byte(`exports.n = 42;`)},
+	}
+	src := `
+		import { createRequire } from "module";
+		var req = createRequire(import.meta.url);
+		if (req("./lib.js").n !== 42) throw new Error("import.meta.url");
+	`
+	handlers := append(NodeScriptImports(), imports.NodeModules{FS: fsys, From: "app/pkg/main.mjs"})
+	iso := New("", Options{Imports: handlers, PrepareSource: bundle.CompileCJS})
+	if err := iso.ScriptMain(t.Context(), src, "app/pkg/main.mjs"); err != nil {
+		t.Fatal(err)
+	}
 }
