@@ -96,6 +96,12 @@ function throws(fn, expected) {
   if (!expected) {
     return;
   }
+  if (expected instanceof RegExp) {
+    if (!expected.test(String(err))) {
+      fail(String(err), expected, 'error message mismatch', 'throws');
+    }
+    return;
+  }
   if (typeof expected === 'function') {
     if (!(err instanceof expected)) {
       throw AssertionError({ message: 'Expected error to be instance of ' + expected.name });
@@ -109,8 +115,14 @@ function throws(fn, expected) {
     if (expected.name && err.name !== expected.name) {
       fail(err.name, expected.name, 'error name mismatch', 'throws');
     }
-    if (expected.message && err.message !== expected.message) {
-      fail(err.message, expected.message, 'error message mismatch', 'throws');
+    if (expected.message) {
+      if (expected.message instanceof RegExp) {
+        if (!expected.message.test(err.message)) {
+          fail(err.message, expected.message, 'error message mismatch', 'throws');
+        }
+      } else if (err.message !== expected.message) {
+        fail(err.message, expected.message, 'error message mismatch', 'throws');
+      }
     }
   }
 }
