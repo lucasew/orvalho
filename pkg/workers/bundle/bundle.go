@@ -129,6 +129,10 @@ if (typeof globalThis.__orvalhoDynamicImport !== "function") {
 // A blind ReplaceAll corrupts Astro island hydration runtime embedded as
 // string literals in the SSR bundle (browser then sees __orvalhoDynamicImport).
 func rewriteDynamicImport(src string) string {
+	return rewriteImportCalls(src, "__orvalhoDynamicImport(")
+}
+
+func rewriteImportCalls(src, repl string) string {
 	var b strings.Builder
 	b.Grow(len(src) + 64)
 	i := 0
@@ -178,13 +182,13 @@ func rewriteDynamicImport(src string) string {
 		// Template literal: leave quasi-literals alone; rewrite only ${...} code.
 		if src[i] == '`' {
 			end := scanTemplateLiteral(src, i)
-			b.WriteString(rewriteTemplateLiteral(src[i:end]))
+			b.WriteString(rewriteTemplateLiteral(src[i:end], repl))
 			i = end
 			continue
 		}
 		// Dynamic import( — keyword import followed by (
 		if n := importCallLen(src, i); n > 0 {
-			b.WriteString("__orvalhoDynamicImport(")
+			b.WriteString(repl)
 			i += n
 			continue
 		}
@@ -280,7 +284,7 @@ func scanTemplateLiteral(src string, i int) int {
 }
 
 // rewriteTemplateLiteral rewrites import( only inside ${...} expressions.
-func rewriteTemplateLiteral(tmpl string) string {
+func rewriteTemplateLiteral(tmpl, repl string) string {
 	if len(tmpl) < 2 || tmpl[0] != '`' {
 		return tmpl
 	}
@@ -337,7 +341,7 @@ func rewriteTemplateLiteral(tmpl string) string {
 				// ${ expr }
 				b.WriteString("${")
 				expr := tmpl[start+2 : j]
-				b.WriteString(rewriteDynamicImport(expr))
+				b.WriteString(rewriteImportCalls(expr, repl))
 				b.WriteByte('}')
 				i = j + 1
 				continue

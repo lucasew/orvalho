@@ -158,6 +158,21 @@ func TestRunScriptFileRequire(t *testing.T) {
 	}
 }
 
+func TestRunScriptFileESM(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "lib.mjs"), []byte("export const n = 7;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "main.mjs")
+	src := "import { n } from './lib.mjs';\nif (n !== 7) throw new Error('n');\n"
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runScriptFile(t.Context(), dir, path, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestScriptRunCLIFile(t *testing.T) {
 	exe := orvalhoExe(t)
 	dir := t.TempDir()

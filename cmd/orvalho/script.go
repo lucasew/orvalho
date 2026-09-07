@@ -163,10 +163,7 @@ func (r realpathScripts) Resolve(spec string, next imports.Resolver[any]) (any, 
 }
 
 func prepareScriptSource(src, file string) (string, error) {
-	if !bundle.NeedsBundle(src) {
-		return src, nil
-	}
-	return bundle.TransformCJS(src, file)
+	return bundle.CompileCJS(src, file)
 }
 
 func scriptTree(dir, file string) (root, rel string) {

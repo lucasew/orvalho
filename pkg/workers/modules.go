@@ -161,7 +161,11 @@ func (iso *Isolate) loadScript(key, source, file string) (goja.Value, error) {
 	wrapped := "(function (require, module, exports, __filename, __dirname) {\n" +
 		"function __import(s){return Promise.resolve(require(s));}\n" +
 		source + "\n})"
-	v, err := iso.vm.RunString(wrapped)
+	name := file
+	if name == "" {
+		name = "script.js"
+	}
+	v, err := runNamedScript(iso.vm, name, wrapped)
 	if err != nil {
 		delete(iso.moduleCache, key)
 		return nil, err
@@ -179,6 +183,15 @@ func (iso *Isolate) loadScript(key, source, file string) (goja.Value, error) {
 	final := module.Get("exports")
 	iso.moduleCache[key] = final
 	return final, nil
+}
+
+func runNamedScript(vm *goja.Runtime, name, src string) (v goja.Value, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("workers: parse %s: %v", name, rec)
+		}
+	}()
+	return vm.RunScript(name, src)
 }
 
 func stripShebang(src string) string {
