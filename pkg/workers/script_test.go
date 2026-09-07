@@ -3,6 +3,7 @@ package workers
 import (
 	"errors"
 	"io/fs"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -104,8 +105,8 @@ func TestScriptMainProcessExitZero(t *testing.T) {
 func TestScriptMainUnhandledRejection(t *testing.T) {
 	iso := New("", Options{})
 	err := iso.ScriptMain(t.Context(), `Promise.reject(new Error("nope"));`, "main.js")
-	if !errors.Is(err, ErrScriptThrow) {
-		t.Fatalf("got %v want ErrScriptThrow", err)
+	if err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("got %v want guest error nope", err)
 	}
 }
 
@@ -115,6 +116,18 @@ func TestScriptMainProcessExitOne(t *testing.T) {
 	var ex *ScriptExitError
 	if !errors.As(err, &ex) || ex.Code != 1 {
 		t.Fatalf("got %v want ScriptExitError 1", err)
+	}
+}
+
+func TestScriptMainExitAfterRequireMiss(t *testing.T) {
+	iso := New("", Options{})
+	err := iso.ScriptMain(t.Context(), `
+		Promise.resolve().then(function () {
+			try { require("util"); } catch (e) { process.exit(1); }
+		});
+	`, "main.js")
+	if !errors.Is(err, ErrModuleNotFound) {
+		t.Fatalf("got %v want ErrModuleNotFound", err)
 	}
 }
 

@@ -39,6 +39,10 @@ type Isolate struct {
 
 	// importFrom is the FS path of the script currently evaluating.
 	importFrom string
+
+	// scriptCause is the first require/load error during ScriptMain.
+	// Guest code may catch it and process.exit(1); we still report this.
+	scriptCause error
 }
 
 // Ensure Isolate implements actor.Actor.

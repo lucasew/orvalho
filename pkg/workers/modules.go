@@ -23,9 +23,17 @@ func (iso *Isolate) jsRequire(call goja.FunctionCall) goja.Value {
 	}
 	v, err := iso.loadModule(spec)
 	if err != nil {
+		iso.noteScriptCause(err)
 		panic(iso.vm.NewGoError(err))
 	}
 	return v
+}
+
+func (iso *Isolate) noteScriptCause(err error) {
+	if err == nil || iso.scriptCause != nil {
+		return
+	}
+	iso.scriptCause = err
 }
 
 func (iso *Isolate) loadModule(spec string) (goja.Value, error) {

@@ -29,6 +29,7 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 	stopWatch := iso.watchInterrupt(ctx)
 	defer stopWatch()
 
+	iso.scriptCause = nil
 	iso.installProcess()
 
 	var rejected error
@@ -36,14 +37,20 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 		if op != goja.PromiseRejectionReject || p == nil {
 			return
 		}
-		res := p.Result()
-		if res != nil {
-			if ex := scriptExitOf(errorOf(res.Export())); ex != nil {
-				rejected = ex
-				return
-			}
+		err := rejectionError(p.Result())
+		if err == nil {
+			return
 		}
-		rejected = fmt.Errorf("%w: %v", ErrScriptThrow, res)
+		if scriptExitOf(err) != nil {
+			if rejected == nil {
+				rejected = err
+			}
+			return
+		}
+		iso.noteScriptCause(err)
+		if rejected == nil || scriptExitOf(rejected) != nil {
+			rejected = err
+		}
 	})
 
 	key := file
@@ -73,16 +80,7 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 		}
 		idle++
 		if idle >= 64 {
-			if rejected != nil {
-				if ex := scriptExitOf(rejected); ex != nil {
-					if ex.Code == 0 {
-						return nil
-					}
-					return ex
-				}
-				return rejected
-			}
-			return nil
+			return iso.finishScript(rejected)
 		}
 	}
 }
@@ -99,6 +97,35 @@ func (iso *Isolate) waitForTimerLocked(ctx context.Context, wait time.Duration) 
 		iso.mu.Lock()
 		return nil
 	}
+}
+
+func (iso *Isolate) finishScript(rejected error) error {
+	if iso.scriptCause != nil {
+		if ex := scriptExitOf(rejected); ex != nil && ex.Code == 0 {
+			return nil
+		}
+		return iso.scriptCause
+	}
+	if rejected == nil {
+		return nil
+	}
+	if ex := scriptExitOf(rejected); ex != nil {
+		if ex.Code == 0 {
+			return nil
+		}
+		return ex
+	}
+	return fmt.Errorf("%w: %v", ErrScriptThrow, rejected)
+}
+
+func rejectionError(v goja.Value) error {
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return nil
+	}
+	if err := errorOf(v.Export()); err != nil {
+		return err
+	}
+	return fmt.Errorf("%s", v.String())
 }
 
 func (iso *Isolate) wrapScriptError(ctx context.Context, err error) error {
