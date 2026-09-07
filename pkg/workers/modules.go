@@ -136,7 +136,15 @@ func (iso *Isolate) loadScript(key, source, file string) (goja.Value, error) {
 	}
 	source = rewriteImportToRequire(source)
 
-	wrapped := "(function (require, module, exports) {\n" +
+	dir := "."
+	if file != "" {
+		dir = path.Dir(file)
+		if dir == "" {
+			dir = "."
+		}
+	}
+
+	wrapped := "(function (require, module, exports, __filename, __dirname) {\n" +
 		"function __import(s){return Promise.resolve(require(s));}\n" +
 		source + "\n})"
 	v, err := iso.vm.RunString(wrapped)
@@ -149,7 +157,7 @@ func (iso *Isolate) loadScript(key, source, file string) (goja.Value, error) {
 		delete(iso.moduleCache, key)
 		return nil, fmt.Errorf("workers: script %q is not a function", key)
 	}
-	_, err = fn(goja.Undefined(), iso.vm.Get("require"), module, exports)
+	_, err = fn(goja.Undefined(), iso.vm.Get("require"), module, exports, iso.vm.ToValue(file), iso.vm.ToValue(dir))
 	if err != nil {
 		delete(iso.moduleCache, key)
 		return nil, err
