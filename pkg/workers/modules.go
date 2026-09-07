@@ -53,7 +53,21 @@ func (iso *Isolate) loadModule(spec string) (goja.Value, error) {
 	}
 	switch x := v.(type) {
 	case imports.Script:
-		return iso.loadScript(spec, x.Source, x.File)
+		// Same File is one module identity (path and path/posix).
+		key := spec
+		if x.File != "" {
+			key = "file:" + x.File
+		}
+		if cached, ok := iso.moduleCache[key]; ok {
+			iso.moduleCache[spec] = cached
+			return cached, nil
+		}
+		got, err := iso.loadScript(key, x.Source, x.File)
+		if err != nil {
+			return nil, err
+		}
+		iso.moduleCache[spec] = got
+		return got, nil
 	case Binding:
 		if x == nil {
 			return nil, fmt.Errorf("%w: %q", ErrModuleNotFound, spec)
