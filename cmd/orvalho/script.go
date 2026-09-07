@@ -173,7 +173,7 @@ func (r realpathScripts) Resolve(spec string, next imports.Resolver[any]) (any, 
 }
 
 func prepareScriptSource(src, file string) (string, error) {
-	return bundle.CompileCJS(src, file)
+	return bundle.TransformCJS(src, file)
 }
 
 func hostSpawn(ctx context.Context, req workers.SpawnReq) (workers.Spawned, error) {

@@ -97,6 +97,19 @@ func TestCompileCJSASCIICharset(t *testing.T) {
 	}
 }
 
+func TestTransformCJSImportMetaURL(t *testing.T) {
+	out, err := bundle.TransformCJS("export const u = import.meta.url;\n", "pkg/dist/file.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if regexp.MustCompile(`import_meta\d*\s*=\s*\{\s*\}`).MatchString(out) {
+		t.Fatalf("empty import_meta survived: %s", out)
+	}
+	if !strings.Contains(out, "__orvalhoFileURL(__orvalhoFilename)") {
+		t.Fatalf("expected file URL from __orvalhoFilename: %s", out)
+	}
+}
+
 func TestCompileCJSImportMetaURL(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "meta.mjs")
@@ -111,8 +124,8 @@ func TestCompileCJSImportMetaURL(t *testing.T) {
 	if regexp.MustCompile(`import_meta\d*\s*=\s*\{\s*\}`).MatchString(out) {
 		t.Fatalf("empty import_meta survived: %s", out)
 	}
-	if !strings.Contains(out, "__orvalhoFileURL(__filename)") {
-		t.Fatalf("expected file URL from __filename: %s", out)
+	if !strings.Contains(out, "__orvalhoFileURL(__orvalhoFilename)") {
+		t.Fatalf("expected file URL from __orvalhoFilename: %s", out)
 	}
 }
 

@@ -651,6 +651,8 @@ func (n *nodeFS) encode(data []byte, enc string) goja.Value {
 	if err != nil {
 		panic(err)
 	}
+	// Node returns Buffer; Vite does readFileSync(url).toString().
+	mustSet(v, "toString", func(goja.FunctionCall) string { return string(cp) })
 	return v
 }
 

@@ -10,6 +10,17 @@ func runNodeURL(t *testing.T, src string) {
 	}
 }
 
+func TestURLResolveFileRelative(t *testing.T) {
+	runNodeURL(t, `
+		var inner = new URL("../../../src/node/constants.ts", "file:///vite/dist/node/chunks/logger.js");
+		if (inner.href !== "file:///vite/src/node/constants.ts") throw new Error("inner " + inner.href);
+		var pkg = new URL("../../package.json", inner);
+		if (pkg.href !== "file:///vite/package.json") throw new Error("pkg " + pkg.href);
+		var httpRel = new URL("c", "https://example.com/a/b");
+		if (httpRel.href !== "https://example.com/a/c") throw new Error("http " + httpRel.href);
+	`)
+}
+
 func TestNodeURLIdentity(t *testing.T) {
 	runNodeURL(t, `
 		if (require("url") !== require("node:url")) throw new Error("url identity");

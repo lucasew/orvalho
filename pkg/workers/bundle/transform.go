@@ -107,10 +107,10 @@ func finishCJS(src string) string {
 	return rewriteImportMeta(src)
 }
 
-// rewriteImportMeta fills esbuild's empty import_meta stub from __filename.
-// The CJS wrap defines __orvalhoFileURL.
+// rewriteImportMeta fills esbuild's empty import_meta stub from the wrap
+// parameter __orvalhoFilename (guest files may declare their own __filename).
 func rewriteImportMeta(src string) string {
-	return emptyImportMeta.ReplaceAllString(src, `$1 = { url: __orvalhoFileURL(__filename) }`)
+	return emptyImportMeta.ReplaceAllString(src, `$1 = { url: __orvalhoFileURL(__orvalhoFilename) }`)
 }
 
 // rewriteUnicodeProperties rewrites \p{…} names regexp2 rejects when /u is set.

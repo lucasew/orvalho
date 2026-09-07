@@ -158,6 +158,37 @@ func TestRunScriptFileRequire(t *testing.T) {
 	}
 }
 
+func TestRunScriptFileViteImportMetaPackageJSON(t *testing.T) {
+	dir := t.TempDir()
+	chunk := filepath.Join(dir, "vite", "dist", "node", "chunks")
+	if err := os.MkdirAll(chunk, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "vite", "package.json"), []byte(`{"version":"1.2.3"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Same URL walk Vite's logger.js uses against import.meta.url.
+	logger := `
+import { readFileSync } from "fs";
+const { version } = JSON.parse(readFileSync(new URL("../../package.json", new URL("../../../src/node/constants.ts", import.meta.url))).toString());
+export { version };
+`
+	if err := os.WriteFile(filepath.Join(chunk, "logger.js"), []byte(logger), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	main := `
+import { version } from "./vite/dist/node/chunks/logger.js";
+if (version !== "1.2.3") throw new Error("version " + version);
+`
+	path := filepath.Join(dir, "main.mjs")
+	if err := os.WriteFile(path, []byte(main), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runScriptFile(t.Context(), dir, path, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunScriptFileESM(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "lib.mjs"), []byte("export const n = 7;\n"), 0o644); err != nil {

@@ -4,11 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/dop251/goja"
 	"github.com/lucasew/orvalho/pkg/imports"
 )
+
+var cjsIdentDecl = regexp.MustCompile(`(?m)\b(?:var|let|const|function)\s+(__filename|__dirname)\b`)
 
 func (iso *Isolate) installModules() {
 	iso.moduleCache = make(map[string]goja.Value)
@@ -115,6 +118,19 @@ func withImportFrom(handlers []imports.Handler[any], from string) []imports.Hand
 	return out
 }
 
+// requireFrom is require bound to from, so a later callback still
+// resolves relative specs against that file, not the caller.
+func (iso *Isolate) requireFrom(from string) func(call goja.FunctionCall) goja.Value {
+	return func(call goja.FunctionCall) goja.Value {
+		prev := iso.importFrom
+		if from != "" {
+			iso.importFrom = from
+		}
+		defer func() { iso.importFrom = prev }()
+		return iso.jsRequire(call)
+	}
+}
+
 func (iso *Isolate) rewriteRelative(spec string) string {
 	if iso.importFrom == "" {
 		return spec
@@ -158,17 +174,7 @@ func (iso *Isolate) loadScript(key, source, file string) (goja.Value, error) {
 		}
 	}
 
-	wrapped := "(function (require, module, exports, __filename, __dirname) {\n" +
-		"function __import(s){return Promise.resolve(require(s));}\n" +
-		"function __orvalhoFileURL(f){\n" +
-		"  if(!f) return 'file:///script.js';\n" +
-		"  f = String(f);\n" +
-		"  if(f.indexOf('file:')===0) return f;\n" +
-		"  f = f.replace(/\\\\/g,'/');\n" +
-		"  if(f.charAt(0)!=='/') f = '/'+f;\n" +
-		"  return 'file://'+f;\n" +
-		"}\n" +
-		source + "\n})"
+	wrapped := wrapCJS(source)
 	name := file
 	if name == "" {
 		name = "script.js"
@@ -183,7 +189,7 @@ func (iso *Isolate) loadScript(key, source, file string) (goja.Value, error) {
 		delete(iso.moduleCache, key)
 		return nil, fmt.Errorf("workers: script %q is not a function", key)
 	}
-	_, err = fn(goja.Undefined(), iso.vm.Get("require"), module, exports, iso.vm.ToValue(file), iso.vm.ToValue(dir))
+	_, err = fn(goja.Undefined(), iso.vm.ToValue(iso.requireFrom(file)), module, exports, iso.vm.ToValue(file), iso.vm.ToValue(dir))
 	if err != nil {
 		delete(iso.moduleCache, key)
 		return nil, err
@@ -191,6 +197,36 @@ func (iso *Isolate) loadScript(key, source, file string) (goja.Value, error) {
 	final := module.Get("exports")
 	iso.moduleCache[key] = final
 	return final, nil
+}
+
+func wrapCJS(source string) string {
+	var b strings.Builder
+	b.WriteString("(function (require, module, exports, __orvalhoFilename, __orvalhoDirname) {\n")
+	b.WriteString("function __import(s){return Promise.resolve(require(s));}\n")
+	b.WriteString("function __orvalhoFileURL(f){\n")
+	b.WriteString("  if(!f) f = __orvalhoFilename;\n")
+	b.WriteString("  if(!f) return 'file:///script.js';\n")
+	b.WriteString("  f = String(f);\n")
+	b.WriteString("  if(f.indexOf('file:')===0) return f;\n")
+	b.WriteString("  f = f.replace(/\\\\/g,'/');\n")
+	b.WriteString("  if(f.charAt(0)!=='/') f = '/'+f;\n")
+	b.WriteString("  return 'file://'+f;\n")
+	b.WriteString("}\n")
+	found := map[string]bool{}
+	for _, m := range cjsIdentDecl.FindAllStringSubmatch(source, -1) {
+		if len(m) > 1 {
+			found[m[1]] = true
+		}
+	}
+	if !found["__filename"] {
+		b.WriteString("var __filename = __orvalhoFilename;\n")
+	}
+	if !found["__dirname"] {
+		b.WriteString("var __dirname = __orvalhoDirname;\n")
+	}
+	b.WriteString(source)
+	b.WriteString("\n})")
+	return b.String()
 }
 
 func runNamedScript(vm *goja.Runtime, name, src string) (v goja.Value, err error) {

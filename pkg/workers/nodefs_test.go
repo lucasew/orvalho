@@ -34,6 +34,7 @@ func TestNodeFSReadFileSync(t *testing.T) {
 		var b = fs.readFileSync("hello.txt");
 		if (b.length !== 2) throw new Error("len " + b.length);
 		if (b[0] !== 104 || b[1] !== 105) throw new Error("bytes");
+		if (b.toString() !== "hi") throw new Error("toString " + b.toString());
 	`)
 }
 

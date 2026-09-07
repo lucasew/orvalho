@@ -68,6 +68,49 @@ func TestScriptMainShebang(t *testing.T) {
 	}
 }
 
+func TestScriptMainGuestDirname(t *testing.T) {
+	iso := New("", Options{})
+	err := iso.ScriptMain(t.Context(), `
+		const __dirname = "guest";
+		if (__dirname !== "guest") throw new Error(__dirname);
+	`, "app/main.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestScriptMainCJSDirname(t *testing.T) {
+	iso := New("", Options{})
+	err := iso.ScriptMain(t.Context(), `
+		if (__dirname !== "app") throw new Error(__dirname);
+		if (__filename !== "app/main.js") throw new Error(__filename);
+	`, "app/main.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestScriptMainRequireBoundToModule(t *testing.T) {
+	fsys := fstest.MapFS{
+		"main.js": {Data: []byte(`
+			var lib = require("./lib/index.js");
+			if (lib.load() !== 7) throw new Error("late require");
+		`)},
+		"lib/index.js": {Data: []byte(`exports.load = function () { return require("./dep.js").n; };`)},
+		"lib/dep.js":   {Data: []byte(`exports.n = 7;`)},
+	}
+	src, err := fs.ReadFile(fsys, "main.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	iso := New("", Options{
+		Imports: []imports.Handler[any]{imports.NodeModules{FS: fsys, From: "main.js"}},
+	})
+	if err := iso.ScriptMain(t.Context(), string(src), "main.js"); err != nil {
+		t.Fatalf("ScriptMain: %v", err)
+	}
+}
+
 func TestScriptMainImportCall(t *testing.T) {
 	fsys := fstest.MapFS{
 		"main.js": {Data: []byte(`
