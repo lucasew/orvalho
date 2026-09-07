@@ -110,8 +110,82 @@ func newNodeFS(iso *Isolate) *goja.Object {
 	mustSet(obj, "writeFileSync", n.jsWriteFileSync)
 	mustSet(obj, "exists", n.jsExists)
 	mustSet(obj, "existsSync", n.jsExistsSync)
+	mustSet(obj, "promises", newNodeFSPromises(iso, obj))
 	return obj
 }
+
+// nodeFSPromisesBinding materializes require("fs/promises").
+type nodeFSPromisesBinding struct{}
+
+var _ Binding = nodeFSPromisesBinding{}
+
+func (nodeFSPromisesBinding) Materialize(iso *Isolate) (*goja.Object, error) {
+	fs, err := (nodeFSBinding{}).Materialize(iso)
+	if err != nil {
+		return nil, err
+	}
+	v := fs.Get("promises")
+	o, ok := v.(*goja.Object)
+	if !ok {
+		return iso.vm.NewObject(), nil
+	}
+	return o, nil
+}
+
+func newNodeFSPromises(iso *Isolate, fs *goja.Object) *goja.Object {
+	v, err := runNamedScript(iso.vm, "node:fs/promises", "("+nodeFSPromisesSource+")")
+	if err != nil {
+		panic("goja fs/promises: " + err.Error())
+	}
+	fn, ok := goja.AssertFunction(v)
+	if !ok {
+		return iso.vm.NewObject()
+	}
+	out, err := fn(goja.Undefined(), fs)
+	if err != nil {
+		panic(err)
+	}
+	o, ok := out.(*goja.Object)
+	if !ok {
+		return iso.vm.NewObject()
+	}
+	return o
+}
+
+// nodeFSPromisesSource wraps callback fs methods as Promises.
+const nodeFSPromisesSource = `
+function (fs) {
+  function wrap(name) {
+    return function () {
+      var args = [];
+      for (var i = 0; i < arguments.length; i++) {
+        args.push(arguments[i]);
+      }
+      var fn = fs[name];
+      return new Promise(function (resolve, reject) {
+        args.push(function (err, val) {
+          if (err) reject(err);
+          else resolve(val);
+        });
+        fn.apply(fs, args);
+      });
+    };
+  }
+  var names = [
+    "access", "appendFile", "copyFile", "lstat", "mkdir", "open",
+    "readFile", "readdir", "readlink", "realpath", "rmdir", "stat",
+    "unlink", "writeFile"
+  ];
+  var p = {};
+  for (var i = 0; i < names.length; i++) {
+    if (typeof fs[names[i]] === "function") {
+      p[names[i]] = wrap(names[i]);
+    }
+  }
+  p.constants = fs.constants;
+  return p;
+}
+`
 
 func nodeFSConstants(vm *goja.Runtime) *goja.Object {
 	c := vm.NewObject()

@@ -218,6 +218,31 @@ func TestNormalizeGuest(t *testing.T) {
 	}
 }
 
+func TestNodeFSPromisesIdentity(t *testing.T) {
+	runNodeFS(t, nodeFSMap(), `
+		var fs = require("fs");
+		var p = require("fs/promises");
+		if (require("node:fs/promises") !== p) throw new Error("node:fs/promises identity");
+		if (fs.promises !== p) throw new Error("fs.promises identity");
+		if (typeof p.readFile !== "function") throw new Error("readFile");
+		if (typeof p.stat !== "function") throw new Error("stat");
+	`)
+}
+
+func TestNodeFSPromisesReadFile(t *testing.T) {
+	runNodeFS(t, nodeFSMap(), `
+		var p = require("fs/promises");
+		var got = "";
+		var code = "";
+		p.readFile("hello.txt", "utf8").then(function (s) { got = s; });
+		p.readFile("missing.txt").then(function () {}, function (e) { code = e.code; });
+		setTimeout(function () {
+			if (got !== "hi") throw new Error("utf8 " + got);
+			if (code !== "ENOENT") throw new Error("code " + code);
+		}, 0);
+	`)
+}
+
 func TestFileURLHasNUL(t *testing.T) {
 	if !fileURLHasNUL("file:///C:/foo\x00bar") {
 		t.Fatal("raw NUL")
