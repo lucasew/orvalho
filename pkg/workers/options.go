@@ -2,6 +2,7 @@ package workers
 
 import (
 	"context"
+	"io/fs"
 	"net/http"
 	"time"
 
@@ -65,6 +66,11 @@ type Options struct {
 	// means not found. Guest JS MUST NOT reach host I/O except through
 	// a Binding the chain returned.
 	Imports []imports.Handler[any]
+
+	// FS is the guest node:fs / fs mount (Go fs.FS only). Nil means no
+	// tree: require("fs") still exists and I/O fails (ENOENT). Never
+	// falls through to the host disk.
+	FS fs.FS
 
 	// Argv is process.argv for ScriptMain. Empty means []string{"orvalho"}.
 	Argv []string

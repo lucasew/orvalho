@@ -21,11 +21,14 @@ function platformTimeout(ms) {
   return ms;
 }
 
+function expectWarning() {}
+
 module.exports = {
   mustCall: mustCall,
   mustNotCall: mustNotCall,
   skip: skip,
   platformTimeout: platformTimeout,
+  expectWarning: expectWarning,
   isWindows: false,
   isMainThread: true,
 };

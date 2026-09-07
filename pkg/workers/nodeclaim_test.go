@@ -40,6 +40,7 @@ func runClaimedNodeTest(t *testing.T, nodeRoot, rel string) {
 	}
 	iso := New("", Options{
 		Argv: []string{"node", file},
+		FS:   os.DirFS(nodeRoot),
 		Imports: append(NodeScriptImports(), imports.NodeModules{
 			FS:   os.DirFS(nodeRoot),
 			From: filepath.ToSlash(rel),
