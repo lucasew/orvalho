@@ -62,6 +62,25 @@ func TestCompileCJSRewritesImportCall(t *testing.T) {
 	}
 }
 
+func TestCompileCJSRewritesIDContinue(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "re.mjs")
+	src := "export const r = /[$_\\u200C\\u200D\\p{ID_Continue}]/u;\n"
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := bundle.CompileCJS(src, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "ID_Continue") {
+		t.Fatalf("ID_Continue survived: %s", out)
+	}
+	if !strings.Contains(out, `\p{L}`) {
+		t.Fatalf("expected \\p{L}: %s", out)
+	}
+}
+
 func TestCompileCJSASCIICharset(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "u.mjs")

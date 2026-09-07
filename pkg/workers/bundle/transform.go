@@ -11,7 +11,32 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 )
 
-var es6UnicodeEscape = regexp.MustCompile(`\\u\{([0-9a-fA-F]{1,6})\}`)
+var (
+	es6UnicodeEscape  = regexp.MustCompile(`\\u\{([0-9a-fA-F]{1,6})\}`)
+	unicodePropEscape = regexp.MustCompile(`\\([pP])\{([^}]+)\}`)
+)
+
+// pAtom maps property names regexp2 rejects under Unicode (the /u flag)
+// to a single category or POSIX class it accepts. Keys are lower-case.
+var pAtom = map[string]string{
+	"id_continue": "L",
+	"idc":         "L",
+	"id_start":    "L",
+	"ids":         "L",
+	"word":        `\w`,
+	"alnum":       "L",
+	"blank":       `\s`,
+	"ahex":        "ASCII_Hex_Digit",
+	"alphabetic":  "L",
+	"alpha":       "L",
+	"cased":       "L",
+	"lower":       "Ll",
+	"upper":       "Lu",
+	"space":       `\s`,
+	"print":       "C",
+	"rgi_emoji":   "Emoji",
+	"ascii":       "Cc",
+}
 
 // CompileCJS compiles source to CommonJS ES2015 in memory (ADR-0017).
 // On-disk files are bundled so imports resolve. Other sources are transformed.
@@ -76,7 +101,50 @@ func buildCJS(source, file, dir string) (string, error) {
 }
 
 func finishCJS(src string) string {
-	return rewriteES6UnicodeEscapes(src)
+	return rewriteUnicodeProperties(rewriteES6UnicodeEscapes(src))
+}
+
+// rewriteUnicodeProperties rewrites \p{…} names regexp2 rejects when /u is set.
+func rewriteUnicodeProperties(src string) string {
+	return unicodePropEscape.ReplaceAllStringFunc(src, func(m string) string {
+		sub := unicodePropEscape.FindStringSubmatch(m)
+		if len(sub) < 3 {
+			return m
+		}
+		kind, name := sub[1], sub[2]
+		if strings.Contains(name, "$") {
+			return m
+		}
+		if rest, ok := strings.CutPrefix(name, "Script="); ok {
+			return `\` + kind + `{` + rest + `}`
+		}
+		alt, ok := pAtom[strings.ToLower(name)]
+		if !ok {
+			return m
+		}
+		if alt == `\w` || alt == `\s` {
+			if kind == "P" {
+				if alt == `\w` {
+					return `\W`
+				}
+				return `\S`
+			}
+			return alt
+		}
+		if strings.ToLower(name) == "print" {
+			if kind == "p" {
+				return `\P{C}`
+			}
+			return `\p{C}`
+		}
+		if strings.ToLower(name) == "ascii" {
+			if kind == "p" {
+				return `[\x00-\x7F]`
+			}
+			return `[^\x00-\x7F]`
+		}
+		return `\` + kind + `{` + alt + `}`
+	})
 }
 
 // rewriteES6UnicodeEscapes turns \u{...} into UTF-16 \uXXXX so goja can parse.
