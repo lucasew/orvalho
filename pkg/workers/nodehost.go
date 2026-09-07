@@ -29,6 +29,7 @@ func NodeScriptImports() []imports.Handler[any] {
 		imports.Alias[any]{From: "node:process", To: "process"},
 		imports.Alias[any]{From: "node:child_process", To: "child_process"},
 		imports.Alias[any]{From: "node:readline", To: "readline"},
+		imports.Alias[any]{From: "node:perf_hooks", To: "perf_hooks"},
 		imports.Map[any]{
 			"util":          nodehostScript("nodehost/util.js"),
 			"util/types":    nodehostScript("nodehost/types.js"),
@@ -44,6 +45,7 @@ func NodeScriptImports() []imports.Handler[any] {
 			"process":       nodeProcessBinding{},
 			"child_process": nodeChildBinding{},
 			"readline":      nodeReadlineBinding{},
+			"perf_hooks":    nodePerfHooksBinding{},
 		},
 		imports.Func[any](func(spec string, next imports.Resolver[any]) (any, error) {
 			if spec == "common" || strings.HasSuffix(spec, "/common") || strings.HasSuffix(spec, "/common/index.js") {
