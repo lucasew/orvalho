@@ -135,6 +135,11 @@ assert.fail = function (msg) {
 assert.strictEqual = strictEqual;
 assert.notStrictEqual = notStrictEqual;
 assert.deepStrictEqual = deepStrictEqual;
+assert.match = function (actual, regexp, message) {
+  if (typeof actual !== 'string' || !regexp || typeof regexp.test !== 'function' || !regexp.test(actual)) {
+    fail(actual, regexp, message, 'match');
+  }
+};
 assert.throws = throws;
 assert.AssertionError = AssertionError;
 assert.ifError = function (err) {
