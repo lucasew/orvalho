@@ -12,7 +12,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/stellar/go v0.0.0-20251023205731-8cd5ab33bcdd
 	github.com/tyler-smith/go-bip39 v1.1.0
-	golang.org/x/crypto v0.46.0
+	golang.org/x/crypto v0.51.0
 )
 
 require (
@@ -29,9 +29,9 @@ require (
 	github.com/protocolbuffers/txtpbfmt v0.0.0-20250627152318-f293424e46b5 // indirect
 	github.com/shogo82148/go-sfv v0.3.3 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	golang.org/x/net v0.47.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
-	golang.org/x/text v0.33.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
