@@ -38,9 +38,14 @@ func runClaimedNodeTest(t *testing.T, nodeRoot, rel string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	iso := New("", Options{
 		Argv: []string{"node", file},
 		FS:   os.DirFS(nodeRoot),
+		Cwd:  cwd,
 		Imports: append(NodeScriptImports(), imports.NodeModules{
 			FS:   os.DirFS(nodeRoot),
 			From: filepath.ToSlash(rel),

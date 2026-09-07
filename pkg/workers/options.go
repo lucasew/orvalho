@@ -75,6 +75,22 @@ type Options struct {
 	// Argv is process.argv for ScriptMain. Empty means []string{"orvalho"}.
 	Argv []string
 
+	// ProcessEnv is process.env. Nil means an empty env (not os.Environ).
+	ProcessEnv map[string]string
+
+	// Cwd is process.cwd(). Guest chdir updates this copy only.
+	// Empty means ".".
+	Cwd string
+
+	// Platform is process.platform. Empty means runtime.GOOS.
+	Platform string
+
+	// Arch is process.arch. Empty means runtime.GOARCH.
+	Arch string
+
+	// PID is process.pid. Zero is a valid injected pid.
+	PID int
+
 	// PrepareSource rewrites guest source after shebang strip and before
 	// the CommonJS wrap (ESM downlevel). Nil means no extra rewrite.
 	PrepareSource func(source, file string) (string, error)
@@ -95,6 +111,13 @@ func (o Options) withDefaults() Options {
 	}
 	if o.Argv != nil {
 		o.Argv = append([]string(nil), o.Argv...)
+	}
+	if o.ProcessEnv != nil {
+		env := make(map[string]string, len(o.ProcessEnv))
+		for k, v := range o.ProcessEnv {
+			env[k] = v
+		}
+		o.ProcessEnv = env
 	}
 	return o
 }

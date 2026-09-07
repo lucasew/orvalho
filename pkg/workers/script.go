@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/dop251/goja"
@@ -175,28 +173,51 @@ func (iso *Isolate) installProcess() {
 	if len(argv) == 0 {
 		argv = []string{"orvalho"}
 	}
+	platform := iso.opts.Platform
+	if platform == "" {
+		platform = runtime.GOOS
+	}
+	arch := iso.opts.Arch
+	if arch == "" {
+		arch = runtime.GOARCH
+	}
+	iso.cwd = iso.opts.Cwd
+	if iso.cwd == "" {
+		iso.cwd = "."
+	}
 	p := iso.vm.NewObject()
 	mustSet(p, "argv", argv)
-	mustSet(p, "platform", runtime.GOOS)
-	mustSet(p, "arch", runtime.GOARCH)
+	mustSet(p, "platform", platform)
+	mustSet(p, "arch", arch)
 	mustSet(p, "title", "orvalho")
-	mustSet(p, "pid", os.Getpid())
+	mustSet(p, "pid", iso.opts.PID)
 	versions := iso.vm.NewObject()
 	mustSet(versions, "node", "24.0.0")
 	mustSet(p, "versions", versions)
 	env := iso.vm.NewObject()
-	for _, e := range os.Environ() {
-		k, v, ok := strings.Cut(e, "=")
-		if ok && k != "" {
+	for k, v := range iso.opts.ProcessEnv {
+		if k != "" {
 			mustSet(env, k, v)
 		}
 	}
 	mustSet(p, "env", env)
-	mustSet(p, "cwd", func() (string, error) { return os.Getwd() })
-	mustSet(p, "chdir", func(dir string) error { return os.Chdir(dir) })
+	mustSet(p, "cwd", iso.jsProcessCwd)
+	mustSet(p, "chdir", iso.jsProcessChdir)
 	mustSet(p, "exit", iso.jsProcessExit)
 	mustSet(p, "nextTick", iso.jsNextTick)
 	mustRuntimeSet(iso.vm, "process", p)
+}
+
+func (iso *Isolate) jsProcessCwd(goja.FunctionCall) string {
+	return iso.cwd
+}
+
+func (iso *Isolate) jsProcessChdir(call goja.FunctionCall) goja.Value {
+	if len(call.Arguments) == 0 || goja.IsUndefined(call.Argument(0)) {
+		panic(iso.vm.NewTypeError("The \"directory\" argument must be of type string"))
+	}
+	iso.cwd = call.Argument(0).String()
+	return goja.Undefined()
 }
 
 func (iso *Isolate) jsProcessExit(call goja.FunctionCall) goja.Value {

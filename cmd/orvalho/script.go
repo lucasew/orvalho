@@ -116,8 +116,11 @@ func runScriptFile(ctx context.Context, dir, file string, extra []string) error 
 	rel = evalFSRel(root, rel)
 	argv := append([]string{"node", file}, extra...)
 	iso := workers.New("", workers.Options{
-		Argv: argv,
-		FS:   os.DirFS(root),
+		Argv:       argv,
+		FS:         os.DirFS(root),
+		ProcessEnv: processEnvMap(),
+		Cwd:        dir,
+		PID:        os.Getpid(),
 		Imports: append(workers.NodeScriptImports(),
 			realpathScripts{root: root, inner: imports.NodeModules{FS: os.DirFS(root), From: rel}},
 		),
@@ -165,6 +168,17 @@ func (r realpathScripts) Resolve(spec string, next imports.Resolver[any]) (any, 
 
 func prepareScriptSource(src, file string) (string, error) {
 	return bundle.CompileCJS(src, file)
+}
+
+func processEnvMap() map[string]string {
+	env := make(map[string]string)
+	for _, e := range os.Environ() {
+		k, v, ok := strings.Cut(e, "=")
+		if ok && k != "" {
+			env[k] = v
+		}
+	}
+	return env
 }
 
 func scriptTree(dir, file string) (root, rel string) {

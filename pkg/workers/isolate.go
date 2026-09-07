@@ -43,6 +43,9 @@ type Isolate struct {
 	// scriptCause is the first require/load error during ScriptMain.
 	// Guest code may catch it and process.exit(1); we still report this.
 	scriptCause error
+
+	// cwd is the injected process.cwd(); chdir updates only this.
+	cwd string
 }
 
 // Ensure Isolate implements actor.Actor.
