@@ -14,23 +14,9 @@ var nodehostFS embed.FS
 // builtins plus a stub for Node's test/common helper.
 func NodeScriptImports() []imports.Handler[any] {
 	return []imports.Handler[any]{
-		imports.Alias[any]{From: "node:util", To: "util"},
-		imports.Alias[any]{From: "node:assert", To: "assert"},
-		imports.Alias[any]{From: "node:path", To: "path"},
 		imports.Alias[any]{From: "path/posix", To: "path"},
 		imports.Alias[any]{From: "node:path/posix", To: "path"},
-		imports.Alias[any]{From: "node:path/win32", To: "path/win32"},
-		imports.Alias[any]{From: "node:fs", To: "fs"},
-		imports.Alias[any]{From: "node:fs/promises", To: "fs/promises"},
-		imports.Alias[any]{From: "node:module", To: "module"},
-		imports.Alias[any]{From: "node:url", To: "url"},
-		imports.Alias[any]{From: "node:crypto", To: "crypto"},
-		imports.Alias[any]{From: "node:os", To: "os"},
-		imports.Alias[any]{From: "node:process", To: "process"},
-		imports.Alias[any]{From: "node:child_process", To: "child_process"},
-		imports.Alias[any]{From: "node:readline", To: "readline"},
-		imports.Alias[any]{From: "node:perf_hooks", To: "perf_hooks"},
-		imports.Map[any]{
+		nodePrefixed(imports.Map[any]{
 			"util":          nodehostScript("nodehost/util.js"),
 			"util/types":    nodehostScript("nodehost/types.js"),
 			"assert":        nodehostScript("nodehost/assert.js"),
@@ -46,7 +32,7 @@ func NodeScriptImports() []imports.Handler[any] {
 			"child_process": nodeChildBinding{},
 			"readline":      nodeReadlineBinding{},
 			"perf_hooks":    nodePerfHooksBinding{},
-		},
+		}),
 		imports.Func[any](func(spec string, next imports.Resolver[any]) (any, error) {
 			if spec == "common" || strings.HasSuffix(spec, "/common") || strings.HasSuffix(spec, "/common/index.js") {
 				return nodehostScript("nodehost/common.js"), nil
@@ -54,6 +40,16 @@ func NodeScriptImports() []imports.Handler[any] {
 			return next(spec)
 		}),
 	}
+}
+
+// nodePrefixed claims both name and node:name for each Map entry.
+func nodePrefixed(m imports.Map[any]) imports.Map[any] {
+	out := make(imports.Map[any], len(m)*2)
+	for k, v := range m {
+		out[k] = v
+		out["node:"+k] = v
+	}
+	return out
 }
 
 func nodehostScript(name string) imports.Script {
