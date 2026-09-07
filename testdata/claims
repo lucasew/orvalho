@@ -1,0 +1,3 @@
+# Listed Node.js tests (paths under testdata/node/). A line is a claim.
+# Refresh the tree with: workspaced codebase apply
+parallel/test-util-inherits.js

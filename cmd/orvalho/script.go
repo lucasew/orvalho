@@ -117,9 +117,9 @@ func runScriptFile(ctx context.Context, dir, file string, extra []string) error 
 	argv := append([]string{"node", file}, extra...)
 	iso := workers.New("", workers.Options{
 		Argv: argv,
-		Imports: []imports.Handler[any]{
+		Imports: append(workers.NodeScriptImports(),
 			realpathScripts{root: root, inner: imports.NodeModules{FS: os.DirFS(root), From: rel}},
-		},
+		),
 		PrepareSource: prepareScriptSource,
 	})
 	return iso.ScriptMain(ctx, string(src), rel)
