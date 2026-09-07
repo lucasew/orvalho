@@ -24,6 +24,7 @@ func NodeScriptImports() []imports.Handler[any] {
 		imports.Alias[any]{From: "node:module", To: "module"},
 		imports.Alias[any]{From: "node:url", To: "url"},
 		imports.Alias[any]{From: "node:crypto", To: "crypto"},
+		imports.Alias[any]{From: "node:os", To: "os"},
 		imports.Map[any]{
 			"util":       nodehostScript("nodehost/util.js"),
 			"util/types": nodehostScript("nodehost/types.js"),
@@ -34,6 +35,7 @@ func NodeScriptImports() []imports.Handler[any] {
 			"module":     nodeModuleBinding{},
 			"url":        nodeURLBinding{},
 			"crypto":     nodeCryptoBinding{},
+			"os":         nodeOSBinding{},
 		},
 		imports.Func[any](func(spec string, next imports.Resolver[any]) (any, error) {
 			if spec == "common" || strings.HasSuffix(spec, "/common") || strings.HasSuffix(spec, "/common/index.js") {
