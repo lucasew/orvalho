@@ -105,7 +105,8 @@ type Options struct {
 	// Empty means ".".
 	Cwd string
 
-	// Platform is process.platform. Empty means runtime.GOOS.
+	// Platform is process.platform and os.platform(). Empty means "wasi"
+	// (not the host GOOS). Native addons are not a goal.
 	Platform string
 
 	// Arch is process.arch and os.arch(). Empty means "wasm32"

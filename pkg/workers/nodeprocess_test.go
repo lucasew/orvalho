@@ -53,6 +53,26 @@ func TestNodeProcessCwdInjected(t *testing.T) {
 	}
 }
 
+func TestNodeProcessPlatformDefault(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		if (process.platform !== "wasi") throw new Error("platform " + process.platform);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeProcessPlatformInjected(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports(), Platform: "linux"})
+	err := iso.ScriptMain(t.Context(), `
+		if (process.platform !== "linux") throw new Error("platform " + process.platform);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeProcessArchDefault(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `

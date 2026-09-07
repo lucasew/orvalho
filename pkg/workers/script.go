@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"time"
 
 	"github.com/dop251/goja"
@@ -175,7 +174,7 @@ func (iso *Isolate) installProcess() {
 	}
 	platform := iso.opts.Platform
 	if platform == "" {
-		platform = runtime.GOOS
+		platform = "wasi"
 	}
 	arch := iso.opts.Arch
 	if arch == "" {

@@ -24,7 +24,8 @@ func TestNodeOSIdentity(t *testing.T) {
 		var os = require("os");
 		if (require("node:os") !== os) throw new Error("node:os identity");
 		if (os.EOL !== "\n") throw new Error("EOL " + JSON.stringify(os.EOL));
-		if (typeof os.platform() !== "string") throw new Error("platform");
+		if (os.platform() !== "wasi") throw new Error("platform " + os.platform());
+		if (os.platform() !== process.platform) throw new Error("os.platform !== process.platform");
 		if (os.arch() !== "wasm32") throw new Error("arch " + os.arch());
 		if (os.arch() !== process.arch) throw new Error("os.arch !== process.arch");
 		if (!os.tmpdir()) throw new Error("tmpdir");
