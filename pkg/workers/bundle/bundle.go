@@ -205,7 +205,7 @@ func importCallLen(src string, i int) int {
 	if i+len(kw) > len(src) || src[i:i+len(kw)] != kw {
 		return 0
 	}
-	if i > 0 && isIdentByte(src[i-1]) {
+	if i > 0 && (src[i-1] == '.' || isIdentByte(src[i-1])) {
 		return 0
 	}
 	j := i + len(kw)

@@ -422,7 +422,7 @@ func importCallLen(src string, i int) int {
 	}
 	if i > 0 {
 		c := src[i-1]
-		if c == '_' || c == '$' ||
+		if c == '.' || c == '?' || c == '_' || c == '$' ||
 			(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
 			return 0
 		}
