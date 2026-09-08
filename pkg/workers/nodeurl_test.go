@@ -46,9 +46,11 @@ func TestNodeURLFileURLToPathAcceptsURLObject(t *testing.T) {
 		if (p !== "/tmp/orvalho-url") throw new Error("obj " + p);
 		var again = url.pathToFileURL(p).toString();
 		if (again.indexOf("file://") !== 0) throw new Error("href " + again);
-		var bare = new URL("/tmp/orvalho-url");
-		var p2 = url.fileURLToPath(bare);
-		if (p2 !== "/tmp/orvalho-url") throw new Error("bare " + p2);
+		try { new URL("unenv/node/inspector/promises"); throw new Error("relative URL"); }
+		catch (e) {
+			if (e.message === "relative URL") throw e;
+			if (e.code !== "ERR_INVALID_URL" && e.name !== "TypeError") throw new Error("rel " + e.code + " " + e.message);
+		}
 	`)
 }
 
@@ -58,6 +60,34 @@ func TestNodeURLFileURLToPathRoundTrip(t *testing.T) {
 		var p = "/tmp/orvalho-url";
 		var back = url.fileURLToPath(url.pathToFileURL(p));
 		if (back !== p) throw new Error("round-trip " + back);
+	`)
+}
+
+func TestURLBareSpecifierThrowsLikeNode(t *testing.T) {
+	runNodeURL(t, `
+		function dump(label, u) {
+			throw new Error(label
+				+ " proto=" + JSON.stringify(u.protocol)
+				+ " href=" + JSON.stringify(u.href)
+				+ " pathname=" + JSON.stringify(u.pathname)
+				+ " host=" + JSON.stringify(u.host));
+		}
+		var file = new URL("file:///node_modules/@cloudflare/vite-plugin/dist/index.mjs");
+		if (file.protocol !== "file:") dump("file url", file);
+		var cwd = require("url").pathToFileURL("/tmp/orvalho-url");
+		if (cwd.protocol !== "file:" || !cwd.href) dump("pathToFileURL", cwd);
+		var back = require("url").fileURLToPath(cwd);
+		if (back !== "/tmp/orvalho-url") throw new Error("round " + back);
+		try {
+			var bare = new URL("unenv/runtime/node/crypto");
+			dump("bare specifier should throw", bare);
+		} catch (e) {
+			if (String(e).indexOf("Invalid URL") < 0 && String(e).indexOf("invalid") < 0) {
+				throw new Error("bare err " + e);
+			}
+		}
+		var nodeu = new URL("node:fs");
+		if (nodeu.protocol !== "node:") dump("node:fs", nodeu);
 	`)
 }
 

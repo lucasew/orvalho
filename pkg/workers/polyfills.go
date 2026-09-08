@@ -247,8 +247,11 @@ const hostPolyfillScript = `
   if (typeof globalThis.URL === "undefined" || typeof globalThis.URL.canParse !== "function") {
     function orvalhoParseAbsURL(s) {
       var m = String(s).match(/^([a-zA-Z][a-zA-Z0-9+.-]*:)\/\/([^\/\?#]*)([^?#]*)(\?[^#]*)?(#.*)?$/);
-      if (!m) return null;
-      return { protocol: m[1], host: m[2], pathname: m[3] || "/", search: m[4] || "", hash: m[5] || "" };
+      if (m) return { protocol: m[1], host: m[2], pathname: m[3] || "/", search: m[4] || "", hash: m[5] || "" };
+      // node:fs / data:… — scheme + opaque path, no //.
+      var o = String(s).match(/^([a-zA-Z][a-zA-Z0-9+.-]*:)([^\/\?#][^?#]*)(\?[^#]*)?(#.*)?$/);
+      if (o) return { protocol: o[1], host: "", pathname: o[2] || "", search: o[3] || "", hash: o[4] || "", opaque: true };
+      return null;
     }
     function orvalhoNormalizePath(p) {
       var parts = p.split("/");
@@ -305,35 +308,22 @@ const hostPolyfillScript = `
         url = orvalhoResolveURL(String(base), url);
       }
       var parsed = orvalhoParseAbsURL(url);
-      if (parsed) {
-        this.protocol = parsed.protocol;
-        this.host = parsed.host;
-        this.hostname = parsed.host.split(":")[0];
-        this.port = parsed.host.indexOf(":") >= 0 ? parsed.host.split(":").slice(1).join(":") : "";
-        this.pathname = parsed.pathname;
-        this.search = parsed.search;
-        this.hash = parsed.hash;
-        this.origin = parsed.protocol === "file:" ? "null" : parsed.protocol + "//" + parsed.host;
-        this.href = parsed.protocol + "//" + parsed.host + parsed.pathname + parsed.search + parsed.hash;
-      } else {
-        var qAt = url.indexOf("?");
-        var hAt = url.indexOf("#");
-        var pathEnd = url.length;
-        if (qAt >= 0) pathEnd = qAt;
-        if (hAt >= 0 && hAt < pathEnd) pathEnd = hAt;
-        this.protocol = "";
-        this.host = "";
-        this.hostname = "";
-        this.port = "";
-        this.pathname = url.slice(0, pathEnd) || "/";
-        if (this.pathname.charAt(0) !== "/" && this.pathname.indexOf("://") === -1) {
-          this.pathname = "/" + this.pathname.replace(/^\//, "");
-        }
-        this.search = qAt >= 0 ? url.slice(qAt, hAt >= 0 ? hAt : url.length) : "";
-        this.hash = hAt >= 0 ? url.slice(hAt) : "";
-        this.origin = "";
-        this.href = url;
+      if (!parsed) {
+        var err = new TypeError("Invalid URL");
+        err.code = "ERR_INVALID_URL";
+        throw err;
       }
+      this.protocol = parsed.protocol;
+      this.host = parsed.host;
+      this.hostname = parsed.host.split(":")[0];
+      this.port = parsed.host.indexOf(":") >= 0 ? parsed.host.split(":").slice(1).join(":") : "";
+      this.pathname = parsed.pathname;
+      this.search = parsed.search;
+      this.hash = parsed.hash;
+      this.origin = parsed.protocol === "file:" ? "null" : (parsed.opaque ? "null" : parsed.protocol + "//" + parsed.host);
+      this.href = parsed.opaque
+        ? parsed.protocol + parsed.pathname + parsed.search + parsed.hash
+        : parsed.protocol + "//" + parsed.host + parsed.pathname + parsed.search + parsed.hash;
       this.searchParams = new OrvalhoURLSearchParams(this.search);
     };
     URLImpl.canParse = function (url, base) {
