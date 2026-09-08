@@ -1,6 +1,7 @@
 package bundle
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,10 +12,15 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 )
 
+//go:embed es_module_lexer.asm.js
+var esmLexerASM string
+
 var (
-	es6UnicodeEscape  = regexp.MustCompile(`\\u\{([0-9a-fA-F]{1,6})\}`)
-	unicodePropEscape = regexp.MustCompile(`\\([pP])\{([^}]+)\}`)
-	emptyImportMeta   = regexp.MustCompile(`\b(import_meta\d*)\s*=\s*\{\s*\}`)
+	es6UnicodeEscape     = regexp.MustCompile(`\\u\{([0-9a-fA-F]{1,6})\}`)
+	unicodePropEscape    = regexp.MustCompile(`\\([pP])\{([^}]+)\}`)
+	emptyImportMeta      = regexp.MustCompile(`\b(import_meta\d*)\s*=\s*\{\s*\}`)
+	awaitImportToRequire = regexp.MustCompile(`\bawait\s+import\s*\(`)
+	awaitBareCall        = regexp.MustCompile(`(?m)^await ([A-Za-z_$][\w$]*\(\);)\s*$`)
 )
 
 // pAtom maps property names regexp2 rejects under Unicode (the /u flag)
@@ -50,6 +56,9 @@ func CompileCJS(source, file string) (string, error) {
 
 // TransformCJS downlevels one file to CommonJS ES2015 via the esbuild Go API.
 func TransformCJS(source, file string) (string, error) {
+	source = stripImportCallOptions(source)
+	source = awaitImportToRequire.ReplaceAllString(source, "require(")
+	source = awaitBareCall.ReplaceAllString(source, "$1")
 	result := api.Transform(source, api.TransformOptions{
 		Loader:     loaderFor(file),
 		Sourcefile: file,
@@ -107,7 +116,105 @@ func finishCJS(src string) string {
 	src = rewriteRegexpFlags(src)
 	src = rewriteCopyProps(src)
 	src = rewriteArgumentsCapture(src)
-	return rewriteImportMeta(src)
+	src = rewriteImportMeta(src)
+	src = rewriteESMLexer(src)
+	return rewriteWasmMemoryCache(src)
+}
+
+// stripImportCallOptions drops import(x, { with: ... }) options so
+// esbuild ES2015 can rewrite the call (dynamic-import is disabled).
+func stripImportCallOptions(src string) string {
+	var b strings.Builder
+	b.Grow(len(src))
+	i := 0
+	for i < len(src) {
+		if n := importCallLen(src, i); n > 0 {
+			b.WriteString(src[i : i+n])
+			i += n
+			arg, next := firstImportArg(src, i)
+			b.WriteString(arg)
+			i = next
+			continue
+		}
+		b.WriteByte(src[i])
+		i++
+	}
+	return b.String()
+}
+
+func firstImportArg(src string, i int) (string, int) {
+	start := i
+	depth := 1
+	comma := -1
+	for i < len(src) && depth > 0 {
+		if src[i] == '"' || src[i] == '\'' {
+			q := src[i]
+			i++
+			for i < len(src) {
+				if src[i] == '\\' && i+1 < len(src) {
+					i += 2
+					continue
+				}
+				if src[i] == q {
+					i++
+					break
+				}
+				i++
+			}
+			continue
+		}
+		if src[i] == '`' {
+			i = scanTemplateLiteral(src, i)
+			continue
+		}
+		switch src[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				if comma >= 0 {
+					return strings.TrimRight(src[start:comma], " \t\n\r") + ")", i + 1
+				}
+				return src[start : i+1], i + 1
+			}
+		case ',':
+			if depth == 1 && comma < 0 {
+				comma = i
+			}
+		}
+		i++
+	}
+	return src[start:], len(src)
+}
+
+// wasm-bindgen caches Uint8Array(memory.buffer) until byteLength === 0
+// (browser detach-on-grow). goja copies; always re-read the live buffer.
+func rewriteWasmMemoryCache(src string) string {
+	old := `if (cachedUint8ArrayMemory0 === null || cachedUint8ArrayMemory0.byteLength === 0) {
+        cachedUint8ArrayMemory0 = new Uint8Array(wasm.memory.buffer);
+    }`
+	neu := `cachedUint8ArrayMemory0 = new Uint8Array(wasm.memory.buffer);`
+	src = strings.ReplaceAll(src, old, neu)
+	old2 := `if (cachedDataViewMemory0 === null || cachedDataViewMemory0.buffer.byteLength === 0) {
+        cachedDataViewMemory0 = new DataView(wasm.memory.buffer);
+    }`
+	neu2 := `cachedDataViewMemory0 = new DataView(wasm.memory.buffer);`
+	return strings.ReplaceAll(src, old2, neu2)
+}
+
+// esmLexerWait is the inlined es-module-lexer WASM gate. goja has no
+// WASM, so parse must use the asm.js implementation instead.
+const esmLexerWait = `if (!C) return init.then((() => parse(E$1)));`
+
+func rewriteESMLexer(src string) string {
+	if !strings.Contains(src, esmLexerWait) {
+		return src
+	}
+	body := strings.Replace(esmLexerASM, "export function parse", "function parse", 1)
+	prelude := "var __orvalhoESMParse = (function () {\n" + body + "\nreturn parse;\n})();\n"
+	repl := "if (typeof __orvalhoESMParse === \"function\") return __orvalhoESMParse(E$1, g);\n" + esmLexerWait
+	return prelude + strings.Replace(src, esmLexerWait, repl, 1)
 }
 
 // funcOpen matches esbuild's function heads. Arrows are skipped so we

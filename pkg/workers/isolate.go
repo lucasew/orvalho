@@ -59,6 +59,7 @@ type Isolate struct {
 	wasmRt       wazero.Runtime
 	wasmCompiled map[*goja.Object]*wasmCompiled
 	wasmSeq      uint64
+	wasmActive   *wasmInstance
 }
 
 // Ensure Isolate implements actor.Actor.

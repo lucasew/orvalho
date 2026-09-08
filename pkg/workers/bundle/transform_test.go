@@ -151,6 +151,40 @@ func TestCompileCJSASCIICharset(t *testing.T) {
 	}
 }
 
+func TestTransformCJSAwaitImportToRequire(t *testing.T) {
+	out, err := bundle.TransformCJS("export const v = await import(\"./p.json\");\n", "mod.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "require(") {
+		t.Fatalf("expected require:\n%s", out)
+	}
+}
+
+func TestTransformCJSStripsImportAttributes(t *testing.T) {
+	out, err := bundle.TransformCJS("export async function v() { return import(\"./p.json\", { with: { type: \"json\" } }); }\n", "mod.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "with:") {
+		t.Fatalf("import attributes survived:\n%s", out)
+	}
+}
+
+func TestTransformCJSRewritesESMLexer(t *testing.T) {
+	src := "export function parse(E$1, g) { if (!C) return init.then((() => parse(E$1))); }\n"
+	out, err := bundle.TransformCJS(src, "lexer.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "__orvalhoESMParse") {
+		t.Fatal("missing JS lexer")
+	}
+	if !strings.Contains(out, "return __orvalhoESMParse(E$1, g)") {
+		t.Fatal("missing parse gate")
+	}
+}
+
 func TestTransformCJSImportMetaURL(t *testing.T) {
 	out, err := bundle.TransformCJS("export const u = import.meta.url;\n", "pkg/dist/file.js")
 	if err != nil {

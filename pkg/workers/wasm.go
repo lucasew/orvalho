@@ -190,6 +190,10 @@ func (iso *Isolate) instantiateJSImports(c *wasmCompiled, importObj goja.Value) 
 					if jsFn == nil {
 						return
 					}
+					if inst := iso.wasmActive; inst != nil {
+						inst.rebindMemory(iso)
+						inst.syncFromWasm()
+					}
 					args := make([]goja.Value, len(params))
 					for i, t := range params {
 						args[i] = iso.vm.ToValue(wasmToJS(stack[i], t))
@@ -197,6 +201,9 @@ func (iso *Isolate) instantiateJSImports(c *wasmCompiled, importObj goja.Value) 
 					ret, err := jsFn(goja.Undefined(), args...)
 					if err != nil {
 						panic(err)
+					}
+					if inst := iso.wasmActive; inst != nil {
+						inst.syncToWasm()
 					}
 					if len(results) > 0 && ret != nil {
 						stack[0] = jsToWasm(ret, results[0])
@@ -331,6 +338,9 @@ func globalJS(g api.Global) any {
 
 func (iso *Isolate) wrapWasmFn(st *wasmInstance, fn api.Function) func(goja.FunctionCall) goja.Value {
 	return func(call goja.FunctionCall) goja.Value {
+		prev := iso.wasmActive
+		iso.wasmActive = st
+		defer func() { iso.wasmActive = prev }()
 		st.syncToWasm()
 		params := fn.Definition().ParamTypes()
 		args := make([]uint64, len(params))
