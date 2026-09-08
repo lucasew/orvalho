@@ -44,6 +44,19 @@ func TestNodeHostTypesIdentity(t *testing.T) {
 	}
 }
 
+func TestNodeStreamConsumers(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var c = require("stream/consumers");
+		if (require("node:stream/consumers") !== c) throw new Error("identity");
+		if (typeof c.text !== "function") throw new Error("text");
+		if (typeof c.json !== "function") throw new Error("json");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWorkerdStub(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `
