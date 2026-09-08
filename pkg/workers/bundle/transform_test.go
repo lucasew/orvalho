@@ -39,11 +39,11 @@ func TestTransformCJSRewritesCopyProps(t *testing.T) {
 }
 
 func TestTransformCJSDropsRegexpDFlag(t *testing.T) {
-	out, err := bundle.TransformCJS("export const r = new RegExp('x', 'dg');\n", "mod.mjs")
+	out, err := bundle.TransformCJS("export const r = new RegExp('x', 'dg');\nexport const s = /w/dgs;\n", "mod.mjs")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out, `"dg"`) || strings.Contains(out, `'dg'`) {
+	if strings.Contains(out, `"dg"`) || strings.Contains(out, `'dg'`) || strings.Contains(out, `"dgs"`) || strings.Contains(out, `'dgs'`) {
 		t.Fatalf("d flag survived: %s", out)
 	}
 }

@@ -135,21 +135,25 @@ func rewriteCopyProps(src string) string {
 	return strings.ReplaceAll(src, old, neu)
 }
 
+// regexpFlagLiteral matches esbuild's `new RegExp(..., "flags")`.
+var regexpFlagLiteral = regexp.MustCompile(`, ("|')([gimsuyadv]*)("|')\)`)
+
 // rewriteRegexpFlags drops flags goja rejects (hasIndices `d`, unicodeSets `v`).
 func rewriteRegexpFlags(src string) string {
-	for _, pair := range [][2]string{
-		{`, "dg")`, `, "g")`},
-		{`, "gd")`, `, "g")`},
-		{`, 'dg')`, `, 'g')`},
-		{`, 'gd')`, `, 'g')`},
-		{`, "d")`, `, "")`},
-		{`, 'd')`, `, '')`},
-		{`, "vg")`, `, "g")`},
-		{`, "gv")`, `, "g")`},
-	} {
-		src = strings.ReplaceAll(src, pair[0], pair[1])
-	}
-	return src
+	return regexpFlagLiteral.ReplaceAllStringFunc(src, func(m string) string {
+		sub := regexpFlagLiteral.FindStringSubmatch(m)
+		if len(sub) < 4 || sub[1] != sub[3] {
+			return m
+		}
+		q, flags := sub[1], sub[2]
+		var b strings.Builder
+		for _, r := range flags {
+			if r != 'd' && r != 'v' {
+				b.WriteRune(r)
+			}
+		}
+		return ", " + q + b.String() + q + ")"
+	})
 }
 
 // rewriteImportMeta fills esbuild's empty import_meta stub from the wrap
