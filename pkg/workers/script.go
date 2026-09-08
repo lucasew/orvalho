@@ -239,7 +239,30 @@ func (iso *Isolate) installProcess() {
 	mustSet(p, "chdir", iso.jsProcessChdir)
 	mustSet(p, "exit", iso.jsProcessExit)
 	mustSet(p, "nextTick", iso.jsNextTick)
+	mustSet(p, "stdin", iso.newStdio(0))
+	mustSet(p, "stdout", iso.newStdio(1))
+	mustSet(p, "stderr", iso.newStdio(2))
 	mustRuntimeSet(iso.vm, "process", p)
+}
+
+func (iso *Isolate) newStdio(fd int) *goja.Object {
+	s := iso.vm.NewObject()
+	attachEmitter(s)
+	mustSet(s, "fd", fd)
+	mustSet(s, "isTTY", false)
+	mustSet(s, "getColorDepth", func(goja.FunctionCall) goja.Value {
+		return iso.vm.ToValue(1)
+	})
+	mustSet(s, "hasColors", func(goja.FunctionCall) goja.Value {
+		return iso.vm.ToValue(false)
+	})
+	mustSet(s, "write", func(goja.FunctionCall) goja.Value {
+		return iso.vm.ToValue(true)
+	})
+	mustSet(s, "end", func(call goja.FunctionCall) goja.Value { return s })
+	mustSet(s, "cork", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
+	mustSet(s, "uncork", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
+	return s
 }
 
 func (iso *Isolate) jsProcessCwd(goja.FunctionCall) string {

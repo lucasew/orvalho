@@ -56,5 +56,11 @@ func (n *nodeTTY) initStream(this *goja.Object) *goja.Object {
 	mustSet(this, "getWindowSize", func(goja.FunctionCall) goja.Value {
 		return n.iso.vm.ToValue([]int{0, 0})
 	})
+	mustSet(this, "getColorDepth", func(goja.FunctionCall) goja.Value {
+		return n.iso.vm.ToValue(1)
+	})
+	mustSet(this, "hasColors", func(goja.FunctionCall) goja.Value {
+		return n.iso.vm.ToValue(false)
+	})
 	return this
 }

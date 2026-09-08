@@ -93,6 +93,18 @@ func TestNodeProcessArchInjected(t *testing.T) {
 	}
 }
 
+func TestNodeProcessStdio(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		if (!process.stdout || process.stdout.isTTY !== false) throw new Error("stdout");
+		if (process.stderr.getColorDepth() !== 1) throw new Error("depth");
+		if (process.stderr.hasColors() !== false) throw new Error("colors");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeProcessPIDInjected(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports(), PID: 42})
 	err := iso.ScriptMain(t.Context(), `
