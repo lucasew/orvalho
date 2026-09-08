@@ -32,6 +32,19 @@ func TestNodeHostTypesIdentity(t *testing.T) {
 	}
 }
 
+func TestNodeStreamPromises(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var p = require("stream/promises");
+		if (require("node:stream/promises") !== p) throw new Error("identity");
+		if (typeof p.pipeline !== "function") throw new Error("pipeline");
+		if (typeof p.finished !== "function") throw new Error("finished");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeAsyncHooksALS(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `
