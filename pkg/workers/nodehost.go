@@ -35,6 +35,7 @@ func NodeScriptImports() []imports.Handler[any] {
 		imports.Alias[any]{From: "url", To: "node:url"},
 		imports.Alias[any]{From: "util", To: "node:util"},
 		imports.Alias[any]{From: "util/types", To: "node:util/types"},
+		imports.Alias[any]{From: "v8", To: "node:v8"},
 		imports.Alias[any]{From: "worker_threads", To: "node:worker_threads"},
 		imports.Alias[any]{From: "zlib", To: "node:zlib"},
 		imports.Map[any]{
@@ -57,6 +58,7 @@ func NodeScriptImports() []imports.Handler[any] {
 			"node:url":            nodeURLBinding{},
 			"node:util":           nodehostScript("nodehost/util.js"),
 			"node:util/types":     nodehostScript("nodehost/types.js"),
+			"node:v8":             nodeV8Binding{},
 			"node:worker_threads": nodeWorkerThreadsBinding{},
 			"node:zlib":           nodeZlibBinding{},
 		},
