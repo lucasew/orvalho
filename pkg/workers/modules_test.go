@@ -155,6 +155,16 @@ func TestRequireRejectsHostPathSpecifiers(t *testing.T) {
 	}
 }
 
+func TestRewriteImportSkipsMethodCall(t *testing.T) {
+	got := rewriteImportToRequire(`runner.import("x"); import("y"); obj?.import("z");`)
+	if strings.Contains(got, `runner.__import`) || strings.Contains(got, `obj?.__import`) {
+		t.Fatalf("method rewritten: %s", got)
+	}
+	if !strings.Contains(got, `__import("y")`) {
+		t.Fatalf("dynamic import missed: %s", got)
+	}
+}
+
 func TestRequireCircularScripts(t *testing.T) {
 	iso := New(`
 		var a = require("orvalho:a");
