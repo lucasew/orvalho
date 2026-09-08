@@ -57,6 +57,23 @@ func TestNodeStreamConsumers(t *testing.T) {
 	}
 }
 
+func TestNodeStringDecoder(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var sd = require("string_decoder");
+		if (require("node:string_decoder") !== sd) throw new Error("identity");
+		if (typeof sd.StringDecoder !== "function") throw new Error("ctor");
+		var d = new sd.StringDecoder("utf8");
+		var s = d.write(Buffer.from("hi"));
+		if (s !== "hi") throw new Error("write " + s);
+		if (typeof d.end !== "function") throw new Error("end");
+		if (d.end() !== "") throw new Error("end empty");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeDomain(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `
