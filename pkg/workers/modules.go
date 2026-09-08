@@ -15,8 +15,111 @@ var cjsIdentDecl = regexp.MustCompile(`(?m)\b(?:var|let|const|function)\s+(__fil
 
 func (iso *Isolate) installModules() {
 	iso.moduleCache = make(map[string]goja.Value)
-	mustRuntimeSet(iso.vm, "require", iso.jsRequire)
+	mustRuntimeSet(iso.vm, "require", iso.newRequire(""))
 	mustRuntimeSet(iso.vm, "getBuiltinModule", iso.jsRequire)
+}
+
+// newRequire is require bound to from, with resolve (Node createRequire).
+func (iso *Isolate) newRequire(from string) *goja.Object {
+	fn := func(call goja.FunctionCall) goja.Value {
+		prev := iso.importFrom
+		if from != "" {
+			iso.importFrom = from
+		}
+		defer func() { iso.importFrom = prev }()
+		return iso.jsRequire(call)
+	}
+	obj := iso.vm.ToValue(fn).ToObject(iso.vm)
+	mustSet(obj, "resolve", func(call goja.FunctionCall) goja.Value {
+		return iso.jsRequireResolve(from, call)
+	})
+	return obj
+}
+
+func (iso *Isolate) jsRequireResolve(from string, call goja.FunctionCall) goja.Value {
+	spec := ""
+	if len(call.Arguments) > 0 && !goja.IsUndefined(call.Argument(0)) && !goja.IsNull(call.Argument(0)) {
+		spec = call.Argument(0).String()
+	}
+	resolveFrom := from
+	if resolveFrom == "" {
+		resolveFrom = iso.importFrom
+	}
+	if len(call.Arguments) > 1 {
+		if p := firstResolvePath(call.Argument(1)); p != "" {
+			resolveFrom = iso.guestResolveFrom(p)
+		}
+	}
+	prev := iso.importFrom
+	if resolveFrom != "" {
+		iso.importFrom = resolveFrom
+	}
+	defer func() { iso.importFrom = prev }()
+
+	lookup := spec
+	if iso.importFrom != "" {
+		lookup = iso.rewriteRelative(spec)
+	}
+	v, err := imports.Resolve(lookup, withImportFrom(iso.opts.Imports, iso.importFrom)...)
+	if err != nil {
+		e := iso.vm.NewGoError(fmt.Errorf("%w: %q", ErrModuleNotFound, spec))
+		_ = e.Set("code", "MODULE_NOT_FOUND")
+		panic(e)
+	}
+	switch x := v.(type) {
+	case imports.Script:
+		if x.File != "" {
+			return iso.vm.ToValue(x.File)
+		}
+	}
+	return iso.vm.ToValue(spec)
+}
+
+func firstResolvePath(v goja.Value) string {
+	obj, ok := v.(*goja.Object)
+	if !ok {
+		return ""
+	}
+	paths := obj.Get("paths")
+	if paths == nil || goja.IsUndefined(paths) || goja.IsNull(paths) {
+		return ""
+	}
+	o, ok := paths.(*goja.Object)
+	if !ok {
+		return ""
+	}
+	if n := o.Get("length"); n != nil && n.ToInteger() > 0 {
+		item := o.Get("0")
+		if item != nil && !goja.IsUndefined(item) && !goja.IsNull(item) {
+			return item.String()
+		}
+	}
+	return ""
+}
+
+func (iso *Isolate) guestResolveFrom(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
+	if isFileHref(p) {
+		p = fileURLToGuest(p)
+	}
+	p = strings.TrimLeft(p, "/")
+	cwd := strings.ReplaceAll(iso.opts.Cwd, "\\", "/")
+	cwd = strings.TrimLeft(cwd, "/")
+	if cwd != "" {
+		if p == cwd {
+			return "."
+		}
+		if rest, ok := strings.CutPrefix(p, cwd+"/"); ok {
+			if rest == "" {
+				return "."
+			}
+			return rest
+		}
+	}
+	if p == "" {
+		return "."
+	}
+	return p
 }
 
 func (iso *Isolate) jsRequire(call goja.FunctionCall) goja.Value {
@@ -120,15 +223,8 @@ func withImportFrom(handlers []imports.Handler[any], from string) []imports.Hand
 
 // requireFrom is require bound to from, so a later callback still
 // resolves relative specs against that file, not the caller.
-func (iso *Isolate) requireFrom(from string) func(call goja.FunctionCall) goja.Value {
-	return func(call goja.FunctionCall) goja.Value {
-		prev := iso.importFrom
-		if from != "" {
-			iso.importFrom = from
-		}
-		defer func() { iso.importFrom = prev }()
-		return iso.jsRequire(call)
-	}
+func (iso *Isolate) requireFrom(from string) goja.Value {
+	return iso.newRequire(from)
 }
 
 func (iso *Isolate) rewriteRelative(spec string) string {
@@ -189,7 +285,7 @@ func (iso *Isolate) loadScript(key, source, file string) (goja.Value, error) {
 		delete(iso.moduleCache, key)
 		return nil, fmt.Errorf("workers: script %q is not a function", key)
 	}
-	_, err = fn(goja.Undefined(), iso.vm.ToValue(iso.requireFrom(file)), module, exports, iso.vm.ToValue(file), iso.vm.ToValue(dir))
+	_, err = fn(goja.Undefined(), iso.requireFrom(file), module, exports, iso.vm.ToValue(file), iso.vm.ToValue(dir))
 	if err != nil {
 		delete(iso.moduleCache, key)
 		return nil, err

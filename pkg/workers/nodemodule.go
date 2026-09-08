@@ -75,12 +75,7 @@ func (n *nodeModule) jsCreateRequire(call goja.FunctionCall) goja.Value {
 	if strings.HasSuffix(filename, "/") {
 		filename += "noop.js"
 	}
-	return n.iso.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		prev := n.iso.importFrom
-		n.iso.importFrom = filename
-		defer func() { n.iso.importFrom = prev }()
-		return n.iso.jsRequire(call)
-	})
+	return n.iso.newRequire(filename)
 }
 
 func (n *nodeModule) throwInvalidFilename(v goja.Value) {

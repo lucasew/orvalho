@@ -77,6 +77,22 @@ func TestNodeModuleCreateRequireInvalid(t *testing.T) {
 	`)
 }
 
+func TestNodeModuleRequireResolve(t *testing.T) {
+	fsys := fstest.MapFS{
+		"app/pkg/lib.js":       {Data: []byte(`exports.n = 1;`)},
+		"app/pkg/package.json": {Data: []byte(`{"name":"pkg"}`)},
+	}
+	runNodeModuleFS(t, fsys, `
+		if (typeof require.resolve !== "function") throw new Error("require.resolve");
+		if (require.resolve("fs") !== "fs") throw new Error("builtin " + require.resolve("fs"));
+		var createRequire = require("module").createRequire;
+		var req = createRequire("/app/pkg/index.js");
+		if (typeof req.resolve !== "function") throw new Error("createRequire.resolve");
+		var p = req.resolve("./lib.js");
+		if (p.indexOf("lib.js") < 0) throw new Error("rel " + p);
+	`)
+}
+
 func TestNodeModuleCreateRequireRelative(t *testing.T) {
 	fsys := fstest.MapFS{
 		"app/pkg/lib.js": {Data: []byte(`exports.n = 42;`)},
