@@ -211,6 +211,25 @@ func TestRequireCircularESMReassign(t *testing.T) {
 	}
 }
 
+func TestMissingSourceMapDoesNotFailParse(t *testing.T) {
+	iso := New("", Options{
+		Imports: importMap(map[string]any{
+			"mod": imports.Script{
+				File:   "mod.js",
+				Source: "'use strict';\nmodule.exports = { n: 1 };\n//# sourceMappingURL=mod.js.map\n",
+			},
+		}),
+		PrepareSource: bundle.TransformCJS,
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var m = require("mod");
+		if (!m || m.n !== 1) throw new Error("n " + (m && m.n));
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestArrowLexicalArguments(t *testing.T) {
 	iso := New("", Options{PrepareSource: bundle.TransformCJS})
 	err := iso.ScriptMain(t.Context(), `

@@ -9,6 +9,7 @@ import (
 	"github.com/lucasew/orvalho/pkg/actor"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja/parser"
 	"github.com/tetratelabs/wazero"
 )
 
@@ -68,8 +69,13 @@ var _ actor.Actor = (*Isolate)(nil)
 // New creates an isolate for script. The script is not executed until the
 // first Tick. Zero-valued opts fields use the documented defaults.
 func New(script string, opts Options) *Isolate {
+	vm := goja.New()
+	// Guest files often keep //# sourceMappingURL; goja's default
+	// loader reads the host FS and fails the parse when the map is
+	// absent. Maps are not a Binding.
+	vm.SetParserOptions(parser.WithDisableSourceMaps)
 	iso := &Isolate{
-		vm:     goja.New(),
+		vm:     vm,
 		script: script,
 		opts:   opts.withDefaults(),
 		timers: newTimerTable(),
