@@ -129,6 +129,7 @@ func runScriptFile(ctx context.Context, dir, file string, extra []string) error 
 		ExecPath:   exe,
 		Spawn:      hostSpawn,
 		Dial:       hostDial,
+		Lookup:     hostLookup,
 		Imports: append(workers.NodeScriptImports(),
 			realpathScripts{root: root, inner: imports.NodeModules{FS: os.DirFS(root), From: rel}},
 		),
@@ -185,6 +186,27 @@ func hostDial(ctx context.Context, req workers.DialReq) (net.Conn, error) {
 	}
 	var d net.Dialer
 	return d.DialContext(ctx, network, req.Address)
+}
+
+func hostLookup(ctx context.Context, req workers.LookupReq) ([]workers.LookupAddr, error) {
+	network := req.Network
+	if network == "" {
+		network = "ip"
+	}
+	var r net.Resolver
+	ips, err := r.LookupIP(ctx, network, req.Hostname)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]workers.LookupAddr, 0, len(ips))
+	for _, ip := range ips {
+		if v4 := ip.To4(); v4 != nil {
+			out = append(out, workers.LookupAddr{Address: v4.String(), Family: 4})
+			continue
+		}
+		out = append(out, workers.LookupAddr{Address: ip.String(), Family: 6})
+	}
+	return out, nil
 }
 
 func hostSpawn(ctx context.Context, req workers.SpawnReq) (workers.Spawned, error) {

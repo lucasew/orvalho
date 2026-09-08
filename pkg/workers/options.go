@@ -43,6 +43,22 @@ type DialReq struct {
 // The isolate never calls net.Dial; the host supplies the conn.
 type DialFunc func(ctx context.Context, req DialReq) (net.Conn, error)
 
+// LookupReq is one guest dns.lookup.
+type LookupReq struct {
+	Hostname string
+	Network  string
+}
+
+// LookupAddr is one resolved address.
+type LookupAddr struct {
+	Address string
+	Family  int
+}
+
+// LookupFunc resolves a name. Nil Options.Lookup means lookup is denied
+// unless the name is already an IP. The isolate never calls Resolver.
+type LookupFunc func(ctx context.Context, req LookupReq) ([]LookupAddr, error)
+
 // Default resource caps. Documented for hosts and enforced in the isolate.
 const (
 	// DefaultMaxPendingTimers is the default hard cap on concurrent
@@ -137,6 +153,10 @@ type Options struct {
 	// Dial is net.connect / createConnection / Socket.connect.
 	// Nil means the module exists and connect fails (not injected).
 	Dial DialFunc
+
+	// Lookup is dns.lookup / dns.promises.lookup. Nil means the module
+	// exists and lookup fails unless the name is already an IP.
+	Lookup LookupFunc
 
 	// PrepareSource rewrites guest source after shebang strip and before
 	// the CommonJS wrap (ESM downlevel). Nil means no extra rewrite.
