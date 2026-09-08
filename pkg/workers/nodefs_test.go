@@ -38,6 +38,24 @@ func TestNodeFSReadFileSync(t *testing.T) {
 	`)
 }
 
+func TestNodeFSClose(t *testing.T) {
+	runNodeFS(t, nodeFSMap(), `
+		var fs = require("fs");
+		if (typeof fs.close !== "function") throw new Error("close");
+		if (typeof fs.closeSync !== "function") throw new Error("closeSync");
+		var fd = fs.openSync("hello.txt");
+		fs.closeSync(fd);
+		var n = 0;
+		fs.close(fd, function (err) {
+			if (err) throw err;
+			n = 1;
+		});
+		setTimeout(function () {
+			if (n !== 1) throw new Error("cb");
+		}, 0);
+	`)
+}
+
 func TestNodeFSExistsSync(t *testing.T) {
 	runNodeFS(t, nodeFSMap(), `
 		var fs = require("fs");

@@ -81,6 +81,8 @@ func newNodeFS(iso *Isolate) *goja.Object {
 	mustSet(obj, "mkdirSync", n.jsMkdirSync)
 	mustSet(obj, "open", n.jsOpen)
 	mustSet(obj, "openSync", n.jsOpenSync)
+	mustSet(obj, "close", n.jsClose)
+	mustSet(obj, "closeSync", n.jsCloseSync)
 	mustSet(obj, "readFile", n.jsReadFile)
 	mustSet(obj, "readFileSync", n.jsReadFileSync)
 	mustSet(obj, "readdir", n.jsReaddir)
@@ -172,7 +174,7 @@ function (fs) {
     };
   }
   var names = [
-    "access", "appendFile", "copyFile", "lstat", "mkdir", "open",
+    "access", "appendFile", "close", "copyFile", "lstat", "mkdir", "open",
     "readFile", "readdir", "readlink", "realpath", "rmdir", "stat",
     "unlink", "writeFile"
   ];
@@ -387,6 +389,17 @@ func (n *nodeFS) jsOpen(call goja.FunctionCall) goja.Value {
 		return goja.Undefined()
 	}
 	n.nextTick(cb, goja.Null(), n.iso.vm.ToValue(3))
+	return goja.Undefined()
+}
+
+func (n *nodeFS) jsCloseSync(call goja.FunctionCall) goja.Value {
+	return goja.Undefined()
+}
+
+func (n *nodeFS) jsClose(call goja.FunctionCall) goja.Value {
+	_, cb := n.optsAndCB(call, 1)
+	n.requireCB(cb)
+	n.nextTick(cb, goja.Null())
 	return goja.Undefined()
 }
 
