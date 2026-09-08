@@ -19,6 +19,7 @@ func (iso *Isolate) installHostPolyfills() {
 	// atob / btoa / URL / streams / crypto / Intl — one script for guest globals.
 	_, _ = iso.vm.RunString(hostPolyfillScript)
 	iso.installWebAssembly()
+	iso.installEvalHook()
 }
 
 // bindConsole installs console.* that write to the host process stderr.
@@ -343,6 +344,91 @@ const hostPolyfillScript = `
     globalThis.URL = URLImpl;
   } else if (globalThis.URL && globalThis.URL.prototype) {
     // Ensure instances get real searchParams if a broken URL already exists.
+  }
+  if (typeof globalThis.Blob !== "function") {
+    function OrvalhoBlob(parts, opts) {
+      this._parts = parts || [];
+      this.type = (opts && opts.type) || "";
+      var n = 0;
+      for (var i = 0; i < this._parts.length; i++) {
+        var p = this._parts[i];
+        n += p && typeof p.byteLength === "number" ? p.byteLength : String(p).length;
+      }
+      this.size = n;
+    }
+    OrvalhoBlob.prototype.arrayBuffer = function () { return Promise.resolve(new ArrayBuffer(this.size)); };
+    OrvalhoBlob.prototype.text = function () {
+      var out = "";
+      for (var i = 0; i < this._parts.length; i++) out += String(this._parts[i]);
+      return Promise.resolve(out);
+    };
+    OrvalhoBlob.prototype.slice = function () { return new OrvalhoBlob([], { type: this.type }); };
+    OrvalhoBlob.prototype.stream = function () {
+      return typeof ReadableStream === "function" ? new ReadableStream() : { getReader: function () { return { read: function () { return Promise.resolve({ done: true }); } }; } };
+    };
+    globalThis.Blob = OrvalhoBlob;
+  }
+  if (typeof globalThis.File !== "function") {
+    function OrvalhoFile(parts, name, opts) {
+      Blob.call(this, parts, opts);
+      this.name = name || "";
+      this.lastModified = (opts && opts.lastModified) || Date.now();
+    }
+    OrvalhoFile.prototype = Object.create(globalThis.Blob.prototype);
+    OrvalhoFile.prototype.constructor = OrvalhoFile;
+    globalThis.File = OrvalhoFile;
+  }
+  if (typeof globalThis.FormData !== "function") {
+    function OrvalhoFormData() { this._pairs = []; }
+    OrvalhoFormData.prototype.append = function (k, v) { this._pairs.push([String(k), v]); };
+    OrvalhoFormData.prototype.get = function (k) {
+      k = String(k);
+      for (var i = 0; i < this._pairs.length; i++) if (this._pairs[i][0] === k) return this._pairs[i][1];
+      return null;
+    };
+    OrvalhoFormData.prototype.has = function (k) { return this.get(k) !== null; };
+    OrvalhoFormData.prototype.set = function (k, v) { this.delete(k); this.append(k, v); };
+    OrvalhoFormData.prototype.delete = function (k) {
+      k = String(k);
+      this._pairs = this._pairs.filter(function (p) { return p[0] !== k; });
+    };
+    OrvalhoFormData.prototype.entries = function () {
+      var i = 0, pairs = this._pairs;
+      return { next: function () { return i >= pairs.length ? { done: true } : { done: false, value: pairs[i++] }; } };
+    };
+    globalThis.FormData = OrvalhoFormData;
+  }
+  if (typeof globalThis.AbortSignal !== "function") {
+    function OrvalhoAbortSignal() { this.aborted = false; this.reason = undefined; }
+    OrvalhoAbortSignal.prototype.addEventListener = function () {};
+    OrvalhoAbortSignal.prototype.removeEventListener = function () {};
+    OrvalhoAbortSignal.prototype.throwIfAborted = function () {
+      if (this.aborted) throw this.reason || new Error("aborted");
+    };
+    OrvalhoAbortSignal.abort = function (reason) {
+      var s = new OrvalhoAbortSignal();
+      s.aborted = true;
+      s.reason = reason;
+      return s;
+    };
+    OrvalhoAbortSignal.timeout = function () { return new OrvalhoAbortSignal(); };
+    OrvalhoAbortSignal.any = function () { return new OrvalhoAbortSignal(); };
+    function OrvalhoAbortController() { this.signal = new OrvalhoAbortSignal(); }
+    OrvalhoAbortController.prototype.abort = function (reason) {
+      this.signal.aborted = true;
+      this.signal.reason = reason;
+    };
+    globalThis.AbortSignal = OrvalhoAbortSignal;
+    globalThis.AbortController = OrvalhoAbortController;
+  }
+  if (typeof globalThis.MessagePort !== "function") {
+    function OrvalhoMessagePort() {}
+    OrvalhoMessagePort.prototype.postMessage = function () {};
+    OrvalhoMessagePort.prototype.start = function () {};
+    OrvalhoMessagePort.prototype.close = function () {};
+    OrvalhoMessagePort.prototype.addEventListener = function () {};
+    OrvalhoMessagePort.prototype.removeEventListener = function () {};
+    globalThis.MessagePort = OrvalhoMessagePort;
   }
   if (typeof globalThis.queueMicrotask !== "function") {
     globalThis.queueMicrotask = function (fn) { Promise.resolve().then(fn); };
