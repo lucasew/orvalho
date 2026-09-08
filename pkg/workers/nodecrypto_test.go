@@ -63,6 +63,22 @@ func TestNodeCryptoRandomFill(t *testing.T) {
 	`)
 }
 
+func TestNodeCryptoGetRandomValues(t *testing.T) {
+	runNodeCrypto(t, `
+		var crypto = require("crypto");
+		if (typeof crypto.getRandomValues !== "function") throw new Error("getRandomValues");
+		var u = new Uint8Array(9);
+		var ret = crypto.getRandomValues(u);
+		if (ret !== u) throw new Error("return identity");
+		var n = 0;
+		for (var i = 0; i < u.length; i++) n |= u[i];
+		if (n === 0) throw new Error("still zero");
+		if (crypto.webcrypto.getRandomValues !== crypto.getRandomValues) throw new Error("webcrypto");
+		var tok = Buffer.from(crypto.getRandomValues(new Uint8Array(9))).toString("base64url");
+		if (typeof tok !== "string" || tok.length < 8) throw new Error("token " + tok);
+	`)
+}
+
 func TestNodeCryptoRandomUUID(t *testing.T) {
 	runNodeCrypto(t, `
 		var crypto = require("crypto");

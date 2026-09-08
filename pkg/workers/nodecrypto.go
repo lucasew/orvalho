@@ -48,6 +48,10 @@ func newNodeCrypto(iso *Isolate) *goja.Object {
 	mustSet(obj, "randomUUID", n.jsRandomUUID)
 	mustSet(obj, "createHash", n.jsCreateHash)
 	mustSet(obj, "getHashes", n.jsGetHashes)
+	mustSet(obj, "getRandomValues", n.jsGetRandomValues)
+	web := iso.vm.NewObject()
+	mustSet(web, "getRandomValues", obj.Get("getRandomValues"))
+	mustSet(obj, "webcrypto", web)
 	return obj
 }
 
@@ -84,6 +88,22 @@ func (n *nodeCrypto) jsRandomFill(call goja.FunctionCall) goja.Value {
 	n.fillRand(view)
 	n.nextTick(cb, goja.Null(), buf)
 	return goja.Undefined()
+}
+
+func (n *nodeCrypto) jsGetRandomValues(call goja.FunctionCall) goja.Value {
+	if len(call.Arguments) == 0 {
+		n.throwType("ERR_INVALID_ARG_TYPE", `The "typedArray" argument must be an integer TypedArray. Received undefined`)
+	}
+	buf := call.Argument(0)
+	view, ok := asByteView(buf)
+	if !ok {
+		n.throwType("ERR_INVALID_ARG_TYPE", `The "typedArray" argument must be an integer TypedArray. Received `+jsReceived(buf))
+	}
+	if len(view) > 65536 {
+		n.throwError("ERR_CRYPTO_OPERATION_FAILED", "The ArrayBufferView's byte length ("+strconv.Itoa(len(view))+") exceeds the number of bytes of entropy available via this API (65536).")
+	}
+	n.fillRand(view)
+	return buf
 }
 
 func (n *nodeCrypto) jsRandomUUID(goja.FunctionCall) goja.Value {
