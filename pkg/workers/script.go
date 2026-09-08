@@ -215,6 +215,7 @@ func (iso *Isolate) installProcess() {
 		iso.cwd = "."
 	}
 	p := iso.vm.NewObject()
+	attachEmitter(p)
 	mustSet(p, "argv", argv)
 	mustSet(p, "platform", platform)
 	mustSet(p, "arch", arch)

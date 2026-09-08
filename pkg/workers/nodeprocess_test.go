@@ -14,6 +14,24 @@ func TestNodeProcessIdentity(t *testing.T) {
 	}
 }
 
+func TestNodeProcessOnce(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		if (typeof process.once !== "function") throw new Error("once");
+		if (typeof process.on !== "function") throw new Error("on");
+		if (typeof process.off !== "function") throw new Error("off");
+		var n = 0;
+		process.once("SIGTERM", function () { n++; });
+		process.emit("SIGTERM");
+		if (n !== 1) throw new Error("emit " + n);
+		if (typeof process.stdin.on !== "function") throw new Error("stdin.on");
+		process.stdin.on("end", function () {});
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeProcessEnvNotHost(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `
