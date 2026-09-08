@@ -217,6 +217,8 @@ func (n *nodeHTTP) jsCreateServer(call goja.FunctionCall) goja.Value {
 		}
 		return goja.Undefined()
 	})
+	mustSet(srv, "unref", func(goja.FunctionCall) goja.Value { return srv })
+	mustSet(srv, "ref", func(goja.FunctionCall) goja.Value { return srv })
 	mustSet(srv, "listen", func(call goja.FunctionCall) goja.Value {
 		n.startListen(srv, &ln, &closeOnce, call)
 		return srv
@@ -251,6 +253,8 @@ func (n *nodeHTTP) jsCreateServer(call goja.FunctionCall) goja.Value {
 		return o
 	})
 	mustSet(srv, "listening", false)
+	mustSet(srv, "unref", func(goja.FunctionCall) goja.Value { return srv })
+	mustSet(srv, "ref", func(goja.FunctionCall) goja.Value { return srv })
 	return srv
 }
 

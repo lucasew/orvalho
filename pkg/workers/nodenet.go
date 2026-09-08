@@ -2,9 +2,11 @@ package workers
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/dop251/goja"
 )
@@ -207,6 +209,13 @@ func (n *nodeNet) jsCreateServer(call goja.FunctionCall) goja.Value {
 	if cb := lastFunc(call); cb != nil {
 		listeners["connection"] = append(listeners["connection"], cb)
 	}
+	var ln net.Listener
+	var closeOnce sync.Once
+	emit := func(ev string, args ...goja.Value) {
+		for _, fn := range listeners[ev] {
+			_, _ = fn(srv, args...)
+		}
+	}
 	mustSet(srv, "on", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 2 {
 			return srv
@@ -218,10 +227,95 @@ func (n *nodeNet) jsCreateServer(call goja.FunctionCall) goja.Value {
 		}
 		return srv
 	})
-	mustSet(srv, "listen", func(goja.FunctionCall) goja.Value { return srv })
-	mustSet(srv, "close", func(goja.FunctionCall) goja.Value { return srv })
-	mustSet(srv, "address", func(goja.FunctionCall) goja.Value { return goja.Null() })
+	mustSet(srv, "once", srv.Get("on"))
+	mustSet(srv, "unref", func(goja.FunctionCall) goja.Value { return srv })
+	mustSet(srv, "ref", func(goja.FunctionCall) goja.Value { return srv })
+	mustSet(srv, "listen", func(call goja.FunctionCall) goja.Value {
+		n.startListen(srv, &ln, &closeOnce, call, emit)
+		return srv
+	})
+	mustSet(srv, "close", func(call goja.FunctionCall) goja.Value {
+		if ln != nil {
+			closeOnce.Do(func() {
+				_ = ln.Close()
+				n.iso.listeners--
+			})
+		}
+		cb := lastFunc(call)
+		if cb != nil {
+			n.iso.timers.schedule(cb, nil, 0, 0, n.iso.now())
+		}
+		return srv
+	})
+	mustSet(srv, "address", func(goja.FunctionCall) goja.Value {
+		if ln == nil {
+			return goja.Null()
+		}
+		a := ln.Addr()
+		if a == nil {
+			return goja.Null()
+		}
+		host, port, _ := net.SplitHostPort(a.String())
+		o := n.iso.vm.NewObject()
+		mustSet(o, "address", host)
+		mustSet(o, "family", "IPv4")
+		p, _ := strconv.Atoi(port)
+		mustSet(o, "port", p)
+		return o
+	})
 	return srv
+}
+
+func (n *nodeNet) startListen(srv *goja.Object, ln *net.Listener, once *sync.Once, call goja.FunctionCall, emit func(string, ...goja.Value)) {
+	port, host, cb := listenArgs(call)
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	fail := func(code string) {
+		err := n.listenErr(code, addr)
+		emit("error", err)
+	}
+	if n.iso.opts.Listen == nil {
+		fail("EADDRNOTAVAIL")
+		return
+	}
+	ctx := n.iso.activeCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	l, err := n.iso.opts.Listen(ctx, ListenReq{Network: "tcp", Address: addr})
+	if err != nil {
+		code := "EADDRINUSE"
+		if errors.Is(err, ErrListenDenied) {
+			code = "EADDRNOTAVAIL"
+		}
+		fail(code)
+		return
+	}
+	*ln = l
+	n.iso.listeners++
+	if cb != nil {
+		n.iso.timers.schedule(cb, nil, 0, 0, n.iso.now())
+	}
+	emit("listening")
+}
+
+func (n *nodeNet) listenErr(code, addr string) *goja.Object {
+	ctor, ok := goja.AssertConstructor(n.iso.vm.Get("Error"))
+	if !ok {
+		e := n.iso.vm.NewGoError(errors.New(code + " " + addr))
+		_ = e.Set("code", code)
+		return e
+	}
+	o, err := ctor(nil, n.iso.vm.ToValue(code+" listen "+addr))
+	if err != nil {
+		panic(err)
+	}
+	_ = o.Set("code", code)
+	_ = o.Set("syscall", "listen")
+	_ = o.Set("address", addr)
+	return o
 }
 
 func (n *nodeNet) throwDenied(addr string) {
