@@ -239,6 +239,8 @@ func (n *nodeChild) newChild(pid int) *goja.Object {
 	})
 	mustSet(child, "kill", func(goja.FunctionCall) bool { return true })
 	mustSet(child, "send", func(goja.FunctionCall) bool { return false })
+	mustSet(child, "unref", func(goja.FunctionCall) goja.Value { return child })
+	mustSet(child, "ref", func(goja.FunctionCall) goja.Value { return child })
 	mustSet(child, "emit", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			return goja.Undefined()

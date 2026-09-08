@@ -122,6 +122,8 @@ func TestNodeChildSpawnInjected(t *testing.T) {
 		var saw = false;
 		var child = require("child_process").spawn("echo", ["hi"]);
 		if (child.pid !== 7) throw new Error("pid " + child.pid);
+		if (typeof child.unref !== "function") throw new Error("unref");
+		child.unref();
 		child.on("exit", function (code) {
 			if (code !== 0) throw new Error("code " + code);
 			saw = true;
