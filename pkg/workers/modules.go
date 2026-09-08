@@ -64,10 +64,7 @@ func (iso *Isolate) jsRequireResolve(from string, call goja.FunctionCall) goja.V
 	}
 	defer func() { iso.importFrom = prev }()
 
-	lookup := spec
-	if iso.importFrom != "" {
-		lookup = iso.rewriteRelative(spec)
-	}
+	lookup := iso.rewriteRelative(spec)
 	v, err := imports.Resolve(lookup, withImportFrom(iso.opts.Imports, iso.importFrom)...)
 	if err != nil {
 		e := iso.vm.NewGoError(fmt.Errorf("%w: %q", ErrModuleNotFound, spec))
@@ -246,6 +243,7 @@ func (iso *Isolate) requireFrom(from string) goja.Value {
 }
 
 func (iso *Isolate) rewriteRelative(spec string) string {
+	spec = stripSpecifierQuery(spec)
 	if mapped, ok := iso.fileURLSpec(spec); ok {
 		return mapped
 	}
@@ -374,6 +372,15 @@ func runNamedScript(vm *goja.Runtime, name, src string) (v goja.Value, err error
 		}
 	}()
 	return vm.RunScript(name, src)
+}
+
+// stripSpecifierQuery drops a URL query (Vite `?t=` cache bust) so
+// svelte.config.js?t=1 looks up svelte.config.js. Hash imports (#foo) stay.
+func stripSpecifierQuery(spec string) string {
+	if i := strings.IndexByte(spec, '?'); i >= 0 {
+		return spec[:i]
+	}
+	return spec
 }
 
 func stripShebang(src string) string {

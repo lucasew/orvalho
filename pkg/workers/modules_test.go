@@ -348,6 +348,25 @@ func TestRequireNodeModulesRelativeInsidePackage(t *testing.T) {
 	}
 }
 
+func TestRequireSpecifierQuery(t *testing.T) {
+	fsys := fstest.MapFS{
+		"svelte.config.js": {Data: []byte(`exports.ok = 1;`)},
+	}
+	iso := New("", Options{
+		Imports: []imports.Handler[any]{imports.NodeModules{FS: fsys}},
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var c = require("svelte.config.js?t=1782090695526");
+		if (c.ok !== 1) throw new Error("query " + c.ok);
+		if (require("svelte.config.js?t=1") !== c) throw new Error("cache");
+		var r = require.resolve("svelte.config.js?t=2");
+		if (r !== "svelte.config.js") throw new Error("resolve " + r);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRequireNodeModulesDir(t *testing.T) {
 	fsys := fstest.MapFS{
 		"node_modules/leftpad/index.js": {Data: []byte(`exports.n = 9;`)},
