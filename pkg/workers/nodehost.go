@@ -15,6 +15,7 @@ var nodehostFS embed.FS
 func NodeScriptImports() []imports.Handler[any] {
 	return []imports.Handler[any]{
 		imports.Alias[any]{From: "assert", To: "node:assert"},
+		imports.Alias[any]{From: "async_hooks", To: "node:async_hooks"},
 		imports.Alias[any]{From: "buffer", To: "node:buffer"},
 		imports.Alias[any]{From: "child_process", To: "node:child_process"},
 		imports.Alias[any]{From: "crypto", To: "node:crypto"},
@@ -48,6 +49,7 @@ func NodeScriptImports() []imports.Handler[any] {
 		imports.Alias[any]{From: "zlib", To: "node:zlib"},
 		imports.Map[any]{
 			"node:assert":         nodehostScript("nodehost/assert.js"),
+			"node:async_hooks":    nodehostScript("nodehost/async_hooks.js"),
 			"node:buffer":         nodehostScript("nodehost/buffer.js"),
 			"node:child_process":  nodeChildBinding{},
 			"node:crypto":         nodeCryptoBinding{},

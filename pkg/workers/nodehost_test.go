@@ -32,6 +32,22 @@ func TestNodeHostTypesIdentity(t *testing.T) {
 	}
 }
 
+func TestNodeAsyncHooksALS(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var ah = require("async_hooks");
+		if (require("node:async_hooks") !== ah) throw new Error("identity");
+		var als = new ah.AsyncLocalStorage();
+		if (als.getStore() !== undefined) throw new Error("empty");
+		var n = als.run(7, function () { return als.getStore(); });
+		if (n !== 7) throw new Error("run " + n);
+		if (typeof ah.createHook().enable !== "function") throw new Error("hook");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeUtilTextEncoder(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `
@@ -42,6 +58,7 @@ func TestNodeUtilTextEncoder(t *testing.T) {
 		var u = new util.TextEncoder("utf-8");
 		var b = u.encode("hi");
 		if (b.length !== 2 || b[0] !== 104) throw new Error("encode");
+		if (new util.TextDecoder().decode(b) !== "hi") throw new Error("decode");
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)
@@ -59,22 +76,6 @@ func TestNodeUtilPromisify(t *testing.T) {
 		setTimeout(function () {
 			if (n !== 7) throw new Error("val " + n);
 		}, 0);
-	`, "t.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestNodeUtilTextEncoder(t *testing.T) {
-	iso := New("", Options{Imports: NodeScriptImports()})
-	err := iso.ScriptMain(t.Context(), `
-		var util = require("util");
-		if (typeof util.TextEncoder !== "function") throw new Error("TextEncoder");
-		if (typeof util.TextDecoder !== "function") throw new Error("TextDecoder");
-		var u = new util.TextEncoder();
-		var b = u.encode("hi");
-		if (b.length !== 2 || b[0] !== 104) throw new Error("encode");
-		if (new util.TextDecoder().decode(b) !== "hi") throw new Error("decode");
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)
