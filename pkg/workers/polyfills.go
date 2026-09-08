@@ -18,6 +18,7 @@ func (iso *Isolate) installHostPolyfills() {
 
 	// atob / btoa / URL / streams / crypto / Intl — one script for guest globals.
 	_, _ = iso.vm.RunString(hostPolyfillScript)
+	iso.installWebAssembly()
 }
 
 // bindConsole installs console.* that write to the host process stderr.
@@ -599,24 +600,6 @@ const hostPolyfillScript = `
     };
   }
 
-  if (typeof globalThis.WebAssembly === "undefined") {
-    var emptyExports = {};
-    globalThis.WebAssembly = {
-      compile: function () { return Promise.resolve({}); },
-      instantiate: function () {
-        return Promise.resolve({ instance: { exports: emptyExports }, module: {}, exports: emptyExports });
-      },
-      compileStreaming: function () { return Promise.resolve({}); },
-      instantiateStreaming: function () {
-        return Promise.resolve({ instance: { exports: emptyExports }, module: {}, exports: emptyExports });
-      },
-      Module: function () {},
-      Instance: function () { this.exports = emptyExports; },
-      Memory: function () { this.buffer = new ArrayBuffer(65536); },
-      Table: function () {},
-      validate: function () { return false; },
-    };
-  }
   if (typeof globalThis.Intl === "undefined") {
     function DTF() {}
     DTF.prototype.format = function (d) { return String(d); };

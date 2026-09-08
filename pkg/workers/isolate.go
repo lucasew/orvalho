@@ -9,6 +9,7 @@ import (
 	"github.com/lucasew/orvalho/pkg/actor"
 
 	"github.com/dop251/goja"
+	"github.com/tetratelabs/wazero"
 )
 
 // Isolate is one pure-goja VM with host-driven timers and minimal WinterTC
@@ -54,6 +55,10 @@ type Isolate struct {
 	httpCh chan *httpJob
 	// listeners is how many guest servers are currently listening.
 	listeners int
+
+	wasmRt       wazero.Runtime
+	wasmCompiled map[*goja.Object]*wasmCompiled
+	wasmSeq      uint64
 }
 
 // Ensure Isolate implements actor.Actor.

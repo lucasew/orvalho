@@ -30,6 +30,7 @@ require (
 	github.com/protocolbuffers/txtpbfmt v0.0.0-20250627152318-f293424e46b5 // indirect
 	github.com/shogo82148/go-sfv v0.3.3 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
+	github.com/tetratelabs/wazero v1.9.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
