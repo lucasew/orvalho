@@ -34,6 +34,21 @@ function mark(u8) {
   return u8;
 }
 
+function checkSize(size) {
+  if (typeof size !== 'number' || size !== size || size < 0 || size > MAX_LENGTH) {
+    var err = new RangeError('The value of "size" is out of range.');
+    err.code = 'ERR_OUT_OF_RANGE';
+    throw err;
+  }
+  return size >>> 0;
+}
+
+function unknownEnc(enc) {
+  var err = new TypeError('Unknown encoding: ' + enc);
+  err.code = 'ERR_UNKNOWN_ENCODING';
+  throw err;
+}
+
 function utf8Bytes(s) {
   return new TextEncoder().encode(String(s));
 }
@@ -95,14 +110,14 @@ Buffer.isBuffer = function (b) {
 };
 
 Buffer.alloc = function (size, fill, enc) {
-  size = size >>> 0;
+  size = checkSize(size);
   var buf = mark(new Uint8Array(size));
   if (fill !== undefined && fill !== 0) buf.fill(fill, 0, size, enc);
   return buf;
 };
 
 Buffer.allocUnsafe = function (size) {
-  return mark(new Uint8Array(size >>> 0));
+  return mark(new Uint8Array(checkSize(size)));
 };
 
 Buffer.allocUnsafeSlow = Buffer.allocUnsafe;
@@ -110,6 +125,7 @@ Buffer.allocUnsafeSlow = Buffer.allocUnsafe;
 Buffer.from = function (value, encOrOffset, length) {
   if (typeof value === 'string') {
     var enc = normEnc(encOrOffset);
+    if (encOrOffset != null && !isEncoding(encOrOffset)) unknownEnc(encOrOffset);
     if (enc === 'hex') return fromHex(value);
     if (enc === 'base64') return fromBase64(value, false);
     if (enc === 'base64url') return fromBase64(value, true);
@@ -118,11 +134,12 @@ Buffer.from = function (value, encOrOffset, length) {
     return mark(utf8Bytes(value));
   }
   if (value instanceof ArrayBuffer) {
-    var view = new Uint8Array(value, encOrOffset >>> 0, length === undefined ? undefined : length >>> 0);
-    return mark(new Uint8Array(view));
+    var off = encOrOffset >>> 0;
+    var view = length === undefined ? new Uint8Array(value, off) : new Uint8Array(value, off, length >>> 0);
+    return mark(view);
   }
   if (ArrayBuffer.isView(value)) {
-    return mark(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+    return mark(new Uint8Array(value));
   }
   if (value && typeof value.length === 'number') {
     return mark(Uint8Array.from(value));
@@ -143,6 +160,8 @@ Buffer.concat = function (list, total) {
   if (total == null) {
     total = 0;
     for (var i = 0; i < list.length; i++) total += list[i].length;
+  } else {
+    total = checkSize(total);
   }
   var out = Buffer.allocUnsafe(total);
   var pos = 0;
@@ -201,7 +220,7 @@ Buffer.prototype.copy = function (target, targetStart, sourceStart, sourceEnd) {
 };
 
 Buffer.prototype.slice = function (start, end) {
-  return mark(Uint8Array.prototype.slice.call(this, start, end));
+  return mark(Uint8Array.prototype.subarray.call(this, start, end));
 };
 
 Buffer.prototype.subarray = function (start, end) {
@@ -287,10 +306,6 @@ Buffer.prototype.toJSON = function () {
 };
 
 exports.Buffer = Buffer;
-exports.SlowBuffer = Buffer.allocUnsafeSlow;
 exports.kMaxLength = MAX_LENGTH;
 exports.kStringMaxLength = MAX_STRING_LENGTH;
 exports.constants = Buffer.constants;
-exports.transcode = function (buf) { return Buffer.from(buf); };
-exports.isUtf8 = function () { return true; };
-exports.isAscii = function () { return true; };

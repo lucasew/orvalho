@@ -146,12 +146,9 @@ function once(emitter, name) {
   return new Promise(function (resolve, reject) {
     function on() {
       cleanup();
-      if (arguments.length === 1) resolve(arguments[0]);
-      else {
-        var a = [];
-        for (var i = 0; i < arguments.length; i++) a.push(arguments[i]);
-        resolve(a);
-      }
+      var a = [];
+      for (var i = 0; i < arguments.length; i++) a.push(arguments[i]);
+      resolve(a);
     }
     function onErr(err) {
       cleanup();

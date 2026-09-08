@@ -34,5 +34,19 @@ func TestNodeBufferRoundtrip(t *testing.T) {
 		if (z.length !== 3 || z[0] !== 0) throw new Error("alloc");
 		var c = Buffer.concat([Buffer.from("a"), Buffer.from("b")]);
 		if (c.toString() !== "ab") throw new Error("concat " + c.toString());
+		try { Buffer.alloc(-1); throw new Error("alloc neg"); } catch (e) {
+			if (e.code !== "ERR_OUT_OF_RANGE") throw new Error("neg " + e.code);
+		}
+		var u8 = new Uint8Array([1, 2]);
+		var copied = Buffer.from(u8);
+		u8[0] = 9;
+		if (copied[0] !== 1) throw new Error("from view must copy");
+		var ab = new ArrayBuffer(2);
+		var shared = Buffer.from(ab);
+		new Uint8Array(ab)[0] = 7;
+		if (shared[0] !== 7) throw new Error("from ArrayBuffer must share");
+		var sl = copied.slice(0, 1);
+		copied[0] = 3;
+		if (sl[0] !== 3) throw new Error("slice must overlap");
 	`)
 }

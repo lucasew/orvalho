@@ -21,5 +21,13 @@ func TestNodeEventsIdentity(t *testing.T) {
 		ee.emit("x", 7);
 		if (n !== 7) throw new Error("emit " + n);
 		if (ee.eventNames()[0] !== "x") throw new Error("names");
+		var got;
+		require("events").once(ee, "y").then(function (args) {
+			got = args;
+		});
+		ee.emit("y", 1);
+		setTimeout(function () {
+			if (!got || got[0] !== 1 || got.length !== 1) throw new Error("once " + got);
+		}, 0);
 	`)
 }
