@@ -30,6 +30,7 @@ type wasmCompiled struct {
 type wasmInstance struct {
 	mod    api.Module
 	jsBuf  []byte
+	jsAB   goja.ArrayBuffer
 	memObj *goja.Object
 }
 
@@ -350,6 +351,7 @@ func (iso *Isolate) wrapWasmFn(st *wasmInstance, fn api.Function) func(goja.Func
 			}
 		}
 		results, err := fn.Call(context.Background(), args...)
+		st.rebindMemory(iso)
 		st.syncFromWasm()
 		if err != nil {
 			panic(iso.vm.NewGoError(err))
@@ -383,7 +385,8 @@ func (st *wasmInstance) attachMemory(iso *Isolate, exports *goja.Object, mem api
 		copy(st.jsBuf, data)
 	}
 	st.memObj = iso.vm.NewObject()
-	mustSet(st.memObj, "buffer", iso.vm.NewArrayBuffer(st.jsBuf))
+	st.jsAB = iso.vm.NewArrayBuffer(st.jsBuf)
+	mustSet(st.memObj, "buffer", st.jsAB)
 	mustSet(st.memObj, "grow", func(call goja.FunctionCall) goja.Value {
 		delta := uint32(0)
 		if len(call.Arguments) > 0 {
@@ -398,11 +401,32 @@ func (st *wasmInstance) attachMemory(iso *Isolate, exports *goja.Object, mem api
 		nb := make([]byte, newSize)
 		copy(nb, st.jsBuf)
 		st.jsBuf = nb
-		mustSet(st.memObj, "buffer", iso.vm.NewArrayBuffer(st.jsBuf))
+		st.jsAB.Detach()
+		st.jsAB = iso.vm.NewArrayBuffer(st.jsBuf)
+		mustSet(st.memObj, "buffer", st.jsAB)
 		st.syncFromWasm()
 		return iso.vm.ToValue(prev)
 	})
 	mustSet(exports, "memory", st.memObj)
+}
+
+func (st *wasmInstance) rebindMemory(iso *Isolate) {
+	mem := liveMemory(st.mod.ExportedMemory("memory"))
+	if mem == nil || st.memObj == nil {
+		return
+	}
+	newSize := mem.Size()
+	if uint32(len(st.jsBuf)) == newSize {
+		return
+	}
+	nb := make([]byte, newSize)
+	if data, ok := mem.Read(0, newSize); ok {
+		copy(nb, data)
+	}
+	st.jsBuf = nb
+	st.jsAB.Detach()
+	st.jsAB = iso.vm.NewArrayBuffer(st.jsBuf)
+	mustSet(st.memObj, "buffer", st.jsAB)
 }
 
 func (st *wasmInstance) syncToWasm() {
