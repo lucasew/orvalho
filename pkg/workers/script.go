@@ -216,8 +216,8 @@ func (iso *Isolate) installProcess() {
 	}
 	p := iso.vm.NewObject()
 	attachEmitter(p)
-	mustSet(p, "argv", argv)
-	mustSet(p, "execArgv", []string{})
+	mustSet(p, "argv", jsStrings(iso.vm, argv))
+	mustSet(p, "execArgv", jsStrings(iso.vm, nil))
 	mustSet(p, "version", "v24.0.0")
 	mustSet(p, "platform", platform)
 	mustSet(p, "arch", arch)
@@ -246,6 +246,14 @@ func (iso *Isolate) installProcess() {
 	mustSet(p, "stdout", iso.newStdio(1))
 	mustSet(p, "stderr", iso.newStdio(2))
 	mustRuntimeSet(iso.vm, "process", p)
+}
+
+func jsStrings(rt *goja.Runtime, xs []string) *goja.Object {
+	items := make([]any, len(xs))
+	for i, s := range xs {
+		items[i] = s
+	}
+	return rt.NewArray(items...)
 }
 
 func (iso *Isolate) newStdio(fd int) *goja.Object {

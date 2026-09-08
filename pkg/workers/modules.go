@@ -34,6 +34,13 @@ func (iso *Isolate) newRequire(from string) *goja.Object {
 	mustSet(obj, "resolve", func(call goja.FunctionCall) goja.Value {
 		return iso.jsRequireResolve(from, call)
 	})
+	main := iso.vm.NewObject()
+	filename := from
+	if filename == "" && len(iso.opts.Argv) > 1 {
+		filename = iso.opts.Argv[1]
+	}
+	mustSet(main, "filename", filename)
+	mustSet(obj, "main", main)
 	return obj
 }
 

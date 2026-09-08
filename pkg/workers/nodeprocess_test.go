@@ -14,6 +14,22 @@ func TestNodeProcessIdentity(t *testing.T) {
 	}
 }
 
+func TestNodeProcessExecArgvIndex(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports(), Argv: []string{"node", "app.js"}})
+	err := iso.ScriptMain(t.Context(), `
+		if (!Array.isArray(process.execArgv)) throw new Error("execArgv "+process.execArgv);
+		var x = process.execArgv[0];
+		if (x !== undefined) throw new Error("execArgv0 "+x);
+		var requireMain = typeof require !== "undefined" && require !== null && require.main ? require.main : { filename: void 0 };
+		var requireMainFilename = requireMain.filename;
+		var filename = (requireMainFilename !== process.execArgv[0] ? requireMainFilename : void 0) || (typeof process._eval === "undefined" ? process.argv[1] : void 0);
+		if (filename !== "app.js" && filename !== require.main.filename) throw new Error("filename "+filename);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeProcessOnce(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `
