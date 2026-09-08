@@ -35,6 +35,7 @@ var (
 	ErrDialDenied           = errors.New("workers: net dial not injected")
 	ErrLookupDenied         = errors.New("workers: dns lookup not injected")
 	ErrListenDenied         = errors.New("workers: http listen not injected")
+	ErrEsbuild              = errors.New("esbuild")
 )
 
 // ScriptExitError is process.exit(code) from ScriptMain.

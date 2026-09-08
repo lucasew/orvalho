@@ -105,6 +105,9 @@ func NodeScriptImports() []imports.Handler[any] {
 			"node:zlib":                nodeZlibBinding{},
 		},
 		imports.Func[any](func(spec string, next imports.Resolver[any]) (any, error) {
+			if spec == "esbuild" || strings.HasPrefix(spec, "esbuild/") {
+				return nodeEsbuildBinding{}, nil
+			}
 			if spec == "workerd" || strings.HasPrefix(spec, "@cloudflare/workerd-") {
 				return nodehostScript("nodehost/workerd_stub.js"), nil
 			}
