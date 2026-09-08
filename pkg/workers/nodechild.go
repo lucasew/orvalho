@@ -256,6 +256,13 @@ func (n *nodeChild) newChild(pid int) *goja.Object {
 	mustSet(child, "connected", false)
 	stdio := vm.NewObject()
 	mustSet(stdio, "on", func(goja.FunctionCall) goja.Value { return stdio })
+	mustSet(stdio, "pipe", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) > 0 {
+			return call.Argument(0)
+		}
+		return stdio
+	})
+	mustSet(stdio, "unpipe", func(goja.FunctionCall) goja.Value { return stdio })
 	mustSet(child, "stdin", stdio)
 	mustSet(child, "stdout", stdio)
 	mustSet(child, "stderr", stdio)

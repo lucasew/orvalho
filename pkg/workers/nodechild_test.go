@@ -124,6 +124,9 @@ func TestNodeChildSpawnInjected(t *testing.T) {
 		if (child.pid !== 7) throw new Error("pid " + child.pid);
 		if (typeof child.unref !== "function") throw new Error("unref");
 		child.unref();
+		if (typeof child.stdout.pipe !== "function") throw new Error("pipe");
+		child.stdout.pipe({});
+		child.stderr.pipe({});
 		child.on("exit", function (code) {
 			if (code !== 0) throw new Error("code " + code);
 			saw = true;
