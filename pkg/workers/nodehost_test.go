@@ -57,6 +57,23 @@ func TestNodeStreamConsumers(t *testing.T) {
 	}
 }
 
+func TestNodeDomain(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var d = require("domain");
+		if (require("node:domain") !== d) throw new Error("identity");
+		if (typeof d.create !== "function") throw new Error("create");
+		var local = d.create();
+		if (typeof local.bind !== "function") throw new Error("bind");
+		var n = 0;
+		local.bind(function () { n = 1; })();
+		if (n !== 1) throw new Error("called " + n);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWorkerdStub(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `
