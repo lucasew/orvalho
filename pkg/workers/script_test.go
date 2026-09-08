@@ -138,6 +138,7 @@ func TestScriptMainProcessExitZero(t *testing.T) {
 	iso := New("", Options{Argv: []string{"node", "main.js", "dev"}})
 	err := iso.ScriptMain(t.Context(), `
 		if (process.argv[2] !== "dev") throw new Error("argv");
+		if (!process.execArgv || process.execArgv.length !== 0) throw new Error("execArgv");
 		process.exit(0);
 	`, "main.js")
 	if err != nil {

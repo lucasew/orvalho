@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 
@@ -128,6 +129,8 @@ func runScriptFile(ctx context.Context, dir, file string, extra []string) error 
 		Cwd:        dir,
 		PID:        os.Getpid(),
 		ExecPath:   exe,
+		Platform:   nodeScriptPlatform(),
+		Arch:       nodeScriptArch(),
 		Spawn:      hostSpawn,
 		Dial:       hostDial,
 		Lookup:     hostLookup,
@@ -293,6 +296,26 @@ func processEnvMap() map[string]string {
 	// Guest paths stay inside the mounted tree (normalizeGuest strips /).
 	env["HOME"] = "/"
 	return env
+}
+
+func nodeScriptPlatform() string {
+	switch runtime.GOOS {
+	case "darwin", "linux", "windows":
+		return runtime.GOOS
+	default:
+		return "linux"
+	}
+}
+
+func nodeScriptArch() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "x64"
+	case "arm64":
+		return "arm64"
+	default:
+		return "x64"
+	}
 }
 
 func scriptTree(dir, file string) (root, rel string) {

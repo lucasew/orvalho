@@ -217,6 +217,8 @@ func (iso *Isolate) installProcess() {
 	p := iso.vm.NewObject()
 	attachEmitter(p)
 	mustSet(p, "argv", argv)
+	mustSet(p, "execArgv", []string{})
+	mustSet(p, "version", "v24.0.0")
 	mustSet(p, "platform", platform)
 	mustSet(p, "arch", arch)
 	mustSet(p, "title", "orvalho")
