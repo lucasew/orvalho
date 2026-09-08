@@ -54,7 +54,7 @@ func newNodeOS(iso *Isolate) *goja.Object {
 	mustSet(obj, "type", n.jsType)
 	mustSet(obj, "uptime", n.jsUptime)
 	mustSet(obj, "userInfo", n.jsUserInfo)
-	mustSet(obj, "constants", iso.vm.CreateObject(nil))
+	mustSet(obj, "constants", osConstants(iso.vm))
 	mustSet(obj, "devNull", "/dev/null")
 
 	// Configurable accessor: assignment throws TypeError; test-os-eol.js redefines it.
@@ -66,6 +66,33 @@ func newNodeOS(iso *Isolate) *goja.Object {
 		panic("goja accessor EOL: " + err.Error())
 	}
 	return obj
+}
+
+// POSIX signal numbers (Linux). human-signals destructures os.constants.signals.
+var osSignalNumbers = []struct {
+	name string
+	num  int
+}{
+	{"SIGHUP", 1}, {"SIGINT", 2}, {"SIGQUIT", 3}, {"SIGILL", 4}, {"SIGTRAP", 5},
+	{"SIGABRT", 6}, {"SIGIOT", 6}, {"SIGBUS", 7}, {"SIGFPE", 8}, {"SIGKILL", 9},
+	{"SIGUSR1", 10}, {"SIGSEGV", 11}, {"SIGUSR2", 12}, {"SIGPIPE", 13}, {"SIGALRM", 14},
+	{"SIGTERM", 15}, {"SIGSTKFLT", 16}, {"SIGCHLD", 17}, {"SIGCLD", 17}, {"SIGCONT", 18},
+	{"SIGSTOP", 19}, {"SIGTSTP", 20}, {"SIGTTIN", 21}, {"SIGTTOU", 22}, {"SIGURG", 23},
+	{"SIGXCPU", 24}, {"SIGXFSZ", 25}, {"SIGVTALRM", 26}, {"SIGPROF", 27}, {"SIGWINCH", 28},
+	{"SIGIO", 29}, {"SIGPOLL", 29}, {"SIGPWR", 30}, {"SIGSYS", 31}, {"SIGUNUSED", 31},
+}
+
+func osConstants(vm *goja.Runtime) *goja.Object {
+	c := vm.NewObject()
+	signals := vm.NewObject()
+	for _, s := range osSignalNumbers {
+		mustSet(signals, s.name, s.num)
+	}
+	mustSet(c, "signals", signals)
+	mustSet(c, "errno", vm.NewObject())
+	mustSet(c, "priority", vm.NewObject())
+	mustSet(c, "dlopen", vm.NewObject())
+	return c
 }
 
 func (n *nodeOS) jsPlatform(goja.FunctionCall) goja.Value {

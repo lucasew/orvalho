@@ -23,6 +23,19 @@ func TestNodeOSArchInjected(t *testing.T) {
 	}
 }
 
+func TestNodeOSConstantsSignals(t *testing.T) {
+	runNodeOS(t, `
+		var os = require("os");
+		if (!os.constants) throw new Error("constants");
+		if (!os.constants.signals) throw new Error("signals");
+		var name2 = "SIGINT";
+		var dest = os.constants;
+		var { signals: { [name2]: constantSignal } } = dest;
+		if (constantSignal !== 2) throw new Error("destructure " + constantSignal);
+		if (typeof os.constants.signals.SIGTERM !== "number") throw new Error("SIGTERM");
+	`)
+}
+
 func TestNodeOSIdentity(t *testing.T) {
 	runNodeOS(t, `
 		var os = require("os");
