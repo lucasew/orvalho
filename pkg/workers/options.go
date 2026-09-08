@@ -59,6 +59,16 @@ type LookupAddr struct {
 // unless the name is already an IP. The isolate never calls Resolver.
 type LookupFunc func(ctx context.Context, req LookupReq) ([]LookupAddr, error)
 
+// ListenReq is one guest http.Server.listen / net.Server.listen.
+type ListenReq struct {
+	Network string
+	Address string
+}
+
+// ListenFunc binds a listener. Nil Options.Listen means listen is denied.
+// The isolate never calls net.Listen; the host supplies the listener.
+type ListenFunc func(ctx context.Context, req ListenReq) (net.Listener, error)
+
 // Default resource caps. Documented for hosts and enforced in the isolate.
 const (
 	// DefaultMaxPendingTimers is the default hard cap on concurrent
@@ -157,6 +167,10 @@ type Options struct {
 	// Lookup is dns.lookup / dns.promises.lookup. Nil means the module
 	// exists and lookup fails unless the name is already an IP.
 	Lookup LookupFunc
+
+	// Listen is http.Server.listen / https.Server.listen. Nil means the
+	// module exists and listen fails (not injected).
+	Listen ListenFunc
 
 	// PrepareSource rewrites guest source after shebang strip and before
 	// the CommonJS wrap (ESM downlevel). Nil means no extra rewrite.

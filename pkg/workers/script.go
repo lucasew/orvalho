@@ -71,7 +71,14 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 			if wait <= 0 {
 				continue
 			}
-			if err := iso.waitForTimerLocked(ctx, wait); err != nil {
+			if err := iso.waitForWorkLocked(ctx, wait); err != nil {
+				return err
+			}
+			continue
+		}
+		if iso.listeners > 0 {
+			idle = 0
+			if err := iso.waitForWorkLocked(ctx, 0); err != nil {
 				return err
 			}
 			continue
@@ -83,16 +90,24 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 	}
 }
 
-func (iso *Isolate) waitForTimerLocked(ctx context.Context, wait time.Duration) error {
+func (iso *Isolate) waitForWorkLocked(ctx context.Context, wait time.Duration) error {
 	iso.mu.Unlock()
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
+	var timerC <-chan time.Time
+	if wait > 0 {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		timerC = timer.C
+	}
 	select {
 	case <-ctx.Done():
 		iso.mu.Lock()
 		return ctx.Err()
-	case <-timer.C:
+	case <-timerC:
 		iso.mu.Lock()
+		return nil
+	case job := <-iso.httpCh:
+		iso.mu.Lock()
+		iso.dispatchHTTP(job)
 		return nil
 	}
 }

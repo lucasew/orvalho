@@ -130,6 +130,7 @@ func runScriptFile(ctx context.Context, dir, file string, extra []string) error 
 		Spawn:      hostSpawn,
 		Dial:       hostDial,
 		Lookup:     hostLookup,
+		Listen:     hostListen,
 		Imports: append(workers.NodeScriptImports(),
 			realpathScripts{root: root, inner: imports.NodeModules{FS: os.DirFS(root), From: rel}},
 		),
@@ -177,6 +178,25 @@ func (r realpathScripts) Resolve(spec string, next imports.Resolver[any]) (any, 
 
 func prepareScriptSource(src, file string) (string, error) {
 	return bundle.TransformCJS(src, file)
+}
+
+func hostListen(ctx context.Context, req workers.ListenReq) (net.Listener, error) {
+	network := req.Network
+	if network == "" {
+		network = "tcp"
+	}
+	host, port, err := net.SplitHostPort(req.Address)
+	if err != nil {
+		host, port = req.Address, "0"
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
+		host = "127.0.0.1"
+	}
+	if ip := net.ParseIP(host); ip != nil && !ip.IsLoopback() {
+		return nil, workers.ErrListenDenied
+	}
+	var lc net.ListenConfig
+	return lc.Listen(ctx, network, net.JoinHostPort(host, port))
 }
 
 func hostDial(ctx context.Context, req workers.DialReq) (net.Conn, error) {

@@ -46,6 +46,11 @@ type Isolate struct {
 
 	// cwd is the injected process.cwd(); chdir updates only this.
 	cwd string
+
+	// httpCh delivers accepted HTTP requests to ScriptMain (Listen DI).
+	httpCh chan *httpJob
+	// listeners is how many guest servers are currently listening.
+	listeners int
 }
 
 // Ensure Isolate implements actor.Actor.
@@ -60,6 +65,7 @@ func New(script string, opts Options) *Isolate {
 		opts:   opts.withDefaults(),
 		timers: newTimerTable(),
 		now:    time.Now,
+		httpCh: make(chan *httpJob, 16),
 	}
 	iso.installTimers()
 	iso.installWebTypes()
