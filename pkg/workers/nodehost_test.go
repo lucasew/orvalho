@@ -2,6 +2,7 @@ package workers
 
 import (
 	"testing"
+	"testing/fstest"
 
 	"github.com/lucasew/orvalho/pkg/imports"
 )
@@ -106,6 +107,26 @@ func TestNodeDomain(t *testing.T) {
 		var n = 0;
 		local.bind(function () { n = 1; })();
 		if (n !== 1) throw new Error("called " + n);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeHostCommonDoesNotShadowFile(t *testing.T) {
+	iso := New("", Options{
+		Imports: append(NodeScriptImports(), imports.NodeModules{
+			FS: fstest.MapFS{
+				"debug/src/common.js": {Data: []byte(`module.exports = function (e) { e.ok = 1; return e; };`)},
+			},
+		}),
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var fn = require("debug/src/common");
+		if (typeof fn !== "function") throw new Error("shadowed " + typeof fn);
+		if (fn({}).ok !== 1) throw new Error("ok");
+		var stub = require("common");
+		if (typeof stub.mustCall !== "function") throw new Error("stub");
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)

@@ -107,6 +107,12 @@ func NodeScriptImports() []imports.Handler[any] {
 				return nodehostScript("nodehost/workerd_stub.js"), nil
 			}
 			if spec == "common" || strings.HasSuffix(spec, "/common") || strings.HasSuffix(spec, "/common/index.js") {
+				// debug/src/common.js vs Node's testdata/node/common/ directory.
+				if strings.HasSuffix(spec, "/common") {
+					if v, err := next(spec + ".js"); err == nil {
+						return v, nil
+					}
+				}
 				return nodehostScript("nodehost/common.js"), nil
 			}
 			return next(spec)

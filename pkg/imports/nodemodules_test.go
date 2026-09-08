@@ -148,6 +148,13 @@ func TestNodeModulesClimbFromNested(t *testing.T) {
 	}
 }
 
+func TestNodeModulesExtensionlessPath(t *testing.T) {
+	t.Parallel()
+	lookupOK(t, tree(map[string]string{
+		"debug/src/common.js": `module.exports = function () {};`,
+	}), "debug/src/common", "debug/src/common.js")
+}
+
 func TestNodeModulesOrvalhoStoreFallback(t *testing.T) {
 	t.Parallel()
 	fsys := tree(map[string]string{
