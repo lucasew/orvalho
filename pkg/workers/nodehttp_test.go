@@ -35,6 +35,7 @@ func TestNodeHTTPServerInstanceof(t *testing.T) {
 		if (({} instanceof http.Server) !== false) throw new Error("plain");
 		var s = http.createServer();
 		if (typeof s.listen !== "function") throw new Error("listen");
+		if (typeof s.prependListener !== "function") throw new Error("prependListener");
 	`)
 }
 

@@ -201,6 +201,15 @@ func (n *nodeHTTP) jsCreateServer(call goja.FunctionCall) goja.Value {
 		}
 		return srv
 	})
+	mustSet(srv, "prependListener", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			if fn, ok := goja.AssertFunction(call.Argument(1)); ok {
+				ev := call.Argument(0).String()
+				listeners[ev] = append([]goja.Callable{fn}, listeners[ev]...)
+			}
+		}
+		return srv
+	})
 	mustSet(srv, "once", srv.Get("on"))
 	mustSet(srv, "removeListener", func(goja.FunctionCall) goja.Value { return srv })
 	mustSet(srv, "emit", func(call goja.FunctionCall) goja.Value {
