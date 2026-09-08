@@ -807,6 +807,16 @@ func (n *nodeFS) encode(data []byte, enc string) goja.Value {
 	}
 	cp := append([]byte(nil), data...)
 	ab := n.iso.vm.NewArrayBuffer(cp)
+	if buf := n.iso.vm.Get("Buffer"); buf != nil && !goja.IsUndefined(buf) {
+		if o, ok := buf.(*goja.Object); ok {
+			if from, ok := goja.AssertFunction(o.Get("from")); ok {
+				v, err := from(buf, n.iso.vm.ToValue(ab))
+				if err == nil {
+					return v
+				}
+			}
+		}
+	}
 	ctor, ok := goja.AssertConstructor(n.iso.vm.Get("Uint8Array"))
 	if !ok {
 		return n.iso.vm.ToValue(ab)

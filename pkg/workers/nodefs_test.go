@@ -38,6 +38,11 @@ func TestNodeFSReadFileSync(t *testing.T) {
 		if (b.length !== 2) throw new Error("len " + b.length);
 		if (b[0] !== 104 || b[1] !== 105) throw new Error("bytes");
 		if (b.toString() !== "hi") throw new Error("toString " + b.toString());
+		if (typeof Buffer !== "undefined" && Buffer.isBuffer && !Buffer.isBuffer(b)) throw new Error("not Buffer");
+		if (typeof b.equals !== "function") throw new Error("equals");
+		if (!b.equals(Buffer.from("hi"))) throw new Error("eq");
+		if (b.toString("utf-8") !== "hi") throw new Error("utf-8 " + b.toString("utf-8"));
+		if (!b.subarray(0, 1).equals(Buffer.from("h"))) throw new Error("subarray");
 	`)
 }
 
