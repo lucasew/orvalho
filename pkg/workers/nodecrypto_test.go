@@ -91,6 +91,18 @@ func TestNodeCryptoRandomUUID(t *testing.T) {
 	`)
 }
 
+func TestNodeCryptoHash(t *testing.T) {
+	runNodeCrypto(t, `
+		var crypto = require("crypto");
+		var hex = crypto.hash("sha256", "abc", "hex");
+		if (hex !== "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") {
+			throw new Error("hash " + hex);
+		}
+		var short = hex.substring(0, 8);
+		if (short.length !== 8) throw new Error("slice");
+	`)
+}
+
 func TestNodeCryptoCreateHash(t *testing.T) {
 	runNodeCrypto(t, `
 		var crypto = require("crypto");

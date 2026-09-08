@@ -47,6 +47,7 @@ func newNodeCrypto(iso *Isolate) *goja.Object {
 	mustSet(obj, "randomFill", n.jsRandomFill)
 	mustSet(obj, "randomUUID", n.jsRandomUUID)
 	mustSet(obj, "createHash", n.jsCreateHash)
+	mustSet(obj, "hash", n.jsHash)
 	mustSet(obj, "getHashes", n.jsGetHashes)
 	mustSet(obj, "getRandomValues", n.jsGetRandomValues)
 	web := iso.vm.NewObject()
@@ -124,6 +125,28 @@ func (n *nodeCrypto) jsRandomUUID(goja.FunctionCall) goja.Value {
 		j += 2
 	}
 	return n.iso.vm.ToValue(string(out[:]))
+}
+
+func (n *nodeCrypto) jsHash(call goja.FunctionCall) goja.Value {
+	algo := n.requireString(call.Argument(0), "algorithm")
+	h, ok := newHasher(algo)
+	if !ok {
+		n.throwError("ERR_CRYPTO_UNKNOWN_DIGEST", "Digest method not supported")
+	}
+	if len(call.Arguments) < 2 {
+		n.throwType("ERR_INVALID_ARG_TYPE", `The "data" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received undefined`)
+	}
+	enc := ""
+	if len(call.Arguments) > 2 && !goja.IsUndefined(call.Argument(2)) && !goja.IsNull(call.Argument(2)) {
+		if _, ok := exportJSString(call.Argument(2)); !ok {
+			n.throwType("ERR_INVALID_ARG_TYPE", `The "outputEncoding" argument must be of type string. Received `+jsReceived(call.Argument(2)))
+		}
+		enc = call.Argument(2).String()
+	}
+	nh := &nodeHash{iso: n.iso, h: h}
+	data := nh.bytesFrom(call.Argument(1), "")
+	_, _ = h.Write(data)
+	return nh.encodeDigest(h.Sum(nil), enc)
 }
 
 func (n *nodeCrypto) jsCreateHash(call goja.FunctionCall) goja.Value {
