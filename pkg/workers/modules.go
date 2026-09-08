@@ -15,6 +15,7 @@ var cjsIdentDecl = regexp.MustCompile(`(?m)\b(?:var|let|const|function)\s+(__fil
 
 func (iso *Isolate) installModules() {
 	iso.moduleCache = make(map[string]goja.Value)
+	iso.loading = make(map[string]*goja.Object)
 	mustRuntimeSet(iso.vm, "require", iso.newRequire(""))
 	mustRuntimeSet(iso.vm, "getBuiltinModule", iso.jsRequire)
 }
@@ -142,9 +143,17 @@ func (iso *Isolate) noteScriptCause(err error) {
 	iso.scriptCause = err
 }
 
+func (iso *Isolate) cachedExports(key string) (goja.Value, bool) {
+	if mod, ok := iso.loading[key]; ok {
+		return mod.Get("exports"), true
+	}
+	v, ok := iso.moduleCache[key]
+	return v, ok
+}
+
 func (iso *Isolate) loadModule(spec string) (goja.Value, error) {
 	spec = iso.rewriteRelative(spec)
-	if v, ok := iso.moduleCache[spec]; ok {
+	if v, ok := iso.cachedExports(spec); ok {
 		return v, nil
 	}
 	v, err := imports.Resolve(spec, withImportFrom(iso.opts.Imports, iso.importFrom)...)
@@ -164,8 +173,10 @@ func (iso *Isolate) loadModule(spec string) (goja.Value, error) {
 		if x.File != "" {
 			key = "file:" + x.File
 		}
-		if cached, ok := iso.moduleCache[key]; ok {
-			iso.moduleCache[spec] = cached
+		if cached, ok := iso.cachedExports(key); ok {
+			if _, loading := iso.loading[key]; !loading {
+				iso.moduleCache[spec] = cached
+			}
 			return cached, nil
 		}
 		got, err := iso.loadScript(key, x.Source, x.File)
@@ -244,12 +255,16 @@ func (iso *Isolate) loadScript(key, source, file string) (goja.Value, error) {
 		return nil, err
 	}
 	iso.moduleCache[key] = exports
+	iso.loading[key] = module
 
 	prev := iso.importFrom
 	if file != "" {
 		iso.importFrom = file
 	}
-	defer func() { iso.importFrom = prev }()
+	defer func() {
+		iso.importFrom = prev
+		delete(iso.loading, key)
+	}()
 
 	source = stripShebang(source)
 	if iso.opts.PrepareSource != nil {

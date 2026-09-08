@@ -8,6 +8,7 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/lucasew/orvalho/pkg/imports"
+	"github.com/lucasew/orvalho/pkg/workers/bundle"
 )
 
 func importMap(m map[string]any) []imports.Handler[any] {
@@ -173,6 +174,30 @@ func TestRequireCircularScripts(t *testing.T) {
 	tickOK(t, iso)
 	if !iso.vm.Get("ok").ToBoolean() {
 		t.Fatal("circular require did not see partial exports")
+	}
+}
+
+func TestRequireCircularESMReassign(t *testing.T) {
+	iso := New("", Options{
+		Imports: importMap(map[string]any{
+			"orvalho:a": imports.Script{File: "a.mjs", Source: `
+				import { n } from "orvalho:b";
+				export function use() { return n(); }
+			`},
+			"orvalho:b": imports.Script{File: "b.mjs", Source: `
+				import { use } from "orvalho:a";
+				export function n() { return 9; }
+				export function unused() { return use; }
+			`},
+		}),
+		PrepareSource: bundle.TransformCJS,
+	})
+	err := iso.ScriptMain(t.Context(), `
+		import { use } from "orvalho:a";
+		if (use() !== 9) throw new Error("use " + use());
+	`, "t.mjs")
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

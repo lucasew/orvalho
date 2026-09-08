@@ -36,6 +36,9 @@ type Isolate struct {
 
 	// moduleCache is the per-isolate require cache (specifier → exports).
 	moduleCache map[string]goja.Value
+	// loading is the CJS module object for scripts still evaluating, so
+	// circular require sees the live module.exports (esbuild reassigns it).
+	loading map[string]*goja.Object
 
 	// importFrom is the FS path of the script currently evaluating.
 	importFrom string
