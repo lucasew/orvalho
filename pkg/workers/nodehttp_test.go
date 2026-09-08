@@ -38,6 +38,30 @@ func TestNodeHTTPServerInstanceof(t *testing.T) {
 	`)
 }
 
+func TestNodeHTTPAgent(t *testing.T) {
+	runNodeHTTP(t, `
+		var http = require("http");
+		if (typeof http.Agent !== "function") throw new Error("Agent");
+		var a = new http.Agent({ keepAlive: true });
+		if (typeof a.on !== "function") throw new Error("on");
+		if (!a.options || a.options.keepAlive !== true) throw new Error("options");
+		var n = 0;
+		a.on("free", function () { n = 1; });
+		a.emit("free");
+		if (n !== 1) throw new Error("emit " + n);
+		var KA = class extends http.Agent {
+			constructor(opts) {
+				super(opts);
+				this.on("free", function () {});
+			}
+		};
+		var k = new KA({ keepAlive: true });
+		if (typeof k.on !== "function") throw new Error("sub on");
+		if (typeof k.keepSocketAlive !== "function") throw new Error("keepSocketAlive");
+		if (k.keepSocketAlive({}) !== true) throw new Error("keep");
+	`)
+}
+
 func TestNodeHTTPListenDenied(t *testing.T) {
 	runNodeHTTP(t, `
 		try {

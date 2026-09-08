@@ -82,8 +82,16 @@ func newNodeHTTP(iso *Isolate, https bool) *goja.Object {
 	mustSet(obj, "Server", server)
 	mustSet(obj, "IncomingMessage", n.jsIncoming)
 	mustSet(obj, "ServerResponse", n.jsOutgoing)
-	mustSet(obj, "Agent", n.jsAgent)
-	mustSet(obj, "globalAgent", iso.vm.NewObject())
+	agent := iso.vm.ToValue(n.jsAgent).ToObject(iso.vm)
+	if p := agent.Get("prototype"); p != nil {
+		if proto, ok := p.(*goja.Object); ok {
+			n.installAgentProto(proto)
+		}
+	}
+	mustSet(obj, "Agent", agent)
+	ga := iso.vm.NewObject()
+	n.initAgent(ga, goja.Undefined())
+	mustSet(obj, "globalAgent", ga)
 	mustSet(obj, "METHODS", httpMethods)
 	mustSet(obj, "STATUS_CODES", statusCodesObj(iso.vm))
 	mustSet(obj, "get", n.jsDeniedOut)
@@ -139,7 +147,40 @@ func (n *nodeHTTP) jsOutgoing(call goja.ConstructorCall) *goja.Object {
 }
 
 func (n *nodeHTTP) jsAgent(call goja.ConstructorCall) *goja.Object {
+	n.initAgent(call.This, call.Argument(0))
 	return call.This
+}
+
+func (n *nodeHTTP) initAgent(this *goja.Object, optsVal goja.Value) {
+	attachEmitter(this)
+	opts := n.iso.vm.NewObject()
+	if o, ok := optsVal.(*goja.Object); ok {
+		opts = o
+	}
+	mustSet(this, "options", opts)
+	mustSet(this, "sockets", n.iso.vm.NewObject())
+	mustSet(this, "freeSockets", n.iso.vm.NewObject())
+	mustSet(this, "requests", n.iso.vm.NewObject())
+}
+
+func (n *nodeHTTP) installAgentProto(proto *goja.Object) {
+	attachEmitter(proto)
+	mustSet(proto, "keepSocketAlive", func(goja.FunctionCall) goja.Value {
+		return n.iso.vm.ToValue(true)
+	})
+	mustSet(proto, "reuseSocket", func(goja.FunctionCall) goja.Value {
+		return goja.Undefined()
+	})
+	mustSet(proto, "destroy", func(goja.FunctionCall) goja.Value {
+		return goja.Undefined()
+	})
+	mustSet(proto, "getName", func(goja.FunctionCall) goja.Value {
+		return n.iso.vm.ToValue("")
+	})
+	mustSet(proto, "createConnection", n.jsDeniedOut)
+	mustSet(proto, "addRequest", func(goja.FunctionCall) goja.Value {
+		return goja.Undefined()
+	})
 }
 
 func (n *nodeHTTP) jsCreateServer(call goja.FunctionCall) goja.Value {
