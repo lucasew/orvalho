@@ -38,14 +38,17 @@ func TestTransformCJSStillTransformsExport(t *testing.T) {
 	}
 }
 
-func TestTransformCJSSkipsImportInString(t *testing.T) {
-	src := "module.exports = { msg: \"failed to import\" };\n"
-	out, err := bundle.TransformCJS(src, "plain.js")
+func TestTransformCJSDetectsExportAfterRegexQuote(t *testing.T) {
+	src := "const re = /[\"&'`]/g\nexport function core() { return 1 }\n"
+	out, err := bundle.TransformCJS(src, "core.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != src {
-		t.Fatalf("CJS with import-in-string changed:\ngot  %q\nwant %q", out, src)
+	if strings.Contains(out, "export function") {
+		t.Fatalf("export survived after regex-with-quote:\n%s", out)
+	}
+	if !strings.Contains(out, "exports") {
+		t.Fatalf("expected CJS exports:\n%s", out)
 	}
 }
 
@@ -195,8 +198,24 @@ func TestTransformCJSAwaitImportToRequire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "require(") {
-		t.Fatalf("expected require:\n%s", out)
+	if !strings.Contains(out, "__import(") {
+		t.Fatalf("expected __import:\n%s", out)
+	}
+}
+
+func TestTransformCJSAwaitImportThen(t *testing.T) {
+	out, err := bundle.TransformCJS(
+		"export async function load(p) { return await import(p).then((m) => m.default); }\n",
+		"mod.mjs",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "require(p).then") {
+		t.Fatalf("await import().then became require().then:\n%s", out)
+	}
+	if !strings.Contains(out, "__import(") {
+		t.Fatalf("expected __import:\n%s", out)
 	}
 }
 

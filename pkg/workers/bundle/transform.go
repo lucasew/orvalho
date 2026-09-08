@@ -60,7 +60,7 @@ func TransformCJS(source, file string) (string, error) {
 		return rewritePlainCJS(source), nil
 	}
 	source = stripImportCallOptions(source)
-	source = awaitImportToRequire.ReplaceAllString(source, "require(")
+	source = awaitImportToRequire.ReplaceAllString(source, "await __import(")
 	source = awaitBareCall.ReplaceAllString(source, "$1")
 	result := api.Transform(source, api.TransformOptions{
 		Loader:     loaderFor(file),
@@ -391,7 +391,7 @@ func needsCJSTransform(src, file string) bool {
 // need esbuild. Tokens that are absent leave src unchanged.
 func rewritePlainCJS(src string) string {
 	if strings.Contains(src, "await") && awaitImportToRequire.MatchString(src) {
-		src = awaitImportToRequire.ReplaceAllString(src, "require(")
+		src = awaitImportToRequire.ReplaceAllString(src, "await __import(")
 	}
 	if strings.Contains(src, "RegExp") && regexpFlagLiteral.MatchString(src) {
 		src = rewriteRegexpFlags(src)
@@ -414,74 +414,33 @@ func rewritePlainCJS(src string) string {
 	return src
 }
 
+// hasESMSyntax is a word-boundary scan. Skipping strings/comments
+// misses `export` after a regex like /["&'`]/ (false skip → goja
+// SyntaxError). Extra transforms of CJS that mention the words are
+// slower, not wrong.
 func hasESMSyntax(src string) bool {
+	return hasJSWord(src, "import") || hasJSWord(src, "export")
+}
+
+func hasJSWord(src, w string) bool {
 	for i := 0; i < len(src); {
-		c := src[i]
-		if c == '/' && i+1 < len(src) {
-			switch src[i+1] {
-			case '/':
-				if j := strings.IndexByte(src[i+2:], '\n'); j >= 0 {
-					i += 2 + j + 1
-				} else {
-					return false
-				}
-				continue
-			case '*':
-				if j := strings.Index(src[i+2:], "*/"); j >= 0 {
-					i += 2 + j + 2
-				} else {
-					return false
-				}
-				continue
-			}
+		j := strings.Index(src[i:], w)
+		if j < 0 {
+			return false
 		}
-		if c == '"' || c == '\'' {
-			i = skipQuoted(src, i)
-			continue
+		j += i
+		if (j == 0 || !isIdentCont(src[j-1])) && (j+len(w) == len(src) || !isIdentCont(src[j+len(w)])) {
+			return true
 		}
-		if c == '`' {
-			i = scanTemplateLiteral(src, i)
-			continue
-		}
-		if isIdentStart(c) {
-			start := i
-			i++
-			for i < len(src) && isIdentCont(src[i]) {
-				i++
-			}
-			w := src[start:i]
-			if w == "import" || w == "export" {
-				return true
-			}
-			continue
-		}
-		i++
+		i = j + len(w)
 	}
 	return false
 }
 
-func skipQuoted(src string, i int) int {
-	q := src[i]
-	i++
-	for i < len(src) {
-		if src[i] == '\\' && i+1 < len(src) {
-			i += 2
-			continue
-		}
-		if src[i] == q {
-			return i + 1
-		}
-		i++
-	}
-	return len(src)
-}
-
-func isIdentStart(c byte) bool {
-	return c == '_' || c == '$' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
-}
-
 func isIdentCont(c byte) bool {
-	return isIdentStart(c) || (c >= '0' && c <= '9')
+	return c == '_' || c == '$' ||
+		(c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+		(c >= '0' && c <= '9')
 }
 
 func loaderFor(file string) api.Loader {
