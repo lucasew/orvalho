@@ -1231,4 +1231,6 @@ module.exports = {
   promisify: promisify,
   stripVTControlCharacters: stripVTControlCharacters,
   types: require("util/types"),
+  TextEncoder: globalThis.TextEncoder,
+  TextDecoder: globalThis.TextDecoder,
 };
