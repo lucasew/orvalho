@@ -236,6 +236,64 @@ func TestNormalizeGuest(t *testing.T) {
 	}
 }
 
+func TestStripCwdPrefix(t *testing.T) {
+	got := stripCwdPrefix("/guest/root/hello.txt", "/guest/root")
+	if got != "hello.txt" {
+		t.Fatalf("abs: %q", got)
+	}
+	got = stripCwdPrefix("/guest/root", "/guest/root")
+	if got != "." {
+		t.Fatalf("cwd: %q", got)
+	}
+	got = stripCwdPrefix("guest/root/dir/a.txt", "/guest/root")
+	if got != "dir/a.txt" {
+		t.Fatalf("stripped slash: %q", got)
+	}
+	got = stripCwdPrefix("/guest/root/../root/hello.txt", "/guest/root")
+	if got != "hello.txt" {
+		t.Fatalf("clean: %q", got)
+	}
+	got = stripCwdPrefix("/hello.txt", "/guest/root")
+	if got != "/hello.txt" {
+		t.Fatalf("other abs: %q", got)
+	}
+	got = stripCwdPrefix("hello.txt", ".")
+	if got != "hello.txt" {
+		t.Fatalf("rel cwd: %q", got)
+	}
+}
+
+func TestNodeFSCwdAbsoluteAndNative(t *testing.T) {
+	iso := New("", Options{
+		FS:      nodeFSMap(),
+		Cwd:     "/guest/root",
+		Imports: NodeScriptImports(),
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var fs = require("fs");
+		if (typeof fs.realpathSync.native !== "function") throw new Error("native");
+		if (fs.realpathSync.native !== fs.realpathSync) throw new Error("native ident");
+		if (typeof fs.realpath.native !== "function") throw new Error("async native");
+		if (fs.readFileSync("/guest/root/hello.txt", "utf8") !== "hi") throw new Error("abs read");
+		if (fs.readFileSync("/hello.txt", "utf8") !== "hi") throw new Error("guest abs");
+		if (!fs.statSync("/guest/root/dir").isDirectory()) throw new Error("dir");
+		if (fs.realpathSync("/guest/root/hello.txt") !== "/guest/root/hello.txt") throw new Error("rp abs " + fs.realpathSync("/guest/root/hello.txt"));
+		if (fs.realpathSync.native("hello.txt") !== "/guest/root/hello.txt") throw new Error("rp rel");
+		if (fs.realpathSync(".") !== "/guest/root") throw new Error("rp cwd " + fs.realpathSync("."));
+		if (fs.statSync("missing.txt", { throwIfNoEntry: false }) !== undefined) throw new Error("throwIfNoEntry");
+		try {
+			fs.statSync("missing.txt");
+			throw new Error("stat should throw");
+		} catch (e) {
+			if (e.message === "stat should throw") throw e;
+			if (e.code !== "ENOENT") throw new Error("stat " + e.code);
+		}
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeFSPromisesIdentity(t *testing.T) {
 	runNodeFS(t, nodeFSMap(), `
 		var fs = require("fs");

@@ -17,8 +17,9 @@ type hostTreeFS struct {
 }
 
 var (
-	_ fs.FS           = hostTreeFS{}
-	_ workers.WriteFS = hostTreeFS{}
+	_ fs.FS              = hostTreeFS{}
+	_ workers.WriteFS    = hostTreeFS{}
+	_ workers.RealpathFS = hostTreeFS{}
 )
 
 func newHostTreeFS(root string) hostTreeFS {
@@ -57,6 +58,22 @@ func (h hostTreeFS) Remove(name string) error {
 		return err
 	}
 	return os.Remove(full)
+}
+
+func (h hostTreeFS) Realpath(name string) (string, error) {
+	full, err := h.resolve(name)
+	if err != nil {
+		return "", err
+	}
+	real, err := filepath.EvalSymlinks(full)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(h.root, real)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return name, nil
+	}
+	return filepath.ToSlash(rel), nil
 }
 
 func (h hostTreeFS) resolve(name string) (string, error) {

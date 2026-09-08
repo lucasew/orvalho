@@ -141,10 +141,15 @@ func TestRunScriptFileWriteFS(t *testing.T) {
 	src := `
 		var fs = require("fs");
 		var os = require("os");
+		var path = require("path");
 		if (os.homedir() === "/home/someone") throw new Error("host home");
 		fs.mkdirSync(os.homedir() + "/.config/astro");
 		fs.writeFileSync("out.txt", "ok");
 		if (fs.readFileSync("out.txt", "utf8") !== "ok") throw new Error("read");
+		var abs = path.join(process.cwd(), "out.txt");
+		if (fs.readFileSync(abs, "utf8") !== "ok") throw new Error("abs read");
+		if (typeof fs.realpathSync.native !== "function") throw new Error("native");
+		if (fs.realpathSync.native(abs) !== abs.replace(/\\/g, "/")) throw new Error("rp " + fs.realpathSync(abs));
 	`
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
@@ -158,6 +163,27 @@ func TestRunScriptFileWriteFS(t *testing.T) {
 	}
 	if st, err := os.Stat(filepath.Join(dir, ".config", "astro")); err != nil || !st.IsDir() {
 		t.Fatalf("guest home mkdir: %v", err)
+	}
+}
+
+func TestHostTreeFSRealpathFollowsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "real", "a.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real", filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	h := newHostTreeFS(dir)
+	got, err := h.Realpath("link/a.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "real/a.txt" {
+		t.Fatalf("realpath=%q", got)
 	}
 }
 

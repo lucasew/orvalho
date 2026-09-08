@@ -19,6 +19,12 @@ type WriteFS interface {
 	Remove(name string) error
 }
 
+// RealpathFS is an optional symlink-resolving surface a mounted [fs.FS]
+// may implement. Without it, realpath returns the cleaned guest path.
+type RealpathFS interface {
+	Realpath(name string) (string, error)
+}
+
 var (
 	errBadPathType = errors.New("workers: fs path type")
 	errPathNUL     = errors.New("workers: fs path NUL")
@@ -89,8 +95,8 @@ func newNodeFS(iso *Isolate) *goja.Object {
 	mustSet(obj, "readdirSync", n.jsReaddirSync)
 	mustSet(obj, "readlink", n.jsReadlink)
 	mustSet(obj, "readlinkSync", n.jsReadlinkSync)
-	mustSet(obj, "realpath", n.jsRealpath)
-	mustSet(obj, "realpathSync", n.jsRealpathSync)
+	n.setNative(obj, "realpath", n.jsRealpath)
+	n.setNative(obj, "realpathSync", n.jsRealpathSync)
 	mustSet(obj, "rename", n.jsStub2("rename", "oldPath", "newPath", false))
 	mustSet(obj, "renameSync", n.jsStub2("rename", "oldPath", "newPath", true))
 	mustSet(obj, "rmdir", n.jsRmdir)
@@ -248,6 +254,9 @@ func (n *nodeFS) statSyncCall(call goja.FunctionCall, op string) goja.Value {
 	p := n.mustPath(call.Argument(0), "path")
 	info, err := n.statPath(p)
 	if err != nil {
+		if !throwIfNoEntry(call.Argument(1)) {
+			return goja.Undefined()
+		}
 		n.throwMapped(op, p, err)
 	}
 	return n.statObj(info)
@@ -354,22 +363,46 @@ func (n *nodeFS) dirNames(ents []fs.DirEntry) goja.Value {
 
 func (n *nodeFS) jsRealpathSync(call goja.FunctionCall) goja.Value {
 	p := n.mustPath(call.Argument(0), "path")
-	if _, err := n.statPath(p); err != nil {
+	out, err := n.realpath(p)
+	if err != nil {
 		n.throwMapped("lstat", p, err)
 	}
-	return n.iso.vm.ToValue(p)
+	return n.iso.vm.ToValue(out)
 }
 
 func (n *nodeFS) jsRealpath(call goja.FunctionCall) goja.Value {
 	p := n.mustPath(call.Argument(0), "path")
 	_, cb := n.optsAndCB(call, 1)
 	n.requireCB(cb)
-	if _, err := n.statPath(p); err != nil {
+	out, err := n.realpath(p)
+	if err != nil {
 		n.nextTick(cb, n.sysMapped("lstat", p, err), goja.Undefined())
 		return goja.Undefined()
 	}
-	n.nextTick(cb, goja.Null(), n.iso.vm.ToValue(p))
+	n.nextTick(cb, goja.Null(), n.iso.vm.ToValue(out))
 	return goja.Undefined()
+}
+
+func (n *nodeFS) realpath(p string) (string, error) {
+	if _, err := n.statPath(p); err != nil {
+		return "", err
+	}
+	if rp, ok := n.fsys.(RealpathFS); ok {
+		real, err := rp.Realpath(p)
+		if err != nil {
+			return "", err
+		}
+		p = real
+	}
+	return n.publicPath(p), nil
+}
+
+func (n *nodeFS) setNative(obj *goja.Object, name string, fn func(goja.FunctionCall) goja.Value) {
+	v := n.iso.vm.ToValue(fn)
+	mustSet(obj, name, v)
+	if o, ok := v.(*goja.Object); ok {
+		mustSet(o, "native", v)
+	}
 }
 
 func (n *nodeFS) jsOpenSync(call goja.FunctionCall) goja.Value {
@@ -750,15 +783,21 @@ func (n *nodeFS) statObj(info fs.FileInfo) *goja.Object {
 	isLink := info.Mode()&fs.ModeSymlink != 0
 	mustSet(o, "size", info.Size())
 	mustSet(o, "mode", int64(info.Mode()))
-	mustSet(o, "isFile", func() bool { return isFile })
-	mustSet(o, "isDirectory", func() bool { return isDir })
-	mustSet(o, "isSymbolicLink", func() bool { return isLink })
-	mustSet(o, "isBlockDevice", func() bool { return false })
-	mustSet(o, "isCharacterDevice", func() bool { return false })
-	mustSet(o, "isFIFO", func() bool { return false })
-	mustSet(o, "isSocket", func() bool { return false })
+	mustSet(o, "isFile", n.statFlag(isFile))
+	mustSet(o, "isDirectory", n.statFlag(isDir))
+	mustSet(o, "isSymbolicLink", n.statFlag(isLink))
+	mustSet(o, "isBlockDevice", n.statFlag(false))
+	mustSet(o, "isCharacterDevice", n.statFlag(false))
+	mustSet(o, "isFIFO", n.statFlag(false))
+	mustSet(o, "isSocket", n.statFlag(false))
 	mustSet(o, "mtimeMs", float64(info.ModTime().UnixMilli()))
 	return o
+}
+
+func (n *nodeFS) statFlag(v bool) func(goja.FunctionCall) goja.Value {
+	return func(goja.FunctionCall) goja.Value {
+		return n.iso.vm.ToValue(v)
+	}
 }
 
 func (n *nodeFS) mustTwo(call goja.FunctionCall, n1, n2 string) (string, string) {
@@ -793,7 +832,64 @@ func (n *nodeFS) parsePath(v goja.Value) (string, error) {
 	} else if strings.ContainsRune(raw, 0) {
 		return "", errPathNUL
 	}
-	return normalizeGuest(raw)
+	cwd := ""
+	if n != nil && n.iso != nil {
+		cwd = n.iso.cwd
+	}
+	return normalizeGuest(stripCwdPrefix(raw, cwd))
+}
+
+// stripCwdPrefix maps a host-absolute path under process.cwd() into the
+// mounted tree. Vite resolves against cwd; normalizeGuest would otherwise
+// treat "/home/.../proj/src" as guest "home/.../proj/src".
+func stripCwdPrefix(p, cwd string) string {
+	p = path.Clean(strings.ReplaceAll(p, "\\", "/"))
+	cwd = path.Clean(strings.ReplaceAll(cwd, "\\", "/"))
+	if cwd == "." || cwd == "" {
+		return p
+	}
+	alts := []string{cwd}
+	if trimmed := strings.TrimPrefix(cwd, "/"); trimmed != cwd && trimmed != "" {
+		alts = append(alts, trimmed)
+	}
+	for _, c := range alts {
+		if p == c {
+			return "."
+		}
+		if strings.HasPrefix(p, c+"/") {
+			rest := p[len(c)+1:]
+			if rest == "" {
+				return "."
+			}
+			return rest
+		}
+	}
+	return p
+}
+
+// publicPath is the Node-facing absolute path for a guest tree path.
+func (n *nodeFS) publicPath(guest string) string {
+	cwd := "/"
+	if n != nil && n.iso != nil {
+		cwd = strings.ReplaceAll(n.iso.cwd, "\\", "/")
+		cwd = strings.TrimRight(cwd, "/")
+		if cwd == "" || cwd == "." {
+			cwd = "/"
+		}
+	}
+	if guest == "" || guest == "." {
+		if strings.HasPrefix(cwd, "/") {
+			return cwd
+		}
+		return "/"
+	}
+	if !strings.HasPrefix(cwd, "/") {
+		return "/" + guest
+	}
+	if cwd == "/" {
+		return "/" + guest
+	}
+	return cwd + "/" + guest
 }
 
 type pathArg struct {
@@ -885,6 +981,21 @@ func (n *nodeFS) optsAndCB(call goja.FunctionCall, start int) (enc string, cb go
 		}
 	}
 	return enc, nil
+}
+
+func throwIfNoEntry(v goja.Value) bool {
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return true
+	}
+	obj, ok := v.(*goja.Object)
+	if !ok {
+		return true
+	}
+	flag := obj.Get("throwIfNoEntry")
+	if flag == nil || goja.IsUndefined(flag) {
+		return true
+	}
+	return flag.ToBoolean()
 }
 
 func encodingOf(v goja.Value) string {
