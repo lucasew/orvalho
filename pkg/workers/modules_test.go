@@ -367,6 +367,27 @@ func TestRequireNodeModulesRelativeInsidePackage(t *testing.T) {
 	}
 }
 
+func TestDynamicImportThen(t *testing.T) {
+	fsys := fstest.MapFS{
+		"cfg.js": {Data: []byte(`exports.default = { ok: 1 };`)},
+	}
+	iso := New("", Options{
+		Imports:       []imports.Handler[any]{imports.NodeModules{FS: fsys}},
+		PrepareSource: bundle.TransformCJS,
+	})
+	err := iso.ScriptMain(t.Context(), `
+		async function load(p) {
+			return await import(p).then(function (m) { return m.default; });
+		}
+		load("cfg.js").then(function (d) {
+			if (!d || d.ok !== 1) throw new Error("default " + d);
+		});
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRequireSpecifierQuery(t *testing.T) {
 	fsys := fstest.MapFS{
 		"svelte.config.js": {Data: []byte(`exports.ok = 1;`)},
