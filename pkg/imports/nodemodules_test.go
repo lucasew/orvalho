@@ -89,6 +89,26 @@ func TestNodeModulesExportsArrayFallback(t *testing.T) {
 	}), "pkg", "pkg/cjs.js")
 }
 
+func TestNodeModulesExportsStarSubpath(t *testing.T) {
+	t.Parallel()
+	lookupOK(t, tree(map[string]string{
+		"unstorage/package.json":        `{"exports":{"./drivers/*":{"import":"./drivers/*.mjs","require":"./drivers/*.cjs"}}}`,
+		"unstorage/drivers/fs-lite.cjs": `exports.n=1`,
+		"unstorage/drivers/fs-lite.mjs": `export const n=2`,
+	}), "unstorage/drivers/fs-lite", "unstorage/drivers/fs-lite.cjs")
+}
+
+func TestNodeModulesExportsStarMiss(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"pkg/package.json": `{"exports":{"./drivers/*":"./drivers/*.js"}}`,
+		"pkg/secret.js":    `exports.n=1`,
+	})
+	if _, ok := (NodeModules{FS: fsys}).Lookup("pkg/secret"); ok {
+		t.Fatal("star exports must not leak secret")
+	}
+}
+
 func TestNodeModulesExportsSubpathClosed(t *testing.T) {
 	t.Parallel()
 	fsys := tree(map[string]string{

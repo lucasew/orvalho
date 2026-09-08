@@ -63,7 +63,7 @@ func matchExport(v any, key string) (string, bool) {
 			}
 			return pickCondition(x)
 		}
-		return "", false
+		return matchImportPattern(x, key)
 	default:
 		return "", false
 	}
