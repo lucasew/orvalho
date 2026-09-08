@@ -36,6 +36,7 @@ func NodeScriptImports() []imports.Handler[any] {
 		imports.Alias[any]{From: "util", To: "node:util"},
 		imports.Alias[any]{From: "util/types", To: "node:util/types"},
 		imports.Alias[any]{From: "worker_threads", To: "node:worker_threads"},
+		imports.Alias[any]{From: "zlib", To: "node:zlib"},
 		imports.Map[any]{
 			"node:assert":         nodehostScript("nodehost/assert.js"),
 			"node:child_process":  nodeChildBinding{},
@@ -57,6 +58,7 @@ func NodeScriptImports() []imports.Handler[any] {
 			"node:util":           nodehostScript("nodehost/util.js"),
 			"node:util/types":     nodehostScript("nodehost/types.js"),
 			"node:worker_threads": nodeWorkerThreadsBinding{},
+			"node:zlib":           nodeZlibBinding{},
 		},
 		imports.Func[any](func(spec string, next imports.Resolver[any]) (any, error) {
 			if spec == "common" || strings.HasSuffix(spec, "/common") || strings.HasSuffix(spec, "/common/index.js") {
