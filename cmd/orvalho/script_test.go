@@ -93,6 +93,74 @@ func TestWithPathPrefix(t *testing.T) {
 	}
 }
 
+func TestProcessEnvMapHome(t *testing.T) {
+	t.Setenv("HOME", "/home/someone")
+	env := processEnvMap()
+	if env["HOME"] != "/" {
+		t.Fatalf("HOME=%q want /", env["HOME"])
+	}
+}
+
+func TestHostTreeFSWriteAndEscape(t *testing.T) {
+	dir := t.TempDir()
+	h := newHostTreeFS(dir)
+	if err := h.WriteFile("a.txt", []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "a.txt"))
+	if err != nil || string(got) != "hi" {
+		t.Fatalf("write: %q %v", got, err)
+	}
+	if err := h.Mkdir(".config/astro", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(filepath.Join(dir, ".config", "astro"))
+	if err != nil || !st.IsDir() {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := h.WriteFile("../escape.txt", []byte("no"), 0o644); err == nil {
+		t.Fatal("want escape on write")
+	}
+	if err := h.Mkdir("../escape-dir", 0o755); err == nil {
+		t.Fatal("want escape on mkdir")
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "escape.txt")); err == nil {
+		t.Fatal("wrote outside root")
+	}
+	if err := h.Remove("a.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("remove: %v", err)
+	}
+}
+
+func TestRunScriptFileWriteFS(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.js")
+	src := `
+		var fs = require("fs");
+		var os = require("os");
+		if (os.homedir() === "/home/someone") throw new Error("host home");
+		fs.mkdirSync(os.homedir() + "/.config/astro");
+		fs.writeFileSync("out.txt", "ok");
+		if (fs.readFileSync("out.txt", "utf8") !== "ok") throw new Error("read");
+	`
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runScriptFile(t.Context(), dir, path, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "out.txt"))
+	if err != nil || string(got) != "ok" {
+		t.Fatalf("out: %q %v", got, err)
+	}
+	if st, err := os.Stat(filepath.Join(dir, ".config", "astro")); err != nil || !st.IsDir() {
+		t.Fatalf("guest home mkdir: %v", err)
+	}
+}
+
 func TestRunScriptFileSucceeds(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "main.js")

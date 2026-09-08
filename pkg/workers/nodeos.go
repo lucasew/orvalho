@@ -3,17 +3,16 @@ package workers
 import (
 	"encoding/binary"
 	"os"
-	"os/user"
 	"runtime"
-	"strconv"
 	"strings"
 
 	"github.com/dop251/goja"
 )
 
 // nodeOSBinding materializes guest require("os") / require("node:os").
-// platform/arch match process (wasi/wasm32 unless Options). Other facts
-// are host (Hostname, TempDir, UserHomeDir, NumCPU).
+// platform/arch match process (wasi/wasm32 unless Options). homedir/tmpdir
+// stay in the guest (HOME/TMPDIR or "/" and "/tmp"). Other facts are host
+// (Hostname, NumCPU).
 type nodeOSBinding struct{}
 
 var _ Binding = nodeOSBinding{}
@@ -93,13 +92,6 @@ func (n *nodeOS) jsHomedir(goja.FunctionCall) goja.Value {
 }
 
 func nodeHomedir() string {
-	home, err := os.UserHomeDir()
-	if err == nil && home != "" {
-		return home
-	}
-	if home = os.Getenv("HOME"); home != "" {
-		return home
-	}
 	return "/"
 }
 
@@ -111,10 +103,7 @@ func (n *nodeOS) jsTmpdir(goja.FunctionCall) goja.Value {
 	if !ok {
 		dir, ok = n.envString("TEMP")
 	}
-	if !ok {
-		dir = os.TempDir()
-	}
-	if dir == "" {
+	if !ok || dir == "" {
 		dir = "/tmp"
 	}
 	if len(dir) > 1 && strings.HasSuffix(dir, "/") {
@@ -236,28 +225,19 @@ func (n *nodeOS) jsAvailableParallelism(goja.FunctionCall) goja.Value {
 }
 
 func (n *nodeOS) jsUserInfo(goja.FunctionCall) goja.Value {
-	username := os.Getenv("USER")
-	uid, gid := -1, -1
-	shell := os.Getenv("SHELL")
+	username, _ := n.envString("USER")
+	if username == "" {
+		username, _ = n.envString("LOGNAME")
+	}
+	shell, _ := n.envString("SHELL")
 	home := nodeHomedir()
-	if u, err := user.Current(); err == nil && u != nil {
-		if u.Username != "" {
-			username = u.Username
-		}
-		if id, err := strconv.Atoi(u.Uid); err == nil {
-			uid = id
-		}
-		if id, err := strconv.Atoi(u.Gid); err == nil {
-			gid = id
-		}
-		if u.HomeDir != "" {
-			home = u.HomeDir
-		}
+	if h, ok := n.envString("HOME"); ok {
+		home = h
 	}
 	obj := n.iso.vm.NewObject()
 	mustSet(obj, "username", username)
-	mustSet(obj, "uid", uid)
-	mustSet(obj, "gid", gid)
+	mustSet(obj, "uid", -1)
+	mustSet(obj, "gid", -1)
 	mustSet(obj, "shell", shell)
 	mustSet(obj, "homedir", home)
 	return obj

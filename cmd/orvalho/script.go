@@ -115,6 +115,7 @@ func runScriptFile(ctx context.Context, dir, file string, extra []string) error 
 	}
 	root, rel := scriptTree(dir, file)
 	rel = evalFSRel(root, rel)
+	tree := newHostTreeFS(root)
 	argv := append([]string{"node", file}, extra...)
 	exe, err := os.Executable()
 	if err != nil {
@@ -122,7 +123,7 @@ func runScriptFile(ctx context.Context, dir, file string, extra []string) error 
 	}
 	iso := workers.New("", workers.Options{
 		Argv:       argv,
-		FS:         os.DirFS(root),
+		FS:         tree,
 		ProcessEnv: processEnvMap(),
 		Cwd:        dir,
 		PID:        os.Getpid(),
@@ -132,7 +133,7 @@ func runScriptFile(ctx context.Context, dir, file string, extra []string) error 
 		Lookup:     hostLookup,
 		Listen:     hostListen,
 		Imports: append(workers.NodeScriptImports(),
-			realpathScripts{root: root, inner: imports.NodeModules{FS: os.DirFS(root), From: rel}},
+			realpathScripts{root: root, inner: imports.NodeModules{FS: tree, From: rel}},
 		),
 		PrepareSource: prepareScriptSource,
 	})
@@ -289,6 +290,8 @@ func processEnvMap() map[string]string {
 			env[k] = v
 		}
 	}
+	// Guest paths stay inside the mounted tree (normalizeGuest strips /).
+	env["HOME"] = "/"
 	return env
 }
 
