@@ -39,6 +39,7 @@ func newNodeChild(iso *Isolate) *goja.Object {
 	mustSet(obj, "execSync", n.jsExecSync)
 	mustSet(obj, "execFileSync", n.jsExecFileSync)
 	mustSet(obj, "spawnSync", n.jsSpawnSync)
+	mustSet(obj, "default", obj)
 	return obj
 }
 

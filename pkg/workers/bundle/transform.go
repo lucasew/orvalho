@@ -104,7 +104,25 @@ func buildCJS(source, file, dir string) (string, error) {
 func finishCJS(src string) string {
 	src = rewriteES6UnicodeEscapes(src)
 	src = rewriteUnicodeProperties(src)
+	src = rewriteRegexpFlags(src)
 	return rewriteImportMeta(src)
+}
+
+// rewriteRegexpFlags drops flags goja rejects (hasIndices `d`, unicodeSets `v`).
+func rewriteRegexpFlags(src string) string {
+	for _, pair := range [][2]string{
+		{`, "dg")`, `, "g")`},
+		{`, "gd")`, `, "g")`},
+		{`, 'dg')`, `, 'g')`},
+		{`, 'gd')`, `, 'g')`},
+		{`, "d")`, `, "")`},
+		{`, 'd')`, `, '')`},
+		{`, "vg")`, `, "g")`},
+		{`, "gv")`, `, "g")`},
+	} {
+		src = strings.ReplaceAll(src, pair[0], pair[1])
+	}
+	return src
 }
 
 // rewriteImportMeta fills esbuild's empty import_meta stub from the wrap

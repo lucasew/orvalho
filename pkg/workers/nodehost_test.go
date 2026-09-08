@@ -32,6 +32,23 @@ func TestNodeHostTypesIdentity(t *testing.T) {
 	}
 }
 
+func TestNodeUtilPromisify(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var util = require("util");
+		if (typeof util.promisify !== "function") throw new Error("promisify");
+		var n = 0;
+		function orig(cb) { cb(null, 7); }
+		util.promisify(orig)().then(function (v) { n = v; });
+		setTimeout(function () {
+			if (n !== 7) throw new Error("val " + n);
+		}, 0);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeHostImportsDoNotNeedTree(t *testing.T) {
 	iso := New("", Options{
 		Imports: append(NodeScriptImports(), imports.NodeModules{}),

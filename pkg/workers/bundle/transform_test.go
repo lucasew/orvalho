@@ -10,6 +10,16 @@ import (
 	"github.com/lucasew/orvalho/pkg/workers/bundle"
 )
 
+func TestTransformCJSDropsRegexpDFlag(t *testing.T) {
+	out, err := bundle.TransformCJS("export const r = new RegExp('x', 'dg');\n", "mod.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, `"dg"`) || strings.Contains(out, `'dg'`) {
+		t.Fatalf("d flag survived: %s", out)
+	}
+}
+
 func TestTransformCJSOptionalCatch(t *testing.T) {
 	out, err := bundle.TransformCJS("try { x(); } catch { y(); }\nexport const n = 1;\n", "mod.mjs")
 	if err != nil {

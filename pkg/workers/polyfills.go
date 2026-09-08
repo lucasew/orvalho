@@ -12,6 +12,9 @@ import (
 // that are outside our WinterTC subset but required for real adapter output.
 func (iso *Isolate) installHostPolyfills() {
 	iso.bindConsole()
+	if g := iso.vm.Get("globalThis"); g != nil {
+		mustRuntimeSet(iso.vm, "global", g)
+	}
 
 	// atob / btoa / URL / streams / crypto / Intl — one script for guest globals.
 	_, _ = iso.vm.RunString(hostPolyfillScript)

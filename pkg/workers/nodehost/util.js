@@ -1189,10 +1189,46 @@ function formatWithOptions(inspectOptions) {
   return formatWithOptionsInternal(inspectOptions, Array.prototype.slice.call(arguments, 1));
 }
 
+var promisifyCustom = Symbol.for('nodejs.util.promisify.custom');
+
+function promisify(original) {
+  if (typeof original !== 'function') {
+    throw invalidArgType('original', 'Function', original);
+  }
+  if (original[promisifyCustom]) {
+    var custom = original[promisifyCustom];
+    if (typeof custom !== 'function') {
+      throw invalidArgType('util.promisify.custom', 'Function', custom);
+    }
+    return custom;
+  }
+  function fn() {
+    var args = [];
+    for (var i = 0; i < arguments.length; i++) args.push(arguments[i]);
+    var self = this;
+    return new Promise(function (resolve, reject) {
+      args.push(function (err, value) {
+        if (err) reject(err);
+        else resolve(value);
+      });
+      original.apply(self, args);
+    });
+  }
+  Object.setPrototypeOf(fn, Object.getPrototypeOf(original));
+  return fn;
+}
+promisify.custom = promisifyCustom;
+
+function stripVTControlCharacters(str) {
+  return String(str).replace(/\x1B\[[0-9;]*[A-Za-z]/g, '');
+}
+
 module.exports = {
   inherits: inherits,
   format: format,
   formatWithOptions: formatWithOptions,
   inspect: inspect,
+  promisify: promisify,
+  stripVTControlCharacters: stripVTControlCharacters,
   types: require("util/types"),
 };

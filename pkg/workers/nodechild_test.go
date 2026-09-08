@@ -3,7 +3,51 @@ package workers
 import (
 	"context"
 	"testing"
+
+	"github.com/lucasew/orvalho/pkg/workers/bundle"
 )
+
+func TestNodeChildPromisifyExecFile(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports(), PrepareSource: bundle.TransformCJS})
+	err := iso.ScriptMain(t.Context(), `
+		import childProcess, { exec, execFile, execSync } from "node:child_process";
+		import { promisify } from "node:util";
+		if (typeof execFile !== "function") throw new Error("named " + typeof execFile);
+		if (typeof childProcess.execFile !== "function") throw new Error("ns " + typeof childProcess.execFile);
+		var execFileAsync = promisify(childProcess.execFile);
+		if (typeof execFileAsync !== "function") throw new Error("async");
+	`, "t.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeChildPropNames(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var cp = require("child_process");
+		var names = Object.getOwnPropertyNames(cp);
+		if (names.indexOf("execFile") < 0) throw new Error("names " + names);
+		var d = Object.getOwnPropertyDescriptor(cp, "execFile");
+		if (!d || typeof d.value !== "function") throw new Error("desc " + d);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeChildESMExecFile(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports(), PrepareSource: bundle.TransformCJS})
+	err := iso.ScriptMain(t.Context(), `
+		import cp from "node:child_process";
+		if (typeof cp.execFile !== "function") throw new Error("default.execFile " + typeof cp.execFile + " keys " + Object.getOwnPropertyNames(cp));
+		import { execFile } from "node:child_process";
+		if (typeof execFile !== "function") throw new Error("named execFile");
+	`, "t.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestNodeChildIdentity(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
