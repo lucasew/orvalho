@@ -38,6 +38,20 @@ func TestNodeURLPathToFileURL(t *testing.T) {
 	`)
 }
 
+func TestNodeURLFileURLToPathAcceptsURLObject(t *testing.T) {
+	runNodeURL(t, `
+		var url = require("url");
+		var u = new URL("file:///tmp/orvalho-url");
+		var p = url.fileURLToPath(u);
+		if (p !== "/tmp/orvalho-url") throw new Error("obj " + p);
+		var again = url.pathToFileURL(p).toString();
+		if (again.indexOf("file://") !== 0) throw new Error("href " + again);
+		var bare = new URL("/tmp/orvalho-url");
+		var p2 = url.fileURLToPath(bare);
+		if (p2 !== "/tmp/orvalho-url") throw new Error("bare " + p2);
+	`)
+}
+
 func TestNodeURLFileURLToPathRoundTrip(t *testing.T) {
 	runNodeURL(t, `
 		var url = require("url");

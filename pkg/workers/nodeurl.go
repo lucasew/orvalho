@@ -385,6 +385,13 @@ function () {
       pathname = parsed.pathname;
     }
     if (protocol !== "file:") {
+      // new URL("/abs/path") is invalid in Node but our URL keeps
+      // protocol "". mlly then does fileURLToPath(url). Treat a
+      // leading-/ href or pathname as a POSIX path.
+      var pathish = pathname || href;
+      if (pathish && pathish.charAt(0) === "/") {
+        return pathish;
+      }
       var schemeErr = new TypeError("The URL must be of scheme file");
       schemeErr.code = "ERR_INVALID_URL_SCHEME";
       throw schemeErr;
