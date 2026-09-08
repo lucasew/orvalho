@@ -415,13 +415,32 @@ func TestNodeFSExistsEnvBinary(t *testing.T) {
 		FS:      nodeFSMap(),
 		Imports: NodeScriptImports(),
 		ProcessEnv: map[string]string{
-			"ESBUILD_BINARY_PATH": "/host/bin/esbuild",
+			"ESBUILD_BINARY_PATH": "/home/lucasew/.local/share/mise/installs/http-esbuild/0.28.1/bin/esbuild",
 		},
 	})
 	err := iso.ScriptMain(t.Context(), `
 		var fs = require("fs");
-		if (!fs.existsSync("/host/bin/esbuild")) throw new Error("env path");
+		var ESBUILD_BINARY_PATH = process.env.ESBUILD_BINARY_PATH || ESBUILD_BINARY_PATH;
+		var isValidBinaryPath = function (x) { return !!x && x !== "/usr/bin/esbuild"; };
+		if (!isValidBinaryPath(ESBUILD_BINARY_PATH)) throw new Error("invalid " + ESBUILD_BINARY_PATH);
+		if (!fs.existsSync(ESBUILD_BINARY_PATH)) throw new Error("env path");
 		if (fs.existsSync("/host/bin/other")) throw new Error("other");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeFSExistsEnvBinaryLiveProcessEnv(t *testing.T) {
+	iso := New("", Options{
+		FS:      nodeFSMap(),
+		Imports: NodeScriptImports(),
+	})
+	err := iso.ScriptMain(t.Context(), `
+		process.env.ESBUILD_BINARY_PATH = "/opt/esbuild";
+		var fs = require("fs");
+		if (!fs.existsSync("/opt/esbuild")) throw new Error("live env");
+		if (!fs.existsSync("/opt/foo/../esbuild")) throw new Error("cleaned");
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)

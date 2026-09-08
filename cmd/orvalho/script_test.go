@@ -101,6 +101,14 @@ func TestProcessEnvMapHome(t *testing.T) {
 	}
 }
 
+func TestProcessEnvMapKeepsEsbuildBinary(t *testing.T) {
+	t.Setenv("ESBUILD_BINARY_PATH", "/host/bin/esbuild")
+	env := processEnvMap()
+	if env["ESBUILD_BINARY_PATH"] != "/host/bin/esbuild" {
+		t.Fatalf("ESBUILD_BINARY_PATH=%q", env["ESBUILD_BINARY_PATH"])
+	}
+}
+
 func TestHostTreeFSWriteAndEscape(t *testing.T) {
 	dir := t.TempDir()
 	h := newHostTreeFS(dir)

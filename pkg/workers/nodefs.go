@@ -305,10 +305,8 @@ func (n *nodeFS) jsExistsSync(call goja.FunctionCall) goja.Value {
 }
 
 func (n *nodeFS) pathExists(v goja.Value) bool {
-	if v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
-		if n.envHostFile(v.String()) {
-			return true
-		}
+	if n.envHostFile(fsPathString(v)) {
+		return true
 	}
 	p, err := n.parsePath(v)
 	if err != nil {
@@ -320,11 +318,56 @@ func (n *nodeFS) pathExists(v goja.Value) bool {
 
 // envHostFile is true when path is the user-supplied ESBUILD_BINARY_PATH.
 // That file lives on the host; Spawn runs it. The guest tree does not contain it.
+// Compare ProcessEnv and the live process.env — JS may set the var after New,
+// and v.String() on a Buffer/URL is not the path bytes.
 func (n *nodeFS) envHostFile(raw string) bool {
-	if n == nil || n.iso == nil || n.iso.opts.ProcessEnv == nil || raw == "" {
+	if n == nil || n.iso == nil || raw == "" {
 		return false
 	}
-	return raw == n.iso.opts.ProcessEnv["ESBUILD_BINARY_PATH"]
+	want := path.Clean(strings.ReplaceAll(raw, "\\", "/"))
+	for _, cand := range n.envBinaryCands() {
+		if cand == "" {
+			continue
+		}
+		if want == path.Clean(strings.ReplaceAll(cand, "\\", "/")) {
+			return true
+		}
+	}
+	return false
+}
+
+func (n *nodeFS) envBinaryCands() []string {
+	var out []string
+	if n.iso.opts.ProcessEnv != nil {
+		out = append(out, n.iso.opts.ProcessEnv["ESBUILD_BINARY_PATH"])
+	}
+	if n.iso.vm == nil {
+		return out
+	}
+	p, ok := n.iso.vm.Get("process").(*goja.Object)
+	if !ok {
+		return out
+	}
+	env, ok := p.Get("env").(*goja.Object)
+	if !ok {
+		return out
+	}
+	v := env.Get("ESBUILD_BINARY_PATH")
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return out
+	}
+	return append(out, v.String())
+}
+
+func fsPathString(v goja.Value) string {
+	arg := inspectPathArg(v)
+	if arg.ok && !arg.fileURL {
+		return arg.raw
+	}
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return ""
+	}
+	return v.String()
 }
 
 func (n *nodeFS) jsAccessSync(call goja.FunctionCall) goja.Value {
@@ -1227,8 +1270,39 @@ func valueBytes(v goja.Value) []byte {
 		return []byte(x)
 	case []byte:
 		return append([]byte(nil), x...)
+	case goja.ArrayBuffer:
+		return append([]byte(nil), x.Bytes()...)
+	}
+	if o, ok := v.(*goja.Object); ok {
+		if b := typedArrayBytes(o); b != nil {
+			return b
+		}
 	}
 	return []byte(v.String())
+}
+
+func typedArrayBytes(o *goja.Object) []byte {
+	buf := o.Get("buffer")
+	if buf == nil || goja.IsUndefined(buf) || goja.IsNull(buf) {
+		return nil
+	}
+	ab, ok := buf.Export().(goja.ArrayBuffer)
+	if !ok {
+		return nil
+	}
+	raw := ab.Bytes()
+	off := 0
+	if v := o.Get("byteOffset"); v != nil && !goja.IsUndefined(v) {
+		off = int(v.ToInteger())
+	}
+	n := len(raw) - off
+	if v := o.Get("byteLength"); v != nil && !goja.IsUndefined(v) {
+		n = int(v.ToInteger())
+	}
+	if off < 0 || n < 0 || off+n > len(raw) {
+		return append([]byte(nil), raw...)
+	}
+	return append([]byte(nil), raw[off:off+n]...)
 }
 
 func (n *nodeFS) requireCB(cb goja.Callable) {
