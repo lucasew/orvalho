@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -127,6 +128,7 @@ func runScriptFile(ctx context.Context, dir, file string, extra []string) error 
 		PID:        os.Getpid(),
 		ExecPath:   exe,
 		Spawn:      hostSpawn,
+		Dial:       hostDial,
 		Imports: append(workers.NodeScriptImports(),
 			realpathScripts{root: root, inner: imports.NodeModules{FS: os.DirFS(root), From: rel}},
 		),
@@ -174,6 +176,15 @@ func (r realpathScripts) Resolve(spec string, next imports.Resolver[any]) (any, 
 
 func prepareScriptSource(src, file string) (string, error) {
 	return bundle.TransformCJS(src, file)
+}
+
+func hostDial(ctx context.Context, req workers.DialReq) (net.Conn, error) {
+	network := req.Network
+	if network == "" {
+		network = "tcp"
+	}
+	var d net.Dialer
+	return d.DialContext(ctx, network, req.Address)
 }
 
 func hostSpawn(ctx context.Context, req workers.SpawnReq) (workers.Spawned, error) {

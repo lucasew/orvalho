@@ -32,6 +32,7 @@ var (
 	ErrScriptThrow          = errors.New("script: guest throw")
 	ErrScriptExit           = errors.New("script: exit")
 	ErrSpawnDenied          = errors.New("workers: child_process spawn not injected")
+	ErrDialDenied           = errors.New("workers: net dial not injected")
 )
 
 // ScriptExitError is process.exit(code) from ScriptMain.

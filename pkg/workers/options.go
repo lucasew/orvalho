@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"io/fs"
+	"net"
 	"net/http"
 	"time"
 
@@ -31,6 +32,16 @@ type Spawned interface {
 
 // SpawnFunc starts a child. Nil Options.Spawn means spawn is denied.
 type SpawnFunc func(ctx context.Context, req SpawnReq) (Spawned, error)
+
+// DialReq is one guest net.connect.
+type DialReq struct {
+	Network string
+	Address string
+}
+
+// DialFunc opens a connection. Nil Options.Dial means connect is denied.
+// The isolate never calls net.Dial; the host supplies the conn.
+type DialFunc func(ctx context.Context, req DialReq) (net.Conn, error)
 
 // Default resource caps. Documented for hosts and enforced in the isolate.
 const (
@@ -122,6 +133,10 @@ type Options struct {
 	// Spawn is child_process.spawn / exec / fork. Nil means the module
 	// exists and spawn fails (not injected).
 	Spawn SpawnFunc
+
+	// Dial is net.connect / createConnection / Socket.connect.
+	// Nil means the module exists and connect fails (not injected).
+	Dial DialFunc
 
 	// PrepareSource rewrites guest source after shebang strip and before
 	// the CommonJS wrap (ESM downlevel). Nil means no extra rewrite.
