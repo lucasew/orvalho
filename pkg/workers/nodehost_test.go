@@ -74,6 +74,27 @@ func TestNodeStringDecoder(t *testing.T) {
 	}
 }
 
+func TestNodePunycode(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var p = require("punycode");
+		if (require("node:punycode") !== p) throw new Error("identity");
+		if (typeof p.toASCII !== "function") throw new Error("toASCII");
+		if (typeof p.toUnicode !== "function") throw new Error("toUnicode");
+		if (p.toASCII("localhost") !== "localhost") throw new Error("ascii host");
+		if (p.toASCII("example.com") !== "example.com") throw new Error("ascii domain");
+		if (p.toUnicode("localhost") !== "localhost") throw new Error("unicode host");
+		if (p.toUnicode("example.com") !== "example.com") throw new Error("unicode domain");
+		if (p.ucs2) {
+			var pts = p.ucs2.decode("ab");
+			if (!pts || pts.length !== 2 || pts[0] !== 97 || pts[1] !== 98) throw new Error("ucs2");
+		}
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeDomain(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `
