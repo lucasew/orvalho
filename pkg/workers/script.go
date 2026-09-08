@@ -113,14 +113,14 @@ func (iso *Isolate) waitForWorkLocked(ctx context.Context, wait time.Duration) e
 }
 
 func (iso *Isolate) finishScript(rejected error) error {
+	if rejected == nil {
+		return nil
+	}
 	if iso.scriptCause != nil {
 		if ex := scriptExitOf(rejected); ex != nil && ex.Code == 0 {
 			return nil
 		}
 		return iso.scriptCause
-	}
-	if rejected == nil {
-		return nil
 	}
 	if ex := scriptExitOf(rejected); ex != nil {
 		if ex.Code == 0 {

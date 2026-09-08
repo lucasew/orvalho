@@ -174,6 +174,15 @@ func TestScriptMainExitAfterRequireMiss(t *testing.T) {
 	}
 }
 
+func TestScriptMainCaughtRequireMissContinues(t *testing.T) {
+	iso := New("", Options{})
+	if err := iso.ScriptMain(t.Context(), `
+		try { require("no-such-module"); } catch (e) {}
+	`, "main.js"); err != nil {
+		t.Fatalf("caught miss must not fail ScriptMain: %v", err)
+	}
+}
+
 func TestScriptMainTimerThrow(t *testing.T) {
 	iso := New("", Options{})
 	err := iso.ScriptMain(t.Context(), `
