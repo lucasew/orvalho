@@ -410,6 +410,24 @@ func TestNodeFSAbsAfterChdir(t *testing.T) {
 	}
 }
 
+func TestNodeFSExistsEnvBinary(t *testing.T) {
+	iso := New("", Options{
+		FS:      nodeFSMap(),
+		Imports: NodeScriptImports(),
+		ProcessEnv: map[string]string{
+			"ESBUILD_BINARY_PATH": "/host/bin/esbuild",
+		},
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var fs = require("fs");
+		if (!fs.existsSync("/host/bin/esbuild")) throw new Error("env path");
+		if (fs.existsSync("/host/bin/other")) throw new Error("other");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeFSPromisesIdentity(t *testing.T) {
 	runNodeFS(t, nodeFSMap(), `
 		var fs = require("fs");

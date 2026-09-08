@@ -305,12 +305,26 @@ func (n *nodeFS) jsExistsSync(call goja.FunctionCall) goja.Value {
 }
 
 func (n *nodeFS) pathExists(v goja.Value) bool {
+	if v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
+		if n.envHostFile(v.String()) {
+			return true
+		}
+	}
 	p, err := n.parsePath(v)
 	if err != nil {
 		return false
 	}
 	_, err = n.statPath(p)
 	return err == nil
+}
+
+// envHostFile is true when path is the user-supplied ESBUILD_BINARY_PATH.
+// That file lives on the host; Spawn runs it. The guest tree does not contain it.
+func (n *nodeFS) envHostFile(raw string) bool {
+	if n == nil || n.iso == nil || n.iso.opts.ProcessEnv == nil || raw == "" {
+		return false
+	}
+	return raw == n.iso.opts.ProcessEnv["ESBUILD_BINARY_PATH"]
 }
 
 func (n *nodeFS) jsAccessSync(call goja.FunctionCall) goja.Value {
