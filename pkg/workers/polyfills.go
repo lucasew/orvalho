@@ -308,6 +308,15 @@ const hostPolyfillScript = `
         url = orvalhoResolveURL(String(base), url);
       }
       var parsed = orvalhoParseAbsURL(url);
+      if (!parsed && url.charAt(0) === "/") {
+        // new URL("/abs") is invalid in Node; mlly still constructs it.
+        var qAt = url.indexOf("?");
+        var hAt = url.indexOf("#");
+        var pathEnd = url.length;
+        if (qAt >= 0) pathEnd = qAt;
+        if (hAt >= 0 && hAt < pathEnd) pathEnd = hAt;
+        parsed = { protocol: "", host: "", pathname: url.slice(0, pathEnd) || "/", search: qAt >= 0 ? url.slice(qAt, hAt >= 0 ? hAt : url.length) : "", hash: hAt >= 0 ? url.slice(hAt) : "", opaque: false, pathish: true };
+      }
       if (!parsed) {
         var err = new TypeError("Invalid URL");
         err.code = "ERR_INVALID_URL";
@@ -320,10 +329,12 @@ const hostPolyfillScript = `
       this.pathname = parsed.pathname;
       this.search = parsed.search;
       this.hash = parsed.hash;
-      this.origin = parsed.protocol === "file:" ? "null" : (parsed.opaque ? "null" : parsed.protocol + "//" + parsed.host);
-      this.href = parsed.opaque
-        ? parsed.protocol + parsed.pathname + parsed.search + parsed.hash
-        : parsed.protocol + "//" + parsed.host + parsed.pathname + parsed.search + parsed.hash;
+      this.origin = parsed.protocol === "file:" || parsed.opaque || parsed.pathish ? "null" : parsed.protocol + "//" + parsed.host;
+      this.href = parsed.pathish
+        ? url
+        : parsed.opaque
+          ? parsed.protocol + parsed.pathname + parsed.search + parsed.hash
+          : parsed.protocol + "//" + parsed.host + parsed.pathname + parsed.search + parsed.hash;
       this.searchParams = new OrvalhoURLSearchParams(this.search);
     };
     URLImpl.canParse = function (url, base) {

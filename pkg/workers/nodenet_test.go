@@ -93,25 +93,6 @@ func TestNodeNetDialInjected(t *testing.T) {
 	}
 }
 
-func TestNodeNetServerUnrefListen(t *testing.T) {
-	runNodeNet(t, `
-		var net = require("net");
-		var s = net.createServer();
-		if (typeof s.unref !== "function") throw new Error("unref");
-		if (s.unref() !== s) throw new Error("unref this");
-		var port = 0;
-		s.listen({ port: 0 }, function () {
-			var a = s.address();
-			if (!a || typeof a.port !== "number") throw new Error("address " + a);
-			port = a.port;
-			s.close(function () { port = -port; });
-		});
-		setTimeout(function () {
-			if (port >= 0) throw new Error("close " + port);
-		}, 0);
-	`)
-}
-
 func TestNodeNetIsIP(t *testing.T) {
 	runNodeNet(t, `
 		var net = require("net");

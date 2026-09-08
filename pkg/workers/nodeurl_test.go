@@ -1,6 +1,10 @@
 package workers
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/lucasew/orvalho/pkg/workers/bundle"
+)
 
 func runNodeURL(t *testing.T, src string) {
 	t.Helper()
@@ -46,6 +50,9 @@ func TestNodeURLFileURLToPathAcceptsURLObject(t *testing.T) {
 		if (p !== "/tmp/orvalho-url") throw new Error("obj " + p);
 		var again = url.pathToFileURL(p).toString();
 		if (again.indexOf("file://") !== 0) throw new Error("href " + again);
+		var bare = new URL("/tmp/orvalho-url");
+		var p2 = url.fileURLToPath(bare);
+		if (p2 !== "/tmp/orvalho-url") throw new Error("bare " + p2);
 		try { new URL("unenv/node/inspector/promises"); throw new Error("relative URL"); }
 		catch (e) {
 			if (e.message === "relative URL") throw e;
@@ -65,30 +72,47 @@ func TestNodeURLFileURLToPathRoundTrip(t *testing.T) {
 
 func TestURLBareSpecifierThrowsLikeNode(t *testing.T) {
 	runNodeURL(t, `
-		function dump(label, u) {
-			throw new Error(label
-				+ " proto=" + JSON.stringify(u.protocol)
-				+ " href=" + JSON.stringify(u.href)
-				+ " pathname=" + JSON.stringify(u.pathname)
-				+ " host=" + JSON.stringify(u.host));
-		}
 		var file = new URL("file:///node_modules/@cloudflare/vite-plugin/dist/index.mjs");
-		if (file.protocol !== "file:") dump("file url", file);
+		if (file.protocol !== "file:") throw new Error("file proto " + file.protocol + " href=" + file.href);
+		if (require("url").fileURLToPath(file) !== "/node_modules/@cloudflare/vite-plugin/dist/index.mjs") {
+			throw new Error("file path " + require("url").fileURLToPath(file));
+		}
 		var cwd = require("url").pathToFileURL("/tmp/orvalho-url");
-		if (cwd.protocol !== "file:" || !cwd.href) dump("pathToFileURL", cwd);
-		var back = require("url").fileURLToPath(cwd);
-		if (back !== "/tmp/orvalho-url") throw new Error("round " + back);
+		if (cwd.protocol !== "file:" || String(cwd.href).indexOf("file://") !== 0) {
+			throw new Error("pathToFileURL " + cwd.protocol + " " + cwd.href);
+		}
 		try {
-			var bare = new URL("unenv/runtime/node/crypto");
-			dump("bare specifier should throw", bare);
+			new URL("unenv/runtime/node/crypto");
+			throw new Error("bare specifier should throw");
 		} catch (e) {
-			if (String(e).indexOf("Invalid URL") < 0 && String(e).indexOf("invalid") < 0) {
-				throw new Error("bare err " + e);
-			}
+			if (e.message === "bare specifier should throw") throw e;
+			if (e.code !== "ERR_INVALID_URL") throw new Error("bare code " + e.code + " " + e);
 		}
 		var nodeu = new URL("node:fs");
-		if (nodeu.protocol !== "node:") dump("node:fs", nodeu);
+		if (nodeu.protocol !== "node:") throw new Error("node proto " + nodeu.protocol + " href=" + nodeu.href);
+		if (nodeu.href !== "node:fs") throw new Error("node href " + nodeu.href);
 	`)
+}
+
+func TestGuestImportMetaURLIsFile(t *testing.T) {
+	iso := New("", Options{
+		Imports:       NodeScriptImports(),
+		PrepareSource: bundle.TransformCJS,
+	})
+	err := iso.ScriptMain(t.Context(), `
+		import { fileURLToPath, pathToFileURL } from "node:url";
+		var href = import.meta.url;
+		if (typeof href !== "string" || href.indexOf("file://") !== 0) throw new Error("meta " + href);
+		var u = new URL(href);
+		if (u.protocol !== "file:") throw new Error("protocol " + JSON.stringify(u.protocol) + " href=" + u.href);
+		var p = fileURLToPath(u);
+		if (!p || p.charAt(0) !== "/") throw new Error("path " + p);
+		if (fileURLToPath(pathToFileURL(p)) !== p) throw new Error("round " + p);
+		if (fileURLToPath(pathToFileURL("/abs/foo")) !== "/abs/foo") throw new Error("abs");
+	`, "pkg/dist/plugin.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestNodeURLFormatInvalid(t *testing.T) {
