@@ -56,6 +56,9 @@ func CompileCJS(source, file string) (string, error) {
 
 // TransformCJS downlevels one file to CommonJS ES2015 via the esbuild Go API.
 func TransformCJS(source, file string) (string, error) {
+	if !needsCJSTransform(source, file) {
+		return rewritePlainCJS(source), nil
+	}
 	source = stripImportCallOptions(source)
 	source = awaitImportToRequire.ReplaceAllString(source, "require(")
 	source = awaitBareCall.ReplaceAllString(source, "$1")
@@ -372,6 +375,113 @@ func resolveDir(file string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// needsCJSTransform is true when esbuild can change the file (ESM
+// syntax, or a loader that is not already JS).
+func needsCJSTransform(src, file string) bool {
+	switch strings.ToLower(filepath.Ext(file)) {
+	case ".ts", ".mts", ".cts", ".json", ".mjs":
+		return true
+	}
+	return hasESMSyntax(src)
+}
+
+// rewritePlainCJS applies the goja-only regex patches that do not
+// need esbuild. Tokens that are absent leave src unchanged.
+func rewritePlainCJS(src string) string {
+	if strings.Contains(src, "await") && awaitImportToRequire.MatchString(src) {
+		src = awaitImportToRequire.ReplaceAllString(src, "require(")
+	}
+	if strings.Contains(src, "RegExp") && regexpFlagLiteral.MatchString(src) {
+		src = rewriteRegexpFlags(src)
+	}
+	if strings.Contains(src, ".apply(") && strings.Contains(src, "arguments") {
+		src = rewriteArgumentsCapture(src)
+	}
+	if strings.Contains(src, esmLexerWait) {
+		src = rewriteESMLexer(src)
+	}
+	if strings.Contains(src, `\u{`) {
+		src = rewriteES6UnicodeEscapes(src)
+	}
+	if strings.Contains(src, `\p{`) || strings.Contains(src, `\P{`) {
+		src = rewriteUnicodeProperties(src)
+	}
+	if strings.Contains(src, "cachedUint8ArrayMemory0") || strings.Contains(src, "cachedDataViewMemory0") {
+		src = rewriteWasmMemoryCache(src)
+	}
+	return src
+}
+
+func hasESMSyntax(src string) bool {
+	for i := 0; i < len(src); {
+		c := src[i]
+		if c == '/' && i+1 < len(src) {
+			switch src[i+1] {
+			case '/':
+				if j := strings.IndexByte(src[i+2:], '\n'); j >= 0 {
+					i += 2 + j + 1
+				} else {
+					return false
+				}
+				continue
+			case '*':
+				if j := strings.Index(src[i+2:], "*/"); j >= 0 {
+					i += 2 + j + 2
+				} else {
+					return false
+				}
+				continue
+			}
+		}
+		if c == '"' || c == '\'' {
+			i = skipQuoted(src, i)
+			continue
+		}
+		if c == '`' {
+			i = scanTemplateLiteral(src, i)
+			continue
+		}
+		if isIdentStart(c) {
+			start := i
+			i++
+			for i < len(src) && isIdentCont(src[i]) {
+				i++
+			}
+			w := src[start:i]
+			if w == "import" || w == "export" {
+				return true
+			}
+			continue
+		}
+		i++
+	}
+	return false
+}
+
+func skipQuoted(src string, i int) int {
+	q := src[i]
+	i++
+	for i < len(src) {
+		if src[i] == '\\' && i+1 < len(src) {
+			i += 2
+			continue
+		}
+		if src[i] == q {
+			return i + 1
+		}
+		i++
+	}
+	return len(src)
+}
+
+func isIdentStart(c byte) bool {
+	return c == '_' || c == '$' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+}
+
+func isIdentCont(c byte) bool {
+	return isIdentStart(c) || (c >= '0' && c <= '9')
 }
 
 func loaderFor(file string) api.Loader {

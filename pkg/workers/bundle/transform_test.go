@@ -10,6 +10,45 @@ import (
 	"github.com/lucasew/orvalho/pkg/workers/bundle"
 )
 
+func TestTransformCJSSkipsPlainCJS(t *testing.T) {
+	src := "module.exports = { n: 1 };\n"
+	out, err := bundle.TransformCJS(src, "plain.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != src {
+		t.Fatalf("plain CJS changed:\ngot  %q\nwant %q", out, src)
+	}
+}
+
+func TestTransformCJSStillTransformsExport(t *testing.T) {
+	src := "export const n = 1;\n"
+	out, err := bundle.TransformCJS(src, "mod.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out == src {
+		t.Fatal("export file was not transformed")
+	}
+	if strings.Contains(out, "export const") || strings.Contains(out, "export {") {
+		t.Fatalf("export survived:\n%s", out)
+	}
+	if !strings.Contains(out, "exports") {
+		t.Fatalf("expected CJS exports:\n%s", out)
+	}
+}
+
+func TestTransformCJSSkipsImportInString(t *testing.T) {
+	src := "module.exports = { msg: \"failed to import\" };\n"
+	out, err := bundle.TransformCJS(src, "plain.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != src {
+		t.Fatalf("CJS with import-in-string changed:\ngot  %q\nwant %q", out, src)
+	}
+}
+
 func TestTransformCJSRewritesCopyProps(t *testing.T) {
 	out, err := bundle.TransformCJS("import { execFile } from \"node:child_process\";\nexport const f = execFile;\n", "mod.mjs")
 	if err != nil {
