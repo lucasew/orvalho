@@ -48,6 +48,21 @@ func TestNodeAsyncHooksALS(t *testing.T) {
 	}
 }
 
+func TestNodeUtilStyleText(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var util = require("util");
+		if (typeof util.styleText !== "function") throw new Error("styleText");
+		var s = util.styleText("red", "x");
+		if (s.indexOf("x") < 0) throw new Error("text");
+		var t = util.styleText(["bold", "dim"], "y");
+		if (t.indexOf("y") < 0) throw new Error("multi");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeUtilTextEncoder(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `
