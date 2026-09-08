@@ -34,6 +34,23 @@ func TestWebAssemblyAdd(t *testing.T) {
 	}
 }
 
+func TestWebAssemblyModuleConstructor(t *testing.T) {
+	raw, err := hex.DecodeString(addWasmHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iso := New("", Options{})
+	err = iso.ScriptMain(t.Context(), `
+		var bytes = new Uint8Array([`+bytesToJS(raw)+`]);
+		var mod = new WebAssembly.Module(bytes);
+		var inst = new WebAssembly.Instance(mod);
+		if (inst.exports.add(1, 2) !== 3) throw new Error("ctor add");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWebAssemblyCompileThenInstantiate(t *testing.T) {
 	raw, err := hex.DecodeString(addWasmHex)
 	if err != nil {
