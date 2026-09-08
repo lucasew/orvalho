@@ -15,10 +15,12 @@ var nodehostFS embed.FS
 func NodeScriptImports() []imports.Handler[any] {
 	return []imports.Handler[any]{
 		imports.Alias[any]{From: "assert", To: "node:assert"},
+		imports.Alias[any]{From: "buffer", To: "node:buffer"},
 		imports.Alias[any]{From: "child_process", To: "node:child_process"},
 		imports.Alias[any]{From: "crypto", To: "node:crypto"},
 		imports.Alias[any]{From: "dns", To: "node:dns"},
 		imports.Alias[any]{From: "dns/promises", To: "node:dns/promises"},
+		imports.Alias[any]{From: "events", To: "node:events"},
 		imports.Alias[any]{From: "fs", To: "node:fs"},
 		imports.Alias[any]{From: "fs/promises", To: "node:fs/promises"},
 		imports.Alias[any]{From: "module", To: "node:module"},
@@ -40,10 +42,12 @@ func NodeScriptImports() []imports.Handler[any] {
 		imports.Alias[any]{From: "zlib", To: "node:zlib"},
 		imports.Map[any]{
 			"node:assert":         nodehostScript("nodehost/assert.js"),
+			"node:buffer":         nodehostScript("nodehost/buffer.js"),
 			"node:child_process":  nodeChildBinding{},
 			"node:crypto":         nodeCryptoBinding{},
 			"node:dns":            nodeDNSBinding{},
 			"node:dns/promises":   nodeDNSPromisesBinding{},
+			"node:events":         nodehostScript("nodehost/events.js"),
 			"node:fs":             nodeFSBinding{},
 			"node:fs/promises":    nodeFSPromisesBinding{},
 			"node:module":         nodeModuleBinding{},

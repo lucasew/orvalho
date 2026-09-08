@@ -28,6 +28,7 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 
 	iso.scriptCause = nil
 	iso.installProcess()
+	iso.installBuffer()
 
 	var rejected error
 	iso.vm.SetPromiseRejectionTracker(func(p *goja.Promise, op goja.PromiseRejectionOperation) {
@@ -165,6 +166,20 @@ func errorOf(v any) error {
 		return err
 	}
 	return nil
+}
+
+func (iso *Isolate) installBuffer() {
+	v, err := iso.loadModule("node:buffer")
+	if err != nil {
+		return
+	}
+	o, ok := v.(*goja.Object)
+	if !ok {
+		return
+	}
+	if b := o.Get("Buffer"); b != nil && !goja.IsUndefined(b) {
+		mustRuntimeSet(iso.vm, "Buffer", b)
+	}
 }
 
 func (iso *Isolate) installProcess() {
