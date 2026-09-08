@@ -101,10 +101,58 @@ func (n NodeModules) packageDir(name string) (string, bool) {
 			break
 		}
 	}
+	if d, ok := n.orvalhoPackageDir(name); ok {
+		return d, true
+	}
 	if n.isDir(name) {
 		return name, true
 	}
 	return "", false
+}
+
+// orvalhoPackageDir finds name in node_modules/.orvalho/<name>@<ver>/…
+// when no hoisted or slot symlink is visible from From.
+func (n NodeModules) orvalhoPackageDir(name string) (string, bool) {
+	start := "."
+	if n.From != "" {
+		start = path.Dir(n.From)
+	}
+	for dir := start; ; dir = path.Dir(dir) {
+		if d, ok := n.orvalhoSlot(path.Join(dir, "node_modules", ".orvalho"), name); ok {
+			return d, true
+		}
+		if dir == "." || dir == "/" {
+			break
+		}
+	}
+	return "", false
+}
+
+func (n NodeModules) orvalhoSlot(store, name string) (string, bool) {
+	parent, prefix := store, name+"@"
+	if i := strings.IndexByte(name, '/'); i >= 0 && strings.HasPrefix(name, "@") {
+		parent = path.Join(store, name[:i])
+		prefix = name[i+1:] + "@"
+	}
+	ents, err := fs.ReadDir(n.FS, parent)
+	if err != nil {
+		return "", false
+	}
+	var best, bestVer string
+	for _, e := range ents {
+		en := e.Name()
+		if !strings.HasPrefix(en, prefix) {
+			continue
+		}
+		cand := path.Join(parent, en, "node_modules", name)
+		if !n.isDir(cand) {
+			continue
+		}
+		if best == "" || en > bestVer {
+			best, bestVer = cand, en
+		}
+	}
+	return best, best != ""
 }
 
 func (n NodeModules) packageFile(pkgDir, sub string) (string, bool) {

@@ -148,6 +148,41 @@ func TestNodeModulesClimbFromNested(t *testing.T) {
 	}
 }
 
+func TestNodeModulesOrvalhoStoreFallback(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"app.js": `require("prismjs/components.js")`,
+		"node_modules/.orvalho/prismjs@1.30.0/node_modules/prismjs/package.json":   `{}`,
+		"node_modules/.orvalho/prismjs@1.30.0/node_modules/prismjs/components.js": `exports.n=1`,
+	})
+	got, ok := (NodeModules{FS: fsys, From: "app.js"}).Lookup("prismjs/components.js")
+	if !ok {
+		t.Fatal("miss")
+	}
+	want := "node_modules/.orvalho/prismjs@1.30.0/node_modules/prismjs/components.js"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestNodeModulesOrvalhoStoreScoped(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"node_modules/.orvalho/@astrojs/prism@4.0.2/node_modules/@astrojs/prism/package.json": `{"main":"index.js"}`,
+		"node_modules/.orvalho/@astrojs/prism@4.0.2/node_modules/@astrojs/prism/index.js":     `exports.n=1`,
+	})
+	lookupOK(t, fsys, "@astrojs/prism", "node_modules/.orvalho/@astrojs/prism@4.0.2/node_modules/@astrojs/prism/index.js")
+}
+
+func TestNodeModulesOrvalhoStorePrefersHoisted(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"node_modules/prismjs/index.js": `exports.n=1`,
+		"node_modules/.orvalho/prismjs@9.9.9/node_modules/prismjs/index.js": `exports.n=2`,
+	})
+	lookupOK(t, fsys, "prismjs", "node_modules/prismjs/index.js")
+}
+
 func TestNodeModulesHashImportDefault(t *testing.T) {
 	t.Parallel()
 	fsys := tree(map[string]string{
