@@ -89,6 +89,14 @@ func TestNodeModulesExportsArrayFallback(t *testing.T) {
 	}), "pkg", "pkg/cjs.js")
 }
 
+func TestNodeModulesExportsImportOnly(t *testing.T) {
+	t.Parallel()
+	lookupOK(t, tree(map[string]string{
+		"ultrahtml/package.json":  `{"exports":{".":{"types":"./dist/index.d.ts","import":"./dist/index.js"}}}`,
+		"ultrahtml/dist/index.js": `export default 1`,
+	}), "ultrahtml", "ultrahtml/dist/index.js")
+}
+
 func TestNodeModulesExportsStarSubpath(t *testing.T) {
 	t.Parallel()
 	lookupOK(t, tree(map[string]string{

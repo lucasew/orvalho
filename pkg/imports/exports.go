@@ -6,6 +6,7 @@ import (
 )
 
 var exportConditions = []string{"require", "node", "default"}
+var importConditions = []string{"import", "node", "default"}
 
 func resolveExports(packageJSON []byte, sub string) (string, bool) {
 	var meta struct {
@@ -41,6 +42,14 @@ func exportMiss(packageJSON []byte, sub string) bool {
 }
 
 func matchExport(v any, key string) (string, bool) {
+	if t, ok := matchExportConds(v, key, exportConditions); ok {
+		return t, true
+	}
+	// Guest import is rewritten to require; ESM-only packages only have import.
+	return matchExportConds(v, key, importConditions)
+}
+
+func matchExportConds(v any, key string, conds []string) (string, bool) {
 	switch x := v.(type) {
 	case string:
 		if key == "." {
@@ -52,18 +61,18 @@ func matchExport(v any, key string) (string, bool) {
 			if key != "." {
 				return "", false
 			}
-			return pickCondition(x)
+			return pickConds(x, conds)
 		}
 		if raw, ok := x[key]; ok {
-			return pickTarget(raw)
+			return pickTargetConds(raw, conds)
 		}
 		if key == "." {
 			if raw, ok := x["."]; ok {
-				return pickTarget(raw)
+				return pickTargetConds(raw, conds)
 			}
-			return pickCondition(x)
+			return pickConds(x, conds)
 		}
-		return matchImportPattern(x, key)
+		return matchStarPattern(x, key, conds)
 	default:
 		return "", false
 	}
@@ -79,14 +88,18 @@ func isConditionMap(m map[string]any) bool {
 }
 
 func pickTarget(v any) (string, bool) {
+	return pickTargetConds(v, exportConditions)
+}
+
+func pickTargetConds(v any, conds []string) (string, bool) {
 	switch x := v.(type) {
 	case string:
 		return x, true
 	case map[string]any:
-		return pickCondition(x)
+		return pickConds(x, conds)
 	case []any:
 		for _, item := range x {
-			if s, ok := pickTarget(item); ok {
+			if s, ok := pickTargetConds(item, conds); ok {
 				return s, true
 			}
 		}
@@ -96,13 +109,13 @@ func pickTarget(v any) (string, bool) {
 	}
 }
 
-func pickCondition(m map[string]any) (string, bool) {
-	for _, c := range exportConditions {
+func pickConds(m map[string]any, conds []string) (string, bool) {
+	for _, c := range conds {
 		raw, ok := m[c]
 		if !ok {
 			continue
 		}
-		if s, ok := pickTarget(raw); ok {
+		if s, ok := pickTargetConds(raw, conds); ok {
 			return s, true
 		}
 	}
@@ -129,10 +142,10 @@ func resolveImports(packageJSON []byte, spec string) (string, bool) {
 	if raw, ok := m[spec]; ok {
 		return pickTarget(raw)
 	}
-	return matchImportPattern(m, spec)
+	return matchStarPattern(m, spec, exportConditions)
 }
 
-func matchImportPattern(m map[string]any, spec string) (string, bool) {
+func matchStarPattern(m map[string]any, spec string, conds []string) (string, bool) {
 	bestKey := ""
 	bestMid := ""
 	var bestRaw any
@@ -158,7 +171,7 @@ func matchImportPattern(m map[string]any, spec string) (string, bool) {
 	if bestKey == "" {
 		return "", false
 	}
-	target, ok := pickTarget(bestRaw)
+	target, ok := pickTargetConds(bestRaw, conds)
 	if !ok {
 		return "", false
 	}
