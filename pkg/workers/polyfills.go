@@ -398,6 +398,12 @@ const hostPolyfillScript = `
     };
     globalThis.FormData = OrvalhoFormData;
   }
+  if (typeof globalThis.FinalizationRegistry !== "function") {
+    function OrvalhoFinalizationRegistry() {}
+    OrvalhoFinalizationRegistry.prototype.register = function () {};
+    OrvalhoFinalizationRegistry.prototype.unregister = function () {};
+    globalThis.FinalizationRegistry = OrvalhoFinalizationRegistry;
+  }
   if (typeof globalThis.AbortSignal !== "function") {
     function OrvalhoAbortSignal() { this.aborted = false; this.reason = undefined; }
     OrvalhoAbortSignal.prototype.addEventListener = function () {};
@@ -429,6 +435,53 @@ const hostPolyfillScript = `
     OrvalhoMessagePort.prototype.addEventListener = function () {};
     OrvalhoMessagePort.prototype.removeEventListener = function () {};
     globalThis.MessagePort = OrvalhoMessagePort;
+  }
+  if (typeof globalThis.FinalizationRegistry !== "function") {
+    function OrvalhoFinalizationRegistry() {}
+    OrvalhoFinalizationRegistry.prototype.register = function () {};
+    OrvalhoFinalizationRegistry.prototype.unregister = function () { return false; };
+    globalThis.FinalizationRegistry = OrvalhoFinalizationRegistry;
+  }
+  if (typeof globalThis.WeakRef !== "function") {
+    function OrvalhoWeakRef(v) { this._v = v; }
+    OrvalhoWeakRef.prototype.deref = function () { return this._v; };
+    globalThis.WeakRef = OrvalhoWeakRef;
+  }
+  if (typeof globalThis.DOMException !== "function") {
+    function OrvalhoDOMException(message, name) {
+      this.message = message == null ? "" : String(message);
+      this.name = name == null ? "Error" : String(name);
+    }
+    OrvalhoDOMException.prototype = Object.create(Error.prototype);
+    OrvalhoDOMException.prototype.constructor = OrvalhoDOMException;
+    globalThis.DOMException = OrvalhoDOMException;
+  }
+  if (typeof globalThis.Event !== "function") {
+    function OrvalhoEvent(type, init) {
+      this.type = String(type);
+      this.bubbles = !!(init && init.bubbles);
+      this.cancelable = !!(init && init.cancelable);
+    }
+    globalThis.Event = OrvalhoEvent;
+  }
+  if (typeof globalThis.EventTarget !== "function") {
+    function OrvalhoEventTarget() { this._ls = {}; }
+    OrvalhoEventTarget.prototype.addEventListener = function (type, fn) {
+      type = String(type);
+      (this._ls[type] || (this._ls[type] = [])).push(fn);
+    };
+    OrvalhoEventTarget.prototype.removeEventListener = function (type, fn) {
+      type = String(type);
+      var a = this._ls[type];
+      if (!a) return;
+      this._ls[type] = a.filter(function (x) { return x !== fn; });
+    };
+    OrvalhoEventTarget.prototype.dispatchEvent = function (ev) {
+      var a = this._ls[ev && ev.type];
+      if (a) for (var i = 0; i < a.length; i++) try { a[i](ev); } catch (e) {}
+      return true;
+    };
+    globalThis.EventTarget = OrvalhoEventTarget;
   }
   if (typeof globalThis.queueMicrotask !== "function") {
     globalThis.queueMicrotask = function (fn) { Promise.resolve().then(fn); };
