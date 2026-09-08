@@ -20,6 +20,7 @@ var (
 	unicodePropEscape    = regexp.MustCompile(`\\([pP])\{([^}]+)\}`)
 	emptyImportMeta      = regexp.MustCompile(`\b(import_meta\d*)\s*=\s*\{\s*\}`)
 	awaitImportToRequire = regexp.MustCompile(`\bawait\s+import\s*\(`)
+	tlaAwaitImport       = regexp.MustCompile(`(?m)^(\s*(?:export\s+)?(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*)await\s+import\s*\(`)
 	awaitBareCall        = regexp.MustCompile(`(?m)^await ([A-Za-z_$][\w$]*\(\);)\s*$`)
 )
 
@@ -60,7 +61,7 @@ func TransformCJS(source, file string) (string, error) {
 		return rewritePlainCJS(source), nil
 	}
 	source = stripImportCallOptions(source)
-	source = awaitImportToRequire.ReplaceAllString(source, "await __import(")
+	source = rewriteAwaitImport(source)
 	source = awaitBareCall.ReplaceAllString(source, "$1")
 	result := api.Transform(source, api.TransformOptions{
 		Loader:     loaderFor(file),
@@ -122,6 +123,15 @@ func finishCJS(src string) string {
 	src = rewriteImportMeta(src)
 	src = rewriteESMLexer(src)
 	return rewriteWasmMemoryCache(src)
+}
+
+// rewriteAwaitImport keeps import() a thenable except at module top
+// level, where esbuild ES2015 rejects await. `await import(x).then`
+// is await (import(x).then(...)) — `.` binds tighter than await —
+// so a sync require().then throws.
+func rewriteAwaitImport(src string) string {
+	src = tlaAwaitImport.ReplaceAllString(src, "${1}require(")
+	return awaitImportToRequire.ReplaceAllString(src, "await __import(")
 }
 
 // stripImportCallOptions drops import(x, { with: ... }) options so
@@ -378,20 +388,32 @@ func resolveDir(file string) (string, bool) {
 }
 
 // needsCJSTransform is true when esbuild can change the file (ESM
-// syntax, or a loader that is not already JS).
+// syntax, a non-JS loader, or syntax goja cannot parse).
 func needsCJSTransform(src, file string) bool {
 	switch strings.ToLower(filepath.Ext(file)) {
 	case ".ts", ".mts", ".cts", ".json", ".mjs":
 		return true
 	}
-	return hasESMSyntax(src)
+	return hasESMSyntax(src) || hasDownlevelSyntax(src)
+}
+
+// hasDownlevelSyntax reports tokens esbuild ES2015 rewrites that goja
+// rejects (async generators, optional catch).
+func hasDownlevelSyntax(src string) bool {
+	if strings.Contains(src, "async *") || strings.Contains(src, "async function*") || strings.Contains(src, "async function *") {
+		return true
+	}
+	if strings.Contains(src, "catch {") || strings.Contains(src, "catch{") {
+		return true
+	}
+	return false
 }
 
 // rewritePlainCJS applies the goja-only regex patches that do not
 // need esbuild. Tokens that are absent leave src unchanged.
 func rewritePlainCJS(src string) string {
 	if strings.Contains(src, "await") && awaitImportToRequire.MatchString(src) {
-		src = awaitImportToRequire.ReplaceAllString(src, "await __import(")
+		src = rewriteAwaitImport(src)
 	}
 	if strings.Contains(src, "RegExp") && regexpFlagLiteral.MatchString(src) {
 		src = rewriteRegexpFlags(src)

@@ -38,6 +38,17 @@ func TestTransformCJSStillTransformsExport(t *testing.T) {
 	}
 }
 
+func TestTransformCJSDownlevelsAsyncGenerator(t *testing.T) {
+	src := "'use strict'\nmodule.exports = { async * gen() { yield 1 } }\n"
+	out, err := bundle.TransformCJS(src, "g.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "async *") {
+		t.Fatalf("async generator survived:\n%s", out)
+	}
+}
+
 func TestTransformCJSDetectsExportAfterRegexQuote(t *testing.T) {
 	src := "const re = /[\"&'`]/g\nexport function core() { return 1 }\n"
 	out, err := bundle.TransformCJS(src, "core.js")
@@ -198,8 +209,8 @@ func TestTransformCJSAwaitImportToRequire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "__import(") {
-		t.Fatalf("expected __import:\n%s", out)
+	if !strings.Contains(out, "require(") {
+		t.Fatalf("expected require for TLA:\n%s", out)
 	}
 }
 
