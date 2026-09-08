@@ -110,8 +110,13 @@ func NodeScriptImports() []imports.Handler[any] {
 			}
 			if spec == "common" || strings.HasSuffix(spec, "/common") || strings.HasSuffix(spec, "/common/index.js") {
 				// debug/src/common.js vs Node's testdata/node/common/ directory.
+				// next(spec+".js") then next(spec) so @scope/common and
+				// foo/common (dir) resolve; stub only if both miss.
 				if strings.HasSuffix(spec, "/common") {
 					if v, err := next(spec + ".js"); err == nil {
+						return v, nil
+					}
+					if v, err := next(spec); err == nil {
 						return v, nil
 					}
 				}

@@ -153,6 +153,42 @@ func TestNodeHostCommonDoesNotShadowFile(t *testing.T) {
 	}
 }
 
+func TestNodeHostCommonDoesNotShadowScopedPackage(t *testing.T) {
+	iso := New("", Options{
+		Imports: append(NodeScriptImports(), imports.NodeModules{
+			FS: fstest.MapFS{
+				"@scope/common/package.json": {Data: []byte(`{"main":"index.js"}`)},
+				"@scope/common/index.js":     {Data: []byte(`module.exports = { pkg: 1 };`)},
+			},
+		}),
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var m = require("@scope/common");
+		if (m.pkg !== 1) throw new Error("shadowed " + typeof m.mustCall);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeHostCommonDoesNotShadowDirIndex(t *testing.T) {
+	iso := New("", Options{
+		Imports: append(NodeScriptImports(), imports.NodeModules{
+			FS: fstest.MapFS{
+				"foo/package.json":    {Data: []byte(`{}`)},
+				"foo/common/index.js": {Data: []byte(`module.exports = { dir: 1 };`)},
+			},
+		}),
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var m = require("foo/common");
+		if (m.dir !== 1) throw new Error("shadowed " + typeof m.mustCall);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWorkerdStub(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `
