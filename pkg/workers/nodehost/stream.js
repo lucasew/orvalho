@@ -113,9 +113,16 @@ function pipeline() {
 function finished(stream, opts, cb) {
   if (typeof opts === 'function') cb = opts;
   if (cb) {
-    stream.on('finish', function () { cb(); });
-    stream.on('end', function () { cb(); });
-    stream.on('error', cb);
+    var done = false;
+    var once = function (err) {
+      if (done) return;
+      done = true;
+      if (err !== undefined && err !== null) cb(err);
+      else cb();
+    };
+    stream.on('finish', function () { once(); });
+    stream.on('end', function () { once(); });
+    stream.on('error', once);
   }
   return stream;
 }
