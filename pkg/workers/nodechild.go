@@ -301,11 +301,31 @@ func (n *nodeChild) throwArgType(name string) {
 	panic(e)
 }
 
+func spawnFileName(v goja.Value) string {
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return ""
+	}
+	if o, ok := v.(*goja.Object); ok {
+		if d := o.Get("default"); d != nil && !goja.IsUndefined(d) && !goja.IsNull(d) {
+			if s := d.Export(); s != nil {
+				if str, ok := s.(string); ok && str != "" {
+					return str
+				}
+			}
+		}
+	}
+	s := v.String()
+	if s == "[object Object]" {
+		return ""
+	}
+	return s
+}
+
 func spawnFileArgs(call goja.FunctionCall) (file string, args []string) {
 	if len(call.Arguments) == 0 || goja.IsUndefined(call.Argument(0)) {
 		return "", nil
 	}
-	file = call.Argument(0).String()
+	file = spawnFileName(call.Argument(0))
 	if len(call.Arguments) < 2 {
 		return file, nil
 	}

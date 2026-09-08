@@ -1,6 +1,7 @@
 package workers
 
 import (
+	"context"
 	"testing"
 	"testing/fstest"
 
@@ -186,6 +187,29 @@ func TestNodeHostCommonDoesNotShadowDirIndex(t *testing.T) {
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSpawnWorkerdModule(t *testing.T) {
+	var got string
+	done := make(chan SpawnWait, 1)
+	done <- SpawnWait{Code: 1}
+	iso := New("", Options{
+		Imports: NodeScriptImports(),
+		Spawn: func(ctx context.Context, req SpawnReq) (Spawned, error) {
+			got = req.File
+			return stubSpawned{pid: 1, done: done}, nil
+		},
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var cp = require("child_process");
+		cp.spawn(require("workerd"));
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "/dev/null" {
+		t.Fatalf("spawn file %q", got)
 	}
 }
 
