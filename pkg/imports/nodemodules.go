@@ -9,6 +9,7 @@ import (
 
 // NodeModules looks up package files in FS using a Node.js CommonJS walk
 // (TEC-17). From is the requiring file inside FS; empty means the FS root.
+// Specifiers that start with # resolve through that package's "imports".
 type NodeModules struct {
 	FS   fs.FS
 	From string
@@ -33,6 +34,9 @@ func (n NodeModules) Lookup(spec string) (string, bool) {
 	if n.FS == nil {
 		return "", false
 	}
+	if strings.HasPrefix(spec, "#") {
+		return n.lookupImport(spec)
+	}
 	if p := path.Clean(spec); p != ".." && !strings.HasPrefix(p, "../") && n.isFile(p) {
 		return p, true
 	}
@@ -45,6 +49,42 @@ func (n NodeModules) Lookup(spec string) (string, bool) {
 		return "", false
 	}
 	return n.packageFile(pkgDir, sub)
+}
+
+func (n NodeModules) lookupImport(spec string) (string, bool) {
+	if spec == "#" || strings.HasPrefix(spec, "#/") {
+		return "", false
+	}
+	pkgDir, data, ok := n.nearestPackage()
+	if !ok {
+		return "", false
+	}
+	target, ok := resolveImports(data, spec)
+	if !ok || target == "" || strings.HasPrefix(target, "#") {
+		return "", false
+	}
+	if strings.HasPrefix(target, ".") {
+		return n.file(path.Join(pkgDir, target))
+	}
+	return n.Lookup(target)
+}
+
+func (n NodeModules) nearestPackage() (pkgDir string, data []byte, ok bool) {
+	start := "."
+	if n.From != "" {
+		start = path.Dir(n.From)
+	}
+	for dir := start; ; dir = path.Dir(dir) {
+		p := path.Join(dir, "package.json")
+		b, err := fs.ReadFile(n.FS, p)
+		if err == nil {
+			return dir, b, true
+		}
+		if dir == "." || dir == "/" {
+			break
+		}
+	}
+	return "", nil, false
 }
 
 func (n NodeModules) packageDir(name string) (string, bool) {

@@ -120,6 +120,70 @@ func TestNodeModulesClimbFromNested(t *testing.T) {
 	}
 }
 
+func TestNodeModulesHashImportDefault(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"pkg/package.json": `{"imports":{"#flag":{"module-sync":"./true.js","default":"./false.js"}}}`,
+		"pkg/true.js":      `export default true`,
+		"pkg/false.js":     `export default false`,
+		"pkg/lib/a.js":     `require("#flag")`,
+	})
+	got, ok := (NodeModules{FS: fsys, From: "pkg/lib/a.js"}).Lookup("#flag")
+	if !ok {
+		t.Fatal("miss")
+	}
+	if got != "pkg/false.js" {
+		t.Fatalf("Lookup(#flag)=%q want pkg/false.js (default, not module-sync)", got)
+	}
+}
+
+func TestNodeModulesHashImportNearestOnly(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"package.json":        `{"imports":{"#flag":"./root.js"}}`,
+		"root.js":             `exports.n=1`,
+		"nested/package.json": `{}`,
+		"nested/index.js":     `require("#flag")`,
+	})
+	if _, ok := (NodeModules{FS: fsys, From: "nested/index.js"}).Lookup("#flag"); ok {
+		t.Fatal("nearest package.json without the key must miss")
+	}
+}
+
+func TestNodeModulesHashImportPattern(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"pkg/package.json":   `{"imports":{"#types/*":"./types/*.d.ts"}}`,
+		"pkg/types/foo.d.ts": `export {}`,
+		"pkg/index.js":       `require("#types/foo")`,
+	})
+	got, ok := (NodeModules{FS: fsys, From: "pkg/index.js"}).Lookup("#types/foo")
+	if !ok {
+		t.Fatal("miss")
+	}
+	if got != "pkg/types/foo.d.ts" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestNodeModulesHashImportInvalid(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"package.json": `{"imports":{"#flag":"./x.js"}}`,
+		"x.js":         `exports.n=1`,
+	})
+	n := NodeModules{FS: fsys, From: "x.js"}
+	if _, ok := n.Lookup("#"); ok {
+		t.Fatal("# alone")
+	}
+	if _, ok := n.Lookup("#/x"); ok {
+		t.Fatal("#/")
+	}
+	if _, ok := n.Lookup("#missing"); ok {
+		t.Fatal("missing key")
+	}
+}
+
 func TestNodeModulesMiss(t *testing.T) {
 	t.Parallel()
 	if _, ok := (NodeModules{FS: tree(nil)}).Lookup("lodash"); ok {

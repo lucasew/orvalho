@@ -108,3 +108,59 @@ func pickCondition(m map[string]any) (string, bool) {
 	}
 	return "", false
 }
+
+// resolveImports maps a #specifier through package.json "imports".
+// Conditions are the same as exports (require, node, default).
+func resolveImports(packageJSON []byte, spec string) (string, bool) {
+	var meta struct {
+		Imports json.RawMessage `json:"imports"`
+	}
+	if json.Unmarshal(packageJSON, &meta) != nil || len(meta.Imports) == 0 || string(meta.Imports) == "null" {
+		return "", false
+	}
+	var v any
+	if json.Unmarshal(meta.Imports, &v) != nil {
+		return "", false
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	if raw, ok := m[spec]; ok {
+		return pickTarget(raw)
+	}
+	return matchImportPattern(m, spec)
+}
+
+func matchImportPattern(m map[string]any, spec string) (string, bool) {
+	bestKey := ""
+	bestMid := ""
+	var bestRaw any
+	for key, raw := range m {
+		star := strings.IndexByte(key, '*')
+		if star < 0 {
+			continue
+		}
+		prefix, suffix := key[:star], key[star+1:]
+		if !strings.HasPrefix(spec, prefix) || !strings.HasSuffix(spec, suffix) {
+			continue
+		}
+		if len(spec) < len(prefix)+len(suffix) {
+			continue
+		}
+		if bestKey != "" && len(key) < len(bestKey) {
+			continue
+		}
+		bestKey = key
+		bestMid = spec[len(prefix) : len(spec)-len(suffix)]
+		bestRaw = raw
+	}
+	if bestKey == "" {
+		return "", false
+	}
+	target, ok := pickTarget(bestRaw)
+	if !ok {
+		return "", false
+	}
+	return strings.Replace(target, "*", bestMid, 1), true
+}
