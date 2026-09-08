@@ -38,6 +38,22 @@ func TestTransformCJSRewritesCopyProps(t *testing.T) {
 	}
 }
 
+func TestTransformCJSCapturesArrowArguments(t *testing.T) {
+	out, err := bundle.TransformCJS("export function wrap(fn) { return function () { return Promise.resolve(fn).then((f) => f.apply(this, arguments)); }; }\n", "mod.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, ".apply(this, arguments)") {
+		t.Fatalf("apply arguments survived:\n%s", out)
+	}
+	if !strings.Contains(out, ".apply(this, __orvalhoArguments)") {
+		t.Fatalf("captured apply missing:\n%s", out)
+	}
+	if !strings.Contains(out, "var __orvalhoArguments = arguments;") {
+		t.Fatalf("arguments capture missing:\n%s", out)
+	}
+}
+
 func TestTransformCJSDropsRegexpDFlag(t *testing.T) {
 	out, err := bundle.TransformCJS("export const r = new RegExp('x', 'dg');\nexport const s = /w/dgs;\n", "mod.mjs")
 	if err != nil {

@@ -106,7 +106,23 @@ func finishCJS(src string) string {
 	src = rewriteUnicodeProperties(src)
 	src = rewriteRegexpFlags(src)
 	src = rewriteCopyProps(src)
+	src = rewriteArgumentsCapture(src)
 	return rewriteImportMeta(src)
+}
+
+// funcOpen matches esbuild's function heads. Arrows are skipped so we
+// do not invent an arguments object they do not have.
+var funcOpen = regexp.MustCompile(`\bfunction(?:\s+[A-Za-z_$][\w$]*)?\s*\([^)]*\)\s*\{`)
+
+// rewriteArgumentsCapture lets goja arrows see the enclosing arguments.
+// goja does not implement lexical arguments, so CJS→ESM proxies such as
+// `() => fn.apply(this, arguments)` would call fn with no args.
+func rewriteArgumentsCapture(src string) string {
+	src = funcOpen.ReplaceAllString(src, "${0}var __orvalhoArguments = arguments;")
+	src = strings.ReplaceAll(src, ".apply(this, arguments)", ".apply(this, __orvalhoArguments)")
+	src = strings.ReplaceAll(src, ".apply(null, arguments)", ".apply(null, __orvalhoArguments)")
+	src = strings.ReplaceAll(src, ".apply(void 0, arguments)", ".apply(void 0, __orvalhoArguments)")
+	return src
 }
 
 // rewriteCopyProps replaces esbuild's for-of __copyProps with an index

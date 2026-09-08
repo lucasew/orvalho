@@ -201,6 +201,24 @@ func TestRequireCircularESMReassign(t *testing.T) {
 	}
 }
 
+func TestArrowLexicalArguments(t *testing.T) {
+	iso := New("", Options{PrepareSource: bundle.TransformCJS})
+	err := iso.ScriptMain(t.Context(), `
+		function proxy(fn) {
+			return function () {
+				return Promise.resolve({f: fn}).then((mod) => mod.f.apply(this, arguments));
+			};
+		}
+		var got = 0;
+		proxy(function (n) { got = n; })(7).then(function () {
+			if (got !== 7) throw new Error("got " + got);
+		});
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRequireScriptReplacesExports(t *testing.T) {
 	iso := New(`var got = require("orvalho:fn")();`, Options{
 		Imports: importMap(map[string]any{
