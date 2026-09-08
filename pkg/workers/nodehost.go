@@ -95,6 +95,9 @@ func NodeScriptImports() []imports.Handler[any] {
 			"node:zlib":                nodeZlibBinding{},
 		},
 		imports.Func[any](func(spec string, next imports.Resolver[any]) (any, error) {
+			if spec == "workerd" || strings.HasPrefix(spec, "@cloudflare/workerd-") {
+				return nodehostScript("nodehost/workerd_stub.js"), nil
+			}
 			if spec == "common" || strings.HasSuffix(spec, "/common") || strings.HasSuffix(spec, "/common/index.js") {
 				return nodehostScript("nodehost/common.js"), nil
 			}

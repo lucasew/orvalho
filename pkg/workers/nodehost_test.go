@@ -44,6 +44,21 @@ func TestNodeHostTypesIdentity(t *testing.T) {
 	}
 }
 
+func TestWorkerdStub(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var w = require("workerd");
+		if (typeof w !== "string" && typeof w.default !== "string" && !w.version) {
+			throw new Error("workerd stub " + w);
+		}
+		var n = require("@cloudflare/workerd-linux-64");
+		if (n == null) throw new Error("optional pkg");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeStreamPromises(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `
