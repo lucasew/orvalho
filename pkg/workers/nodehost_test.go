@@ -150,6 +150,27 @@ func TestNodeUtilPromisify(t *testing.T) {
 	}
 }
 
+func TestNodeUtilDeprecate(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var util = require("util");
+		if (typeof util.deprecate !== "function") throw new Error("deprecate");
+		var n = 0;
+		var wrapped = util.deprecate(function (x) { n = x; return x + 1; }, "msg");
+		if (typeof wrapped !== "function") throw new Error("wrapped");
+		var r = wrapped(6);
+		if (r !== 7) throw new Error("val " + r);
+		if (n !== 6) throw new Error("called " + n);
+		var obj = { v: 3, f: function () { return this.v; } };
+		obj.f = util.deprecate(obj.f, "bound");
+		if (obj.f() !== 3) throw new Error("this");
+		if (typeof util.deprecate(function(){}, "msg") !== "function") throw new Error("debug-style");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeHostImportsDoNotNeedTree(t *testing.T) {
 	iso := New("", Options{
 		Imports: append(NodeScriptImports(), imports.NodeModules{}),

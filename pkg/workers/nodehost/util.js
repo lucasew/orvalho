@@ -1219,6 +1219,26 @@ function promisify(original) {
 }
 promisify.custom = promisifyCustom;
 
+function deprecate(fn, msg, code) {
+  var warned = false;
+  function deprecated() {
+    if (!warned) {
+      warned = true;
+      if (typeof process !== 'undefined' && process && typeof process.emitWarning === 'function') {
+        if (code !== undefined) {
+          process.emitWarning(msg, 'DeprecationWarning', code, deprecated);
+        } else {
+          process.emitWarning(msg, 'DeprecationWarning', deprecated);
+        }
+      }
+    }
+    if (typeof fn === 'function') {
+      return fn.apply(this, arguments);
+    }
+  }
+  return deprecated;
+}
+
 function stripVTControlCharacters(str) {
   return String(str).replace(/\x1B\[[0-9;]*[A-Za-z]/g, '');
 }
@@ -1272,6 +1292,7 @@ module.exports = {
   debuglog: function () { return function () {}; },
   debug: function () { return function () {}; },
   promisify: promisify,
+  deprecate: deprecate,
   styleText: styleText,
   stripVTControlCharacters: stripVTControlCharacters,
   types: require("util/types"),
