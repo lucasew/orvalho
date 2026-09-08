@@ -75,6 +75,26 @@ func TestNodeStringDecoder(t *testing.T) {
 	}
 }
 
+func TestNodeConstants(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var c = require("constants");
+		if (require("node:constants") !== c) throw new Error("identity");
+		var os = require("os");
+		if (c.os !== os.constants) throw new Error("os nest");
+		if (typeof os.constants.signals.SIGTERM === "number") {
+			if (c.signals.SIGTERM !== os.constants.signals.SIGTERM) throw new Error("SIGTERM");
+		}
+		var fs = require("fs");
+		if (c.fs !== fs.constants) throw new Error("fs nest");
+		if (typeof fs.constants.F_OK === "number" && c.F_OK !== fs.constants.F_OK) throw new Error("F_OK");
+		if (typeof fs.constants.O_RDONLY === "number" && c.O_RDONLY !== fs.constants.O_RDONLY) throw new Error("O_RDONLY");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodePunycode(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `
