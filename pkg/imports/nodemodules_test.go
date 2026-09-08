@@ -159,7 +159,7 @@ func TestNodeModulesOrvalhoStoreFallback(t *testing.T) {
 	t.Parallel()
 	fsys := tree(map[string]string{
 		"app.js": `require("prismjs/components.js")`,
-		"node_modules/.orvalho/prismjs@1.30.0/node_modules/prismjs/package.json":   `{}`,
+		"node_modules/.orvalho/prismjs@1.30.0/node_modules/prismjs/package.json":  `{}`,
 		"node_modules/.orvalho/prismjs@1.30.0/node_modules/prismjs/components.js": `exports.n=1`,
 	})
 	got, ok := (NodeModules{FS: fsys, From: "app.js"}).Lookup("prismjs/components.js")
@@ -181,10 +181,19 @@ func TestNodeModulesOrvalhoStoreScoped(t *testing.T) {
 	lookupOK(t, fsys, "@astrojs/prism", "node_modules/.orvalho/@astrojs/prism@4.0.2/node_modules/@astrojs/prism/index.js")
 }
 
+func TestNodeModulesOrvalhoStorePicksHighestSemver(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"node_modules/.orvalho/prismjs@1.9.0/node_modules/prismjs/index.js":  `exports.n=9`,
+		"node_modules/.orvalho/prismjs@1.30.0/node_modules/prismjs/index.js": `exports.n=30`,
+	})
+	lookupOK(t, fsys, "prismjs", "node_modules/.orvalho/prismjs@1.30.0/node_modules/prismjs/index.js")
+}
+
 func TestNodeModulesOrvalhoStorePrefersHoisted(t *testing.T) {
 	t.Parallel()
 	fsys := tree(map[string]string{
-		"node_modules/prismjs/index.js": `exports.n=1`,
+		"node_modules/prismjs/index.js":                                     `exports.n=1`,
 		"node_modules/.orvalho/prismjs@9.9.9/node_modules/prismjs/index.js": `exports.n=2`,
 	})
 	lookupOK(t, fsys, "prismjs", "node_modules/prismjs/index.js")

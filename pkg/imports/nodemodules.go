@@ -148,11 +148,84 @@ func (n NodeModules) orvalhoSlot(store, name string) (string, bool) {
 		if !n.isDir(cand) {
 			continue
 		}
-		if best == "" || en > bestVer {
-			best, bestVer = cand, en
+		ver := slotVersion(en)
+		if best == "" || cmpSlotVersion(ver, bestVer) > 0 {
+			best, bestVer = cand, ver
 		}
 	}
 	return best, best != ""
+}
+
+func slotVersion(en string) string {
+	if i := strings.LastIndexByte(en, '@'); i >= 0 {
+		return en[i+1:]
+	}
+	return en
+}
+
+// cmpSlotVersion is numeric major.minor.patch; a release beats the
+// matching prerelease. Unparseable versions fall back to string order.
+func cmpSlotVersion(a, b string) int {
+	va, oka := parseSlotVersion(a)
+	vb, okb := parseSlotVersion(b)
+	if !oka || !okb {
+		return strings.Compare(a, b)
+	}
+	if c := va.major - vb.major; c != 0 {
+		return c
+	}
+	if c := va.minor - vb.minor; c != 0 {
+		return c
+	}
+	if c := va.patch - vb.patch; c != 0 {
+		return c
+	}
+	if va.pre == vb.pre {
+		return 0
+	}
+	if va.pre == "" {
+		return 1
+	}
+	if vb.pre == "" {
+		return -1
+	}
+	return strings.Compare(va.pre, vb.pre)
+}
+
+type slotVer struct {
+	major, minor, patch int
+	pre                 string
+}
+
+func parseSlotVersion(s string) (slotVer, bool) {
+	s = strings.TrimPrefix(s, "v")
+	if i := strings.IndexByte(s, '+'); i >= 0 {
+		s = s[:i]
+	}
+	pre := ""
+	if i := strings.IndexByte(s, '-'); i >= 0 {
+		pre = s[i+1:]
+		s = s[:i]
+	}
+	parts := strings.Split(s, ".")
+	if len(parts) < 1 || len(parts) > 3 {
+		return slotVer{}, false
+	}
+	var nums [3]int
+	for i, p := range parts {
+		n := 0
+		if p == "" {
+			return slotVer{}, false
+		}
+		for _, c := range p {
+			if c < '0' || c > '9' {
+				return slotVer{}, false
+			}
+			n = n*10 + int(c-'0')
+		}
+		nums[i] = n
+	}
+	return slotVer{nums[0], nums[1], nums[2], pre}, true
 }
 
 func (n NodeModules) packageFile(pkgDir, sub string) (string, bool) {
