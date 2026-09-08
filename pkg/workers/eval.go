@@ -97,7 +97,7 @@ func (iso *Isolate) prepareEvalSource(src string, asFunction bool) string {
 		}
 		return src
 	}
-	out, err := bundle.TransformCJS(src, evalSourceName)
+	out, err := bundle.TransformEvalCJS(src, evalSourceName)
 	if err != nil {
 		panic(iso.vm.NewGoError(err))
 	}
@@ -165,11 +165,16 @@ func needsDownlevel(src string) bool {
 const evalSourceName = "eval.mjs"
 
 func wrapEvalCJS(source string, asFunction bool) string {
+	async := strings.Contains(source, "await")
 	var b strings.Builder
 	if asFunction {
 		b.WriteString("return ")
 	}
-	b.WriteString("(function () {\n")
+	if async {
+		b.WriteString("(async function () {\n")
+	} else {
+		b.WriteString("(function () {\n")
+	}
 	b.WriteString("var module = { exports: {} };\n")
 	b.WriteString("var exports = module.exports;\n")
 	b.WriteString("var __file = (typeof __vite_ssr_import_meta__ === \"object\" && __vite_ssr_import_meta__ && __vite_ssr_import_meta__.url) ? String(__vite_ssr_import_meta__.url) : (typeof __filename !== \"undefined\" ? __filename : \"\");\n")
@@ -184,7 +189,12 @@ func wrapEvalCJS(source string, asFunction bool) string {
 	b.WriteString("  __dir = __slash >= 0 ? __p.slice(0, __slash) : \".\";\n")
 	b.WriteString("}\n")
 	b.WriteString("var __req = typeof require === \"function\" ? require : function (s) { throw new Error(\"require \" + s); };\n")
-	b.WriteString(wrapCJS(source))
+	if async {
+		b.WriteString("await ")
+		b.WriteString(wrapCJSFn(source, true))
+	} else {
+		b.WriteString(wrapCJS(source))
+	}
 	b.WriteString("(__req, module, exports, __file, __dir);\n")
 	b.WriteString("if (typeof __vite_ssr_exportName__ === \"function\") {\n")
 	b.WriteString("  var __e = module.exports;\n")

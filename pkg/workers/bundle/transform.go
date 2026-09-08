@@ -57,12 +57,27 @@ func CompileCJS(source, file string) (string, error) {
 
 // TransformCJS downlevels one file to CommonJS ES2015 via the esbuild Go API.
 func TransformCJS(source, file string) (string, error) {
+	return transformCJS(source, file, false)
+}
+
+// TransformEvalCJS is TransformCJS but keeps top-level await. Vite's
+// module runner evals inlined ESM that still has `await` at module scope.
+func TransformEvalCJS(source, file string) (string, error) {
+	return transformCJS(source, file, true)
+}
+
+func transformCJS(source, file string, allowTLA bool) (string, error) {
 	if !needsCJSTransform(source, file) {
 		return rewritePlainCJS(source), nil
 	}
 	source = stripImportCallOptions(source)
 	source = rewriteAwaitImport(source)
 	source = awaitBareCall.ReplaceAllString(source, "$1")
+	if allowTLA {
+		// esbuild CJS cannot emit TLA. Hide await as a call so import/export
+		// still rewrite; wrapEvalCJS restores it inside an async IIFE.
+		source = hideAwaitExprs(source)
+	}
 	result := api.Transform(source, api.TransformOptions{
 		Loader:     loaderFor(file),
 		Sourcefile: file,
@@ -75,7 +90,138 @@ func TransformCJS(source, file string) (string, error) {
 	if len(result.Errors) > 0 {
 		return "", fmt.Errorf("bundle: transform %s: %s", file, result.Errors[0].Text)
 	}
-	return finishCJS(string(result.Code)), nil
+	out := string(result.Code)
+	if allowTLA {
+		out = restoreAwaitExprs(out)
+	}
+	return finishCJS(out), nil
+}
+
+const awaitSentinel = "__orvalhoAwait"
+
+func hideAwaitExprs(src string) string {
+	var b strings.Builder
+	b.Grow(len(src) + 16)
+	i := 0
+	for i < len(src) {
+		if n := jsCommentLen(src, i); n > 0 {
+			b.WriteString(src[i : i+n])
+			i += n
+			continue
+		}
+		if n := jsStringLen(src, i); n > 0 {
+			b.WriteString(src[i : i+n])
+			i += n
+			continue
+		}
+		if isAwaitWord(src, i) {
+			i += 5
+			for i < len(src) && (src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r') {
+				i++
+			}
+			b.WriteString(awaitSentinel)
+			b.WriteByte('(')
+			start := i
+			i = skipJSExpr(src, i)
+			b.WriteString(src[start:i])
+			b.WriteByte(')')
+			continue
+		}
+		b.WriteByte(src[i])
+		i++
+	}
+	return b.String()
+}
+
+func restoreAwaitExprs(src string) string {
+	return strings.ReplaceAll(src, awaitSentinel, "await")
+}
+
+func isAwaitWord(src string, i int) bool {
+	if i+5 > len(src) || src[i:i+5] != "await" {
+		return false
+	}
+	if i > 0 && isIdentCont(src[i-1]) {
+		return false
+	}
+	if i+5 < len(src) && isIdentCont(src[i+5]) {
+		return false
+	}
+	return true
+}
+
+func skipJSExpr(src string, i int) int {
+	depth := 0
+	for i < len(src) {
+		if n := jsCommentLen(src, i); n > 0 {
+			i += n
+			continue
+		}
+		if n := jsStringLen(src, i); n > 0 {
+			i += n
+			continue
+		}
+		c := src[i]
+		switch c {
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			if depth == 0 {
+				return i
+			}
+			depth--
+		case ',', ';':
+			if depth == 0 {
+				return i
+			}
+		case '\n':
+			if depth == 0 {
+				return i
+			}
+		}
+		i++
+	}
+	return i
+}
+
+func jsCommentLen(src string, i int) int {
+	if i+1 < len(src) && src[i] == '/' && src[i+1] == '/' {
+		j := i + 2
+		for j < len(src) && src[j] != '\n' {
+			j++
+		}
+		return j - i
+	}
+	if i+1 < len(src) && src[i] == '/' && src[i+1] == '*' {
+		j := i + 2
+		for j+1 < len(src) && !(src[j] == '*' && src[j+1] == '/') {
+			j++
+		}
+		if j+1 < len(src) {
+			j += 2
+		}
+		return j - i
+	}
+	return 0
+}
+
+func jsStringLen(src string, i int) int {
+	if i >= len(src) || (src[i] != '\'' && src[i] != '"' && src[i] != '`') {
+		return 0
+	}
+	q := src[i]
+	j := i + 1
+	for j < len(src) {
+		if src[j] == '\\' && j+1 < len(src) {
+			j += 2
+			continue
+		}
+		if src[j] == q {
+			return j + 1 - i
+		}
+		j++
+	}
+	return j - i
 }
 
 func buildCJS(source, file, dir string) (string, error) {

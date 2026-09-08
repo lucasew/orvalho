@@ -336,8 +336,16 @@ func (iso *Isolate) loadScript(key, source, file string) (goja.Value, error) {
 }
 
 func wrapCJS(source string) string {
+	return wrapCJSFn(source, false)
+}
+
+func wrapCJSFn(source string, async bool) string {
 	var b strings.Builder
-	b.WriteString("(function (require, module, exports, __orvalhoFilename, __orvalhoDirname) {\n")
+	if async {
+		b.WriteString("(async function (require, module, exports, __orvalhoFilename, __orvalhoDirname) {\n")
+	} else {
+		b.WriteString("(function (require, module, exports, __orvalhoFilename, __orvalhoDirname) {\n")
+	}
 	b.WriteString("function __import(s){return Promise.resolve(require(s));}\n")
 	b.WriteString("function __orvalhoFileURL(f){\n")
 	b.WriteString("  if(!f) f = __orvalhoFilename;\n")

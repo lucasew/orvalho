@@ -21,6 +21,17 @@ func TestTransformCJSSkipsPlainCJS(t *testing.T) {
 	}
 }
 
+func TestTransformEvalCJSKeepsTopLevelAwait(t *testing.T) {
+	src := "export default await Promise.resolve(1);\n"
+	out, err := bundle.TransformEvalCJS(src, "eval.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "await") {
+		t.Fatalf("TLA stripped:\n%s", out)
+	}
+}
+
 func TestTransformCJSStillTransformsExport(t *testing.T) {
 	src := "export const n = 1;\n"
 	out, err := bundle.TransformCJS(src, "mod.js")

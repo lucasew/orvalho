@@ -135,6 +135,40 @@ func TestAsyncFunctionViteSSRBody(t *testing.T) {
 	}
 }
 
+func TestAsyncFunctionESMTopLevelAwait(t *testing.T) {
+	iso := New("", Options{
+		Imports: importMap(map[string]any{
+			"orvalho:n": imports.Script{Source: `exports.n = 4;`},
+		}),
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var AsyncFunction = async function () {}.constructor;
+		var exports = {};
+		function exportName(k, get) {
+			Object.defineProperty(exports, k, { enumerable: true, configurable: true, get: get });
+		}
+		var fn = new AsyncFunction(
+			"__vite_ssr_exports__",
+			"__vite_ssr_import_meta__",
+			"__vite_ssr_import__",
+			"__vite_ssr_dynamic_import__",
+			"__vite_ssr_exportAll__",
+			"__vite_ssr_exportName__",
+			"\"use strict\";\nimport { n } from \"orvalho:n\";\nexport default await Promise.resolve(n + 1);\n"
+		);
+		var got;
+		Promise.resolve(fn(exports, { url: "file:///t.mjs" }, null, null, null, exportName)).then(function () {
+			got = exports.default;
+		});
+		setTimeout(function () {
+			if (got !== 5) throw new Error("default " + got);
+		}, 0);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLooksLikeESM(t *testing.T) {
 	if !looksLikeESM("import { x } from \"y\";\nexport default x;\n") {
 		t.Fatal("esm")
