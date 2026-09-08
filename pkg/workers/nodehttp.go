@@ -64,11 +64,22 @@ type nodeHTTP struct {
 	https bool
 }
 
+func withPrototype(iso *Isolate, fn func(goja.FunctionCall) goja.Value) *goja.Object {
+	obj := iso.vm.ToValue(fn).ToObject(iso.vm)
+	if p := obj.Get("prototype"); p == nil || goja.IsUndefined(p) || goja.IsNull(p) {
+		proto := iso.vm.NewObject()
+		mustSet(obj, "prototype", proto)
+		mustSet(proto, "constructor", obj)
+	}
+	return obj
+}
+
 func newNodeHTTP(iso *Isolate, https bool) *goja.Object {
 	n := &nodeHTTP{iso: iso, https: https}
 	obj := iso.vm.NewObject()
-	mustSet(obj, "createServer", n.jsCreateServer)
-	mustSet(obj, "Server", n.jsCreateServer)
+	server := withPrototype(iso, n.jsCreateServer)
+	mustSet(obj, "createServer", server)
+	mustSet(obj, "Server", server)
 	mustSet(obj, "IncomingMessage", n.jsIncoming)
 	mustSet(obj, "ServerResponse", n.jsOutgoing)
 	mustSet(obj, "Agent", n.jsAgent)

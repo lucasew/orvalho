@@ -27,6 +27,17 @@ func TestNodeHTTPIdentity(t *testing.T) {
 	`)
 }
 
+func TestNodeHTTPServerInstanceof(t *testing.T) {
+	runNodeHTTP(t, `
+		var http = require("http");
+		if (typeof http.Server !== "function") throw new Error("Server");
+		if (http.Server.prototype == null) throw new Error("prototype");
+		if (({} instanceof http.Server) !== false) throw new Error("plain");
+		var s = http.createServer();
+		if (typeof s.listen !== "function") throw new Error("listen");
+	`)
+}
+
 func TestNodeHTTPListenDenied(t *testing.T) {
 	runNodeHTTP(t, `
 		try {
