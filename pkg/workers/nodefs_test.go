@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/lucasew/orvalho/pkg/imports"
+	"github.com/lucasew/orvalho/pkg/workers/bundle"
 )
 
 func nodeFSMap() fstest.MapFS {
@@ -260,6 +263,45 @@ func TestStripCwdPrefix(t *testing.T) {
 	got = stripCwdPrefix("hello.txt", ".")
 	if got != "hello.txt" {
 		t.Fatalf("rel cwd: %q", got)
+	}
+}
+
+func TestRequireFileURL(t *testing.T) {
+	fsys := fstest.MapFS{
+		"mod.js": {Data: []byte("exports.n = 3;\n")},
+	}
+	iso := New("", Options{
+		FS:  fsys,
+		Cwd: "/guest/root",
+		Imports: append(NodeScriptImports(), imports.NodeModules{
+			FS:   fsys,
+			From: "t.js",
+		}),
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var m = require("file:///guest/root/mod.js");
+		if (!m || m.n !== 3) throw new Error("n " + (m && m.n));
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOrvalhoESMParse(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports(), PrepareSource: bundle.TransformCJS})
+	src := `
+		function parse(E$1, g) {
+			if (!C) return init.then((() => parse(E$1)));
+		}
+		var C, init;
+		var src = "import { defineConfig } from 'astro/config';\nimport svelte from '@astrojs/svelte';\nexport default 1;\n";
+		var got = __orvalhoESMParse(src);
+		if (!got || !got[0] || got[0].length !== 2) throw new Error("imports " + (got && got[0] && got[0].length));
+		if (got[0][0].n !== "astro/config") throw new Error("first " + got[0][0].n);
+		if (got[0][1].n !== "@astrojs/svelte") throw new Error("second " + got[0][1].n);
+	`
+	if err := iso.ScriptMain(t.Context(), src, "t.js"); err != nil {
+		t.Fatal(err)
 	}
 }
 

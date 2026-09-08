@@ -1269,6 +1269,8 @@ module.exports = {
   format: format,
   formatWithOptions: formatWithOptions,
   inspect: inspect,
+  debuglog: function () { return function () {}; },
+  debug: function () { return function () {}; },
   promisify: promisify,
   styleText: styleText,
   stripVTControlCharacters: stripVTControlCharacters,

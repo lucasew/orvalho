@@ -6,6 +6,18 @@ import (
 	"github.com/lucasew/orvalho/pkg/imports"
 )
 
+func TestNodeConsole(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var c = require("node:console");
+		if (typeof c.log !== "function") throw new Error("log");
+		if (require("console") !== c) throw new Error("alias");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeHostPathIdentity(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `

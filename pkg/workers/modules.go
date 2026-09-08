@@ -239,6 +239,9 @@ func (iso *Isolate) requireFrom(from string) goja.Value {
 }
 
 func (iso *Isolate) rewriteRelative(spec string) string {
+	if mapped, ok := iso.fileURLSpec(spec); ok {
+		return mapped
+	}
 	if iso.importFrom == "" {
 		return spec
 	}
@@ -246,6 +249,23 @@ func (iso *Isolate) rewriteRelative(spec string) string {
 		return path.Clean(path.Join(path.Dir(iso.importFrom), spec))
 	}
 	return spec
+}
+
+func (iso *Isolate) fileURLSpec(spec string) (string, bool) {
+	if !isFileHref(spec) {
+		return "", false
+	}
+	p := fileURLToGuest(spec)
+	cwd := ""
+	if iso != nil {
+		cwd = iso.cwd
+	}
+	p = stripCwdPrefix(p, cwd)
+	p = strings.TrimLeft(strings.ReplaceAll(p, "\\", "/"), "/")
+	if p == "" {
+		return ".", true
+	}
+	return p, true
 }
 
 func (iso *Isolate) loadScript(key, source, file string) (goja.Value, error) {
