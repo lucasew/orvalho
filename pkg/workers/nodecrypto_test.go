@@ -1,6 +1,10 @@
 package workers
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/lucasew/orvalho/pkg/workers/bundle"
+)
 
 func runNodeCrypto(t *testing.T, src string) {
 	t.Helper()
@@ -101,6 +105,19 @@ func TestNodeCryptoHash(t *testing.T) {
 		var short = hex.substring(0, 8);
 		if (short.length !== 8) throw new Error("slice");
 	`)
+}
+
+func TestNodeCryptoESMDefaultHash(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports(), PrepareSource: bundle.TransformCJS})
+	err := iso.ScriptMain(t.Context(), `
+		import crypto from "node:crypto";
+		if (typeof crypto.hash !== "function") throw new Error("hash " + typeof crypto.hash);
+		var hex = crypto.hash("sha256", "abc", "hex");
+		if (hex.indexOf("ba7816bf") !== 0) throw new Error("hex " + hex);
+	`, "t.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestNodeCryptoCreateHash(t *testing.T) {

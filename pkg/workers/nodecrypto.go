@@ -53,6 +53,7 @@ func newNodeCrypto(iso *Isolate) *goja.Object {
 	web := iso.vm.NewObject()
 	mustSet(web, "getRandomValues", obj.Get("getRandomValues"))
 	mustSet(obj, "webcrypto", web)
+	mustSet(obj, "default", obj)
 	return obj
 }
 
