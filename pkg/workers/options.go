@@ -2,6 +2,7 @@ package workers
 
 import (
 	"context"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -16,6 +17,11 @@ type SpawnReq struct {
 	Args []string
 	Cwd  string
 	Env  []string
+	// Stdin/Stdout/Stderr are guest pipes. The host attaches them to the
+	// child; the isolate never calls os. Nil means the host may inherit.
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 // SpawnWait is the child's exit.

@@ -244,6 +244,17 @@ func hostSpawn(ctx context.Context, req workers.SpawnReq) (workers.Spawned, erro
 	if len(req.Env) > 0 {
 		cmd.Env = req.Env
 	}
+	if req.Stdin != nil {
+		cmd.Stdin = req.Stdin
+	}
+	if req.Stdout != nil {
+		cmd.Stdout = req.Stdout
+	}
+	if req.Stderr != nil {
+		cmd.Stderr = req.Stderr
+	} else {
+		cmd.Stderr = os.Stderr
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}

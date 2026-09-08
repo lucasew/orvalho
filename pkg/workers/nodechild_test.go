@@ -2,6 +2,7 @@ package workers
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/lucasew/orvalho/pkg/workers/bundle"
@@ -163,6 +164,48 @@ func TestNodeChildSpawnExecErrorIsEvent(t *testing.T) {
 		setTimeout(function () {
 			if (!saw) throw new Error("no error event");
 		}, 0);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeChildStdioPipe(t *testing.T) {
+	iso := New("", Options{
+		Imports: NodeScriptImports(),
+		Spawn: func(ctx context.Context, req SpawnReq) (Spawned, error) {
+			if req.Stdin == nil || req.Stdout == nil {
+				t.Fatal("missing stdio pipes")
+			}
+			done := make(chan SpawnWait, 1)
+			go func() {
+				_, _ = io.Copy(req.Stdout, req.Stdin)
+				if c, ok := req.Stdout.(io.Closer); ok {
+					_ = c.Close()
+				}
+				done <- SpawnWait{Code: 0}
+			}()
+			return stubSpawned{pid: 9, done: done}, nil
+		},
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var child = require("child_process").spawn("cat", []);
+		if (typeof child.stdin.write !== "function") throw new Error("write");
+		if (child.stdin === child.stdout) throw new Error("shared stdio");
+		var got = [];
+		var ended = false;
+		child.stdout.on("data", function (chunk) {
+			for (var i = 0; i < chunk.length; i++) got.push(chunk[i]);
+		});
+		child.stdout.on("end", function () { ended = true; });
+		var payload = new Uint8Array([1, 2, 3, 4]);
+		child.stdin.write(payload, function () {
+			child.stdin.end();
+		});
+		setTimeout(function () {
+			if (got.join(",") !== "1,2,3,4") throw new Error("got " + got);
+			if (!ended) throw new Error("no end");
+		}, 20);
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)

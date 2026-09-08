@@ -2,6 +2,7 @@ package workers
 
 import (
 	"context"
+	"io"
 	"strings"
 
 	"github.com/dop251/goja"
@@ -176,20 +177,36 @@ func (n *nodeChild) start(file string, args []string) goja.Value {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	stdinR, stdinW := io.Pipe()
+	stdoutR, stdoutW := io.Pipe()
+	n.attachStdio(child, stdinW, stdoutR)
 	h, err := n.iso.opts.Spawn(ctx, SpawnReq{
-		File: file,
-		Args: args,
-		Cwd:  n.iso.cwd,
-		Env:  processEnvSlice(n.iso),
+		File:   file,
+		Args:   args,
+		Cwd:    n.iso.cwd,
+		Env:    processEnvSlice(n.iso),
+		Stdin:  stdinR,
+		Stdout: stdoutW,
 	})
 	if err != nil {
+		_ = stdinW.Close()
+		_ = stdoutW.Close()
+		_ = stdinR.Close()
+		_ = stdoutR.Close()
 		// Node spawn() returns the ChildProcess and emits 'error'
 		// asynchronously (workerd stub is /dev/null → EACCES).
 		n.scheduleChildError(child, err, file)
 		return child
 	}
 	mustSet(child, "pid", h.PID())
-	n.watch(child, h)
+	mustSet(child, "kill", func(goja.FunctionCall) bool {
+		_ = h.Kill()
+		return true
+	})
+	n.watch(child, h, func() {
+		_ = stdinW.Close()
+		_ = stdoutW.Close()
+	})
 	return child
 }
 
@@ -254,18 +271,10 @@ func (n *nodeChild) newChild(pid int) *goja.Object {
 	listeners := map[string][]goja.Callable{}
 	mustSet(child, "pid", pid)
 	mustSet(child, "connected", false)
-	stdio := vm.NewObject()
-	mustSet(stdio, "on", func(goja.FunctionCall) goja.Value { return stdio })
-	mustSet(stdio, "pipe", func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) > 0 {
-			return call.Argument(0)
-		}
-		return stdio
-	})
-	mustSet(stdio, "unpipe", func(goja.FunctionCall) goja.Value { return stdio })
-	mustSet(child, "stdin", stdio)
-	mustSet(child, "stdout", stdio)
-	mustSet(child, "stderr", stdio)
+	stub := n.newStream()
+	mustSet(child, "stdin", stub)
+	mustSet(child, "stdout", stub)
+	mustSet(child, "stderr", stub)
 	mustSet(child, "on", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 2 {
 			return child
@@ -298,7 +307,166 @@ func (n *nodeChild) newChild(pid int) *goja.Object {
 	return child
 }
 
-func (n *nodeChild) watch(child *goja.Object, h Spawned) {
+func (n *nodeChild) attachStdio(child *goja.Object, stdin io.WriteCloser, stdout io.ReadCloser) {
+	mustSet(child, "stdin", n.newStdin(stdin))
+	mustSet(child, "stdout", n.newStdout(stdout))
+	mustSet(child, "stderr", n.newStream())
+}
+
+func (n *nodeChild) newStream() *goja.Object {
+	s := n.iso.vm.NewObject()
+	listeners := map[string][]goja.Callable{}
+	mustSet(s, "on", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			if fn, ok := goja.AssertFunction(call.Argument(1)); ok {
+				ev := call.Argument(0).String()
+				listeners[ev] = append(listeners[ev], fn)
+			}
+		}
+		return s
+	})
+	mustSet(s, "once", s.Get("on"))
+	mustSet(s, "emit", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			return goja.Undefined()
+		}
+		ev := call.Argument(0).String()
+		var args []goja.Value
+		if len(call.Arguments) > 1 {
+			args = call.Arguments[1:]
+		}
+		for _, fn := range listeners[ev] {
+			_, _ = fn(s, args...)
+		}
+		return goja.Undefined()
+	})
+	mustSet(s, "pipe", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) > 0 {
+			return call.Argument(0)
+		}
+		return s
+	})
+	mustSet(s, "unpipe", func(goja.FunctionCall) goja.Value { return s })
+	mustSet(s, "unref", func(goja.FunctionCall) goja.Value { return s })
+	mustSet(s, "ref", func(goja.FunctionCall) goja.Value { return s })
+	mustSet(s, "destroy", func(goja.FunctionCall) goja.Value { return s })
+	mustSet(s, "end", func(goja.FunctionCall) goja.Value { return s })
+	return s
+}
+
+func (n *nodeChild) newStdin(w io.WriteCloser) *goja.Object {
+	s := n.newStream()
+	mustSet(s, "write", func(call goja.FunctionCall) goja.Value {
+		data := valueBytes(call.Argument(0))
+		var cb goja.Callable
+		if len(call.Arguments) > 1 {
+			if fn, ok := goja.AssertFunction(call.Argument(len(call.Arguments) - 1)); ok {
+				cb = fn
+			}
+		}
+		_, err := w.Write(data)
+		if cb != nil {
+			var ev goja.Value = goja.Null()
+			if err != nil {
+				ev = n.iso.vm.ToValue(err.Error())
+			}
+			n.iso.timers.schedule(cb, []goja.Value{ev}, 0, 0, n.iso.now())
+		}
+		return n.iso.vm.ToValue(err == nil)
+	})
+	mustSet(s, "end", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) > 0 && !goja.IsUndefined(call.Argument(0)) && !goja.IsNull(call.Argument(0)) {
+			if _, isFn := goja.AssertFunction(call.Argument(0)); !isFn {
+				_, _ = w.Write(valueBytes(call.Argument(0)))
+			}
+		}
+		_ = w.Close()
+		return s
+	})
+	mustSet(s, "destroy", func(goja.FunctionCall) goja.Value {
+		_ = w.Close()
+		return s
+	})
+	return s
+}
+
+func (n *nodeChild) newStdout(r io.ReadCloser) *goja.Object {
+	s := n.newStream()
+	ch := make(chan []byte, 8)
+	go func() {
+		defer close(ch)
+		buf := make([]byte, 64*1024)
+		for {
+			nr, err := r.Read(buf)
+			if nr > 0 {
+				cp := make([]byte, nr)
+				copy(cp, buf[:nr])
+				ch <- cp
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	mustSet(s, "destroy", func(goja.FunctionCall) goja.Value {
+		_ = r.Close()
+		return s
+	})
+	n.pump(s, ch)
+	return s
+}
+
+func (n *nodeChild) pump(s *goja.Object, ch <-chan []byte) {
+	emit := s.Get("emit")
+	fn, ok := goja.AssertFunction(emit)
+	if !ok {
+		return
+	}
+	var poll goja.Callable
+	poll = func(this goja.Value, args ...goja.Value) (goja.Value, error) {
+		for {
+			select {
+			case b, ok := <-ch:
+				if !ok {
+					_, err := fn(s, n.iso.vm.ToValue("end"))
+					return goja.Undefined(), err
+				}
+				if _, err := fn(s, n.iso.vm.ToValue("data"), n.bytesToJS(b)); err != nil {
+					return goja.Undefined(), err
+				}
+			default:
+				n.iso.timers.schedule(poll, nil, 0, 0, n.iso.now())
+				return goja.Undefined(), nil
+			}
+		}
+	}
+	n.iso.timers.schedule(poll, nil, 0, 0, n.iso.now())
+}
+
+func (n *nodeChild) bytesToJS(b []byte) goja.Value {
+	cp := append([]byte(nil), b...)
+	ab := n.iso.vm.NewArrayBuffer(cp)
+	if buf := n.iso.vm.Get("Buffer"); buf != nil && !goja.IsUndefined(buf) {
+		if o, ok := buf.(*goja.Object); ok {
+			if from, ok := goja.AssertFunction(o.Get("from")); ok {
+				if v, err := from(buf, n.iso.vm.ToValue(ab)); err == nil {
+					return v
+				}
+			}
+		}
+	}
+	ctor, ok := goja.AssertConstructor(n.iso.vm.Get("Uint8Array"))
+	if !ok {
+		return n.iso.vm.ToValue(ab)
+	}
+	v, err := ctor(nil, n.iso.vm.ToValue(ab))
+	if err != nil {
+		return n.iso.vm.ToValue(ab)
+	}
+	return v
+}
+
+func (n *nodeChild) watch(child *goja.Object, h Spawned, onDone func()) {
 	emit := child.Get("emit")
 	fn, ok := goja.AssertFunction(emit)
 	if !ok {
@@ -308,6 +476,9 @@ func (n *nodeChild) watch(child *goja.Object, h Spawned) {
 	poll = func(this goja.Value, args ...goja.Value) (goja.Value, error) {
 		select {
 		case w := <-h.Done():
+			if onDone != nil {
+				onDone()
+			}
 			_, err := fn(child, n.iso.vm.ToValue("exit"), n.iso.vm.ToValue(w.Code), goja.Null())
 			if err != nil {
 				return goja.Undefined(), err
