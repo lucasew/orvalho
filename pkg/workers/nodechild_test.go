@@ -143,6 +143,29 @@ func TestNodeChildSpawnInjected(t *testing.T) {
 	}
 }
 
+func TestNodeChildSpawnExecErrorIsEvent(t *testing.T) {
+	iso := New("", Options{
+		Imports: NodeScriptImports(),
+		Spawn: func(ctx context.Context, req SpawnReq) (Spawned, error) {
+			return nil, ErrSpawnDenied
+		},
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var saw = false;
+		var child = require("child_process").spawn("/dev/null");
+		child.on("error", function (e) {
+			if (!e) throw new Error("no err");
+			saw = true;
+		});
+		setTimeout(function () {
+			if (!saw) throw new Error("no error event");
+		}, 0);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeChildSpawnArgType(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `

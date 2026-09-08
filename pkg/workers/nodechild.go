@@ -2,6 +2,7 @@ package workers
 
 import (
 	"context"
+	"strings"
 
 	"github.com/dop251/goja"
 )
@@ -182,11 +183,43 @@ func (n *nodeChild) start(file string, args []string) goja.Value {
 		Env:  processEnvSlice(n.iso),
 	})
 	if err != nil {
-		panic(n.iso.vm.NewGoError(err))
+		// Node spawn() returns the ChildProcess and emits 'error'
+		// asynchronously (workerd stub is /dev/null → EACCES).
+		n.scheduleChildError(child, err, file)
+		return child
 	}
 	mustSet(child, "pid", h.PID())
 	n.watch(child, h)
 	return child
+}
+
+func (n *nodeChild) scheduleChildError(child *goja.Object, err error, file string) {
+	ctor, ok := goja.AssertConstructor(n.iso.vm.Get("Error"))
+	if !ok {
+		return
+	}
+	o, ctorErr := ctor(nil, n.iso.vm.ToValue(err.Error()))
+	if ctorErr != nil {
+		return
+	}
+	code := "ENOENT"
+	if strings.Contains(err.Error(), "permission denied") {
+		code = "EACCES"
+	}
+	_ = o.Set("code", code)
+	_ = o.Set("syscall", "spawn")
+	_ = o.Set("path", file)
+	emit := child.Get("emit")
+	fn, ok := goja.AssertFunction(emit)
+	if !ok {
+		return
+	}
+	var fire goja.Callable
+	fire = func(this goja.Value, args ...goja.Value) (goja.Value, error) {
+		_, e := fn(child, n.iso.vm.ToValue("error"), o)
+		return goja.Undefined(), e
+	}
+	n.iso.timers.schedule(fire, nil, 0, 0, n.iso.now())
 }
 
 func (n *nodeChild) waitSync(file string, args []string) goja.Value {
