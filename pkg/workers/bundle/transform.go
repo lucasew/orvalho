@@ -105,7 +105,34 @@ func finishCJS(src string) string {
 	src = rewriteES6UnicodeEscapes(src)
 	src = rewriteUnicodeProperties(src)
 	src = rewriteRegexpFlags(src)
+	src = rewriteCopyProps(src)
 	return rewriteImportMeta(src)
+}
+
+// rewriteCopyProps replaces esbuild's for-of __copyProps with an index
+// loop. goja can fail to iterate getOwnPropertyNames; each getter must
+// bind its key so every name does not resolve to the last property.
+func rewriteCopyProps(src string) string {
+	old := `var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};`
+	neu := `var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    var names = __getOwnPropNames(from);
+    for (var i = 0; i < names.length; i++) {
+      var key = names[i];
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: ((k) => from[k]).bind(null, key), enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+  }
+  return to;
+};`
+	return strings.ReplaceAll(src, old, neu)
 }
 
 // rewriteRegexpFlags drops flags goja rejects (hasIndices `d`, unicodeSets `v`).

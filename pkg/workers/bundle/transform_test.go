@@ -10,6 +10,34 @@ import (
 	"github.com/lucasew/orvalho/pkg/workers/bundle"
 )
 
+func TestTransformCJSRewritesCopyProps(t *testing.T) {
+	out, err := bundle.TransformCJS("import { execFile } from \"node:child_process\";\nexport const f = execFile;\n", "mod.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "var names = __getOwnPropNames(from);") {
+		i := strings.Index(out, "__copyProps")
+		dump := out
+		if i >= 0 {
+			end := i + 700
+			if end > len(out) {
+				end = len(out)
+			}
+			dump = out[i:end]
+		}
+		t.Fatalf("index-loop rewrite missing; __copyProps block:\n%s", dump)
+	}
+	if strings.Contains(out, "for (let key of __getOwnPropNames(from))") {
+		t.Fatalf("for-of __copyProps survived:\n%s", out)
+	}
+	if !strings.Contains(out, "for (var i = 0; i < names.length; i++)") {
+		t.Fatalf("index loop missing:\n%s", out)
+	}
+	if !strings.Contains(out, `get: ((k) => from[k]).bind(null, key)`) {
+		t.Fatalf("key-binding getter missing:\n%s", out)
+	}
+}
+
 func TestTransformCJSDropsRegexpDFlag(t *testing.T) {
 	out, err := bundle.TransformCJS("export const r = new RegExp('x', 'dg');\n", "mod.mjs")
 	if err != nil {
