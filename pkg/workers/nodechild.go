@@ -325,7 +325,17 @@ func (n *nodeChild) newStream() *goja.Object {
 		}
 		return s
 	})
+	mustSet(s, "prependListener", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			if fn, ok := goja.AssertFunction(call.Argument(1)); ok {
+				ev := call.Argument(0).String()
+				listeners[ev] = append([]goja.Callable{fn}, listeners[ev]...)
+			}
+		}
+		return s
+	})
 	mustSet(s, "once", s.Get("on"))
+	mustSet(s, "prependOnceListener", s.Get("prependListener"))
 	mustSet(s, "emit", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			return goja.Undefined()

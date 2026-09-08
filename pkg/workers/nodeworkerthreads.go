@@ -156,7 +156,17 @@ func attachEmitter(obj *goja.Object) {
 		}
 		return obj
 	})
+	mustSet(obj, "prependListener", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			if fn, ok := goja.AssertFunction(call.Argument(1)); ok {
+				ev := call.Argument(0).String()
+				listeners[ev] = append([]goja.Callable{fn}, listeners[ev]...)
+			}
+		}
+		return obj
+	})
 	mustSet(obj, "once", obj.Get("on"))
+	mustSet(obj, "prependOnceListener", obj.Get("prependListener"))
 	mustSet(obj, "off", func(call goja.FunctionCall) goja.Value { return obj })
 	mustSet(obj, "emit", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {

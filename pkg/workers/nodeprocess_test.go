@@ -42,6 +42,9 @@ func TestNodeProcessOnce(t *testing.T) {
 		if (n !== 1) throw new Error("emit " + n);
 		if (typeof process.stdin.on !== "function") throw new Error("stdin.on");
 		process.stdin.on("end", function () {});
+		if (typeof process.stdin.prependListener !== "function") throw new Error("prependListener");
+		process.stdin.prependListener("data", function () {});
+		if (typeof process.prependListener !== "function") throw new Error("process.prependListener");
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)
