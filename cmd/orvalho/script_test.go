@@ -166,6 +166,35 @@ func TestRunScriptFileWriteFS(t *testing.T) {
 	}
 }
 
+func TestRunScriptFileReaddirDirent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("a.txt", filepath.Join(dir, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "main.js")
+	src := `
+		var fs = require("fs");
+		var ents = fs.readdirSync(".", { withFileTypes: true });
+		var link = ents.filter(function (e) { return e.name === "link.txt"; })[0];
+		if (!link) throw new Error("missing link");
+		if (!link.isSymbolicLink()) throw new Error("not link");
+		if (link.isFile()) throw new Error("link is file");
+		if (ents.some(function (e) { return e.isSymbolicLink() && e.name === "a.txt"; })) throw new Error("a is link");
+	`
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runScriptFile(t.Context(), dir, path, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHostTreeFSRealpathFollowsSymlink(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "real"), 0o755); err != nil {

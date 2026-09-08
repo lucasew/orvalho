@@ -337,7 +337,7 @@ func (n *nodeFS) jsReaddirSync(call goja.FunctionCall) goja.Value {
 	if err != nil {
 		n.throwMapped("scandir", p, err)
 	}
-	return n.dirNames(ents)
+	return n.readdirResult(ents, call.Argument(1))
 }
 
 func (n *nodeFS) jsReaddir(call goja.FunctionCall) goja.Value {
@@ -349,8 +349,15 @@ func (n *nodeFS) jsReaddir(call goja.FunctionCall) goja.Value {
 		n.nextTick(cb, n.sysMapped("scandir", p, err), goja.Undefined())
 		return goja.Undefined()
 	}
-	n.nextTick(cb, goja.Null(), n.dirNames(ents))
+	n.nextTick(cb, goja.Null(), n.readdirResult(ents, call.Argument(1)))
 	return goja.Undefined()
+}
+
+func (n *nodeFS) readdirResult(ents []fs.DirEntry, opts goja.Value) goja.Value {
+	if withFileTypes(opts) {
+		return n.dirents(ents)
+	}
+	return n.dirNames(ents)
 }
 
 func (n *nodeFS) dirNames(ents []fs.DirEntry) goja.Value {
@@ -359,6 +366,43 @@ func (n *nodeFS) dirNames(ents []fs.DirEntry) goja.Value {
 		names = append(names, e.Name())
 	}
 	return n.iso.vm.ToValue(names)
+}
+
+func (n *nodeFS) dirents(ents []fs.DirEntry) goja.Value {
+	out := make([]any, 0, len(ents))
+	for _, e := range ents {
+		out = append(out, n.direntObj(e))
+	}
+	return n.iso.vm.ToValue(out)
+}
+
+func (n *nodeFS) direntObj(e fs.DirEntry) *goja.Object {
+	o := n.iso.vm.NewObject()
+	mode := e.Type()
+	mustSet(o, "name", e.Name())
+	mustSet(o, "isFile", n.statFlag(mode.IsRegular()))
+	mustSet(o, "isDirectory", n.statFlag(e.IsDir()))
+	mustSet(o, "isSymbolicLink", n.statFlag(mode&fs.ModeSymlink != 0))
+	mustSet(o, "isBlockDevice", n.statFlag(false))
+	mustSet(o, "isCharacterDevice", n.statFlag(false))
+	mustSet(o, "isFIFO", n.statFlag(false))
+	mustSet(o, "isSocket", n.statFlag(false))
+	return o
+}
+
+func withFileTypes(v goja.Value) bool {
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return false
+	}
+	obj, ok := v.(*goja.Object)
+	if !ok {
+		return false
+	}
+	flag := obj.Get("withFileTypes")
+	if flag == nil || goja.IsUndefined(flag) {
+		return false
+	}
+	return flag.ToBoolean()
 }
 
 func (n *nodeFS) jsRealpathSync(call goja.FunctionCall) goja.Value {

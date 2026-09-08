@@ -263,6 +263,36 @@ func TestStripCwdPrefix(t *testing.T) {
 	}
 }
 
+func TestNodeFSReaddirWithFileTypes(t *testing.T) {
+	runNodeFS(t, nodeFSMap(), `
+		var fs = require("fs");
+		var names = fs.readdirSync("dir");
+		if (names.indexOf("a.txt") < 0) throw new Error("names " + names);
+		var ents = fs.readdirSync("dir", { withFileTypes: true });
+		var a = null;
+		var sub = null;
+		for (var i = 0; i < ents.length; i++) {
+			if (ents[i].name === "a.txt") a = ents[i];
+			if (ents[i].name === "sub") sub = ents[i];
+		}
+		if (!a) throw new Error("missing a.txt");
+		if (typeof a.isSymbolicLink !== "function") throw new Error("isSymbolicLink");
+		if (!a.isFile()) throw new Error("a file");
+		if (a.isDirectory()) throw new Error("a dir");
+		if (a.isSymbolicLink()) throw new Error("a link");
+		if (!sub || !sub.isDirectory()) throw new Error("sub");
+		var n = 0;
+		fs.readdir("dir", { withFileTypes: true }, function (err, got) {
+			if (err) throw err;
+			if (!got.some(function (e) { return e.name === "a.txt" && e.isFile(); })) throw new Error("async");
+			n = 1;
+		});
+		setTimeout(function () {
+			if (n !== 1) throw new Error("cb");
+		}, 0);
+	`)
+}
+
 func TestNodeFSCwdAbsoluteAndNative(t *testing.T) {
 	iso := New("", Options{
 		FS:      nodeFSMap(),
