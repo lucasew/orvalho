@@ -99,6 +99,8 @@ func newNodeFS(iso *Isolate) *goja.Object {
 	n.setNative(obj, "realpathSync", n.jsRealpathSync)
 	mustSet(obj, "rename", n.jsStub2("rename", "oldPath", "newPath", false))
 	mustSet(obj, "renameSync", n.jsStub2("rename", "oldPath", "newPath", true))
+	mustSet(obj, "rm", n.jsRm)
+	mustSet(obj, "rmSync", n.jsRmSync)
 	mustSet(obj, "rmdir", n.jsRmdir)
 	mustSet(obj, "rmdirSync", n.jsRmdirSync)
 	mustSet(obj, "stat", n.jsStat)
@@ -181,7 +183,7 @@ function (fs) {
   }
   var names = [
     "access", "appendFile", "close", "copyFile", "lstat", "mkdir", "open",
-    "readFile", "readdir", "readlink", "realpath", "rmdir", "stat",
+    "readFile", "readdir", "readlink", "realpath", "rm", "rmdir", "stat",
     "unlink", "writeFile"
   ];
   var p = {};
@@ -619,6 +621,112 @@ func (n *nodeFS) jsUnlink(call goja.FunctionCall) goja.Value {
 	n.requireCB(cb)
 	n.remove(p, "unlink", false, cb)
 	return goja.Undefined()
+}
+
+func (n *nodeFS) jsRmSync(call goja.FunctionCall) goja.Value {
+	p := n.mustPath(call.Argument(0), "path")
+	n.rm(p, rmOptsOf(call.Argument(1)), true, nil)
+	return goja.Undefined()
+}
+
+func (n *nodeFS) jsRm(call goja.FunctionCall) goja.Value {
+	p := n.mustPath(call.Argument(0), "path")
+	opts, cb := n.rmArgs(call)
+	n.requireCB(cb)
+	n.rm(p, opts, false, cb)
+	return goja.Undefined()
+}
+
+type rmOpts struct {
+	recursive bool
+	force     bool
+}
+
+func rmOptsOf(v goja.Value) rmOpts {
+	var o rmOpts
+	obj, ok := v.(*goja.Object)
+	if !ok || v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return o
+	}
+	if x := obj.Get("recursive"); x != nil && !goja.IsUndefined(x) {
+		o.recursive = x.ToBoolean()
+	}
+	if x := obj.Get("force"); x != nil && !goja.IsUndefined(x) {
+		o.force = x.ToBoolean()
+	}
+	return o
+}
+
+func (n *nodeFS) rmArgs(call goja.FunctionCall) (rmOpts, goja.Callable) {
+	if len(call.Arguments) < 2 {
+		return rmOpts{}, nil
+	}
+	a := call.Argument(1)
+	if fn, ok := goja.AssertFunction(a); ok {
+		return rmOpts{}, fn
+	}
+	opts := rmOptsOf(a)
+	if len(call.Arguments) > 2 {
+		if fn, ok := goja.AssertFunction(call.Argument(2)); ok {
+			return opts, fn
+		}
+	}
+	return opts, nil
+}
+
+func (n *nodeFS) rm(p string, opts rmOpts, sync bool, cb goja.Callable) {
+	info, err := n.statPath(p)
+	if err != nil {
+		if opts.force && isNotExist(err) {
+			if !sync {
+				n.nextTick(cb, goja.Null())
+			}
+			return
+		}
+		n.fail("rm", p, err, sync, cb, false)
+		return
+	}
+	w := n.writer()
+	if w == nil {
+		n.fail("rm", p, errReadOnly, sync, cb, false)
+		return
+	}
+	if info.IsDir() && opts.recursive {
+		if err := n.rmRecursive(w, p); err != nil {
+			n.fail("rm", p, err, sync, cb, false)
+			return
+		}
+	} else if err := w.Remove(p); err != nil {
+		n.fail("rm", p, err, sync, cb, false)
+		return
+	}
+	if !sync {
+		n.nextTick(cb, goja.Null())
+	}
+}
+
+func (n *nodeFS) rmRecursive(w WriteFS, p string) error {
+	ents, err := n.readDir(p)
+	if err != nil {
+		return err
+	}
+	for _, e := range ents {
+		child := path.Join(p, e.Name())
+		if e.IsDir() {
+			if err := n.rmRecursive(w, child); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := w.Remove(child); err != nil {
+			return err
+		}
+	}
+	return w.Remove(p)
+}
+
+func isNotExist(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, errPathEscape)
 }
 
 func (n *nodeFS) jsRmdirSync(call goja.FunctionCall) goja.Value {

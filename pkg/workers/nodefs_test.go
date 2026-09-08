@@ -64,6 +64,29 @@ func TestNodeFSClose(t *testing.T) {
 	`)
 }
 
+func TestNodeFSRm(t *testing.T) {
+	runNodeFS(t, nodeFSMap(), `
+		var fs = require("fs");
+		if (typeof fs.rm !== "function") throw new Error("rm");
+		if (typeof fs.rmSync !== "function") throw new Error("rmSync");
+		if (typeof fs.promises.rm !== "function") throw new Error("promises.rm");
+		try { fs.rmSync("nope.txt"); throw new Error("should throw"); } catch (e) {
+			if (e.message === "should throw") throw e;
+			if (e.code !== "ENOENT") throw new Error("code " + e.code);
+		}
+		fs.rmSync("nope.txt", { force: true });
+		try { fs.rmSync("hello.txt"); throw new Error("ro should throw"); } catch (e) {
+			if (e.message === "ro should throw") throw e;
+			if (e.code !== "EROFS") throw new Error("ro " + e.code);
+		}
+		var n = 0;
+		fs.promises.rm("nope2.txt", { force: true }).then(function () { n = 1; });
+		setTimeout(function () {
+			if (n !== 1) throw new Error("promises " + n);
+		}, 0);
+	`)
+}
+
 func TestNodeFSExistsSync(t *testing.T) {
 	runNodeFS(t, nodeFSMap(), `
 		var fs = require("fs");
@@ -182,7 +205,7 @@ func TestNodeFSNullBytes(t *testing.T) {
 		var methods = [
 			"accessSync", "appendFileSync", "chmodSync", "chownSync",
 			"lstatSync", "mkdirSync", "openSync", "readFileSync",
-			"readdirSync", "readlinkSync", "realpathSync", "rmdirSync",
+			"readdirSync", "readlinkSync", "realpathSync", "rmSync", "rmdirSync",
 			"statSync", "truncateSync", "unlinkSync", "utimesSync",
 			"writeFileSync"
 		];
