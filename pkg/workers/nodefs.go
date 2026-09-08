@@ -994,11 +994,27 @@ func (n *nodeFS) parsePath(v goja.Value) (string, error) {
 	} else if strings.ContainsRune(raw, 0) {
 		return "", errPathNUL
 	}
+	return normalizeGuest(n.stripMountPrefix(raw))
+}
+
+// stripMountPrefix maps a host-absolute path under the mounted tree
+// (opts.Cwd) or the current process.cwd(). Vite/wrangler keep host
+// paths after chdir; stripping only the live cwd misses those reads.
+func (n *nodeFS) stripMountPrefix(raw string) string {
 	cwd := ""
+	mount := ""
 	if n != nil && n.iso != nil {
 		cwd = n.iso.cwd
+		mount = n.iso.opts.Cwd
 	}
-	return normalizeGuest(stripCwdPrefix(raw, cwd))
+	out := stripCwdPrefix(raw, cwd)
+	if mount != "" && mount != cwd {
+		alt := stripCwdPrefix(raw, mount)
+		if alt != raw && (out == raw || len(alt) < len(out)) {
+			return alt
+		}
+	}
+	return out
 }
 
 // stripCwdPrefix maps a host-absolute path under process.cwd() into the

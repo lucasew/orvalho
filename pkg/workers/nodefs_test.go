@@ -394,6 +394,22 @@ func TestNodeFSCwdAbsoluteAndNative(t *testing.T) {
 	}
 }
 
+func TestNodeFSAbsAfterChdir(t *testing.T) {
+	iso := New("", Options{
+		FS:      nodeFSMap(),
+		Cwd:     "/guest/root",
+		Imports: NodeScriptImports(),
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var fs = require("fs");
+		process.chdir("/guest/root/dir");
+		if (fs.readFileSync("/guest/root/hello.txt", "utf8") !== "hi") throw new Error("mount");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeFSPromisesIdentity(t *testing.T) {
 	runNodeFS(t, nodeFSMap(), `
 		var fs = require("fs");
