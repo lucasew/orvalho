@@ -22,6 +22,35 @@ func TestNodeChildPromisifyExecFile(t *testing.T) {
 	}
 }
 
+func TestNodeChildPromisifyExecFileResult(t *testing.T) {
+	done := make(chan SpawnWait, 1)
+	done <- SpawnWait{Code: 0}
+	iso := New("", Options{
+		Imports:       NodeScriptImports(),
+		PrepareSource: bundle.TransformCJS,
+		Spawn: func(ctx context.Context, req SpawnReq) (Spawned, error) {
+			return stubSpawned{pid: 3, done: done}, nil
+		},
+	})
+	err := iso.ScriptMain(t.Context(), `
+		import { execFile } from "node:child_process";
+		import { promisify } from "node:util";
+		var saw;
+		promisify(execFile)("echo").then(function (r) {
+			if (!r || typeof r !== "object") throw new Error("shape " + r);
+			if (r.stdout !== "") throw new Error("stdout " + r.stdout);
+			if (r.stderr !== "") throw new Error("stderr " + r.stderr);
+			saw = true;
+		});
+		setTimeout(function () {
+			if (!saw) throw new Error("no result");
+		}, 0);
+	`, "t.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeChildPropNames(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `

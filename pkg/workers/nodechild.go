@@ -40,7 +40,42 @@ func newNodeChild(iso *Isolate) *goja.Object {
 	mustSet(obj, "execFileSync", n.jsExecFileSync)
 	mustSet(obj, "spawnSync", n.jsSpawnSync)
 	mustSet(obj, "default", obj)
+	n.installPromisifyCustom(obj)
 	return obj
+}
+
+// installPromisifyCustom makes promisify(execFile) fulfill {stdout,stderr}
+// the way Node's child_process does (generic promisify keeps only the
+// first success argument).
+func (n *nodeChild) installPromisifyCustom(cp *goja.Object) {
+	v, err := runNamedScript(n.iso.vm, "node:child_process/promisify", `(function (cp) {
+  var key = Symbol.for("nodejs.util.promisify.custom");
+  function wrap(fn) {
+    return function () {
+      var args = [];
+      for (var i = 0; i < arguments.length; i++) args.push(arguments[i]);
+      return new Promise(function (resolve, reject) {
+        args.push(function (err, stdout, stderr) {
+          if (err) reject(err);
+          else resolve({ stdout: stdout == null ? "" : stdout, stderr: stderr == null ? "" : stderr });
+        });
+        fn.apply(cp, args);
+      });
+    };
+  }
+  if (typeof cp.execFile === "function") cp.execFile[key] = wrap(cp.execFile);
+  if (typeof cp.exec === "function") cp.exec[key] = wrap(cp.exec);
+})`)
+	if err != nil {
+		panic("goja child_process promisify: " + err.Error())
+	}
+	fn, ok := goja.AssertFunction(v)
+	if !ok {
+		return
+	}
+	if _, err := fn(goja.Undefined(), cp); err != nil {
+		panic(err)
+	}
 }
 
 func (n *nodeChild) jsSpawn(call goja.FunctionCall) goja.Value {
@@ -94,7 +129,18 @@ func (n *nodeChild) jsExec(call goja.FunctionCall) goja.Value {
 		n.throwArgType("command")
 	}
 	cmd := call.Argument(0).String()
-	return n.start("sh", []string{"-c", cmd})
+	cb := lastFunc(call)
+	child := n.start("sh", []string{"-c", cmd}).(*goja.Object)
+	if cb != nil {
+		on := child.Get("on")
+		if fn, ok := goja.AssertFunction(on); ok {
+			_, _ = fn(child, n.iso.vm.ToValue("exit"), n.iso.vm.ToValue(func(goja.FunctionCall) goja.Value {
+				_, _ = cb(goja.Undefined(), goja.Null(), n.iso.vm.ToValue(""), n.iso.vm.ToValue(""))
+				return goja.Undefined()
+			}))
+		}
+	}
+	return child
 }
 
 func (n *nodeChild) jsExecSync(call goja.FunctionCall) goja.Value {
