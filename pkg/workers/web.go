@@ -85,6 +85,25 @@ func (iso *Isolate) installWebTypes() {
     return iter(this._orvalhoPairs().map(function (p) { return p[1]; }));
   };
   Headers.prototype[Symbol.iterator] = Headers.prototype.entries;
+  var origFromEntries = Object.fromEntries;
+  Object.fromEntries = function (it) {
+    if (it && typeof it.next === "function") {
+      var acc = [];
+      for (;;) {
+        var step = it.next();
+        if (!step || step.done) break;
+        acc.push(step.value);
+      }
+      return origFromEntries(acc);
+    }
+    if (it && typeof it[Symbol.iterator] === "function" && !Array.isArray(it)) {
+      return origFromEntries(Array.from(it));
+    }
+    if (it && typeof it === "object" && typeof it.length !== "number") {
+      return origFromEntries(Object.entries(it));
+    }
+    return origFromEntries(it);
+  };
 })();`)
 
 	reqProto := iso.vm.Get("Request").ToObject(iso.vm).Get("prototype").ToObject(iso.vm)
