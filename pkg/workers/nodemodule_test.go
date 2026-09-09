@@ -93,6 +93,20 @@ func TestNodeModuleRequireResolve(t *testing.T) {
 	`)
 }
 
+func TestNodeModuleCreateRequireGuestPath(t *testing.T) {
+	fsys := fstest.MapFS{
+		"node_modules/astro/tsconfigs/strict.json": {Data: []byte(`{"extends":"./base.json"}`)},
+		"node_modules/astro/tsconfigs/base.json":   {Data: []byte(`{"compilerOptions":{}}`)},
+	}
+	runNodeModuleFS(t, fsys, `
+		var createRequire = require("module").createRequire;
+		var from = "node_modules/astro/tsconfigs/strict.json";
+		var req = createRequire(from);
+		var p = req.resolve("./base.json");
+		if (p.indexOf("base.json") < 0) throw new Error("resolve " + p);
+	`)
+}
+
 func TestNodeModuleCreateRequireRelative(t *testing.T) {
 	fsys := fstest.MapFS{
 		"app/pkg/lib.js": {Data: []byte(`exports.n = 42;`)},

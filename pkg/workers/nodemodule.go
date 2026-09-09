@@ -1,6 +1,7 @@
 package workers
 
 import (
+	"path"
 	"strings"
 
 	"github.com/dop251/goja"
@@ -90,9 +91,6 @@ func createRequireFilename(v goja.Value) (string, bool) {
 		return "", false
 	}
 	if s, ok := exportString(v); ok {
-		if isAbsoluteFilename(s) {
-			return absFilenameToGuest(s), true
-		}
 		if isFileHref(s) {
 			p := fileURLToGuest(s)
 			if p == "" {
@@ -100,7 +98,20 @@ func createRequireFilename(v goja.Value) (string, bool) {
 			}
 			return p, true
 		}
-		return "", false
+		if isAbsoluteFilename(s) {
+			return absFilenameToGuest(s), true
+		}
+		// require.resolve returns guest-tree paths (no leading /).
+		// Vite tsconfck then createRequire(that). Node wants absolute;
+		// those strings are our module identity.
+		if strings.Contains(s, "://") {
+			return "", false
+		}
+		s = path.Clean(strings.ReplaceAll(s, "\\", "/"))
+		if s == "" || s == "." || strings.HasPrefix(s, "..") {
+			return "", false
+		}
+		return s, true
 	}
 	obj, ok := v.(*goja.Object)
 	if !ok {
