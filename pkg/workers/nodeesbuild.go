@@ -44,6 +44,7 @@ func newNodeEsbuild(iso *Isolate) *goja.Object {
 	mustSet(obj, "formatMessagesSync", n.jsFormatMessagesSync)
 	mustSet(obj, "build", n.jsBuild)
 	mustSet(obj, "buildSync", n.jsBuildSync)
+	mustSet(obj, "context", n.jsContext)
 	mustSet(obj, "default", obj)
 	return obj
 }
@@ -149,10 +150,7 @@ func (n *nodeEsbuild) jsBuildSync(call goja.FunctionCall) goja.Value {
 }
 
 func (n *nodeEsbuild) doBuild(call goja.FunctionCall) (goja.Value, goja.Value) {
-	opts, plugins := n.buildOpts(call.Argument(0))
-	opts.Plugins = append(opts.Plugins, n.guestFSPlugin())
-	opts.Plugins = append(opts.Plugins, plugins...)
-	opts.Write = false
+	opts := n.prepareBuild(call.Argument(0))
 	n.iso.trace("esbuild build %s", strings.Join(opts.EntryPoints, " "))
 	t0 := time.Now()
 	res := api.Build(opts)
@@ -162,6 +160,58 @@ func (n *nodeEsbuild) doBuild(call goja.FunctionCall) (goja.Value, goja.Value) {
 	}
 	n.iso.trace("esbuild build ok %s", time.Since(t0).Round(time.Millisecond))
 	return n.buildOK(res), nil
+}
+
+func (n *nodeEsbuild) jsContext(call goja.FunctionCall) goja.Value {
+	p, resolve, reject := n.iso.vm.NewPromise()
+	opts := n.prepareBuild(call.Argument(0))
+	n.iso.trace("esbuild context %s", strings.Join(opts.EntryPoints, " "))
+	ctx, cerr := api.Context(opts)
+	if cerr != nil {
+		reject(n.fail(cerr.Errors, nil))
+		return n.iso.vm.ToValue(p)
+	}
+	resolve(n.wrapContext(ctx))
+	return n.iso.vm.ToValue(p)
+}
+
+func (n *nodeEsbuild) wrapContext(ctx api.BuildContext) goja.Value {
+	o := n.iso.vm.NewObject()
+	mustSet(o, "rebuild", func(goja.FunctionCall) goja.Value {
+		p, resolve, reject := n.iso.vm.NewPromise()
+		n.iso.trace("esbuild context rebuild")
+		t0 := time.Now()
+		res := ctx.Rebuild()
+		if len(res.Errors) > 0 {
+			n.iso.trace("esbuild context rebuild fail %s", time.Since(t0).Round(time.Millisecond))
+			reject(n.fail(res.Errors, res.Warnings))
+		} else {
+			n.iso.trace("esbuild context rebuild ok %s", time.Since(t0).Round(time.Millisecond))
+			resolve(n.buildOK(res))
+		}
+		return n.iso.vm.ToValue(p)
+	})
+	mustSet(o, "cancel", func(goja.FunctionCall) goja.Value {
+		p, resolve, _ := n.iso.vm.NewPromise()
+		ctx.Cancel()
+		resolve(goja.Undefined())
+		return n.iso.vm.ToValue(p)
+	})
+	mustSet(o, "dispose", func(goja.FunctionCall) goja.Value {
+		p, resolve, _ := n.iso.vm.NewPromise()
+		ctx.Dispose()
+		resolve(goja.Undefined())
+		return n.iso.vm.ToValue(p)
+	})
+	return o
+}
+
+func (n *nodeEsbuild) prepareBuild(v goja.Value) api.BuildOptions {
+	opts, plugins := n.buildOpts(v)
+	opts.Plugins = append(opts.Plugins, n.guestFSPlugin())
+	opts.Plugins = append(opts.Plugins, plugins...)
+	opts.Write = false
+	return opts
 }
 
 func (n *nodeEsbuild) buildOK(res api.BuildResult) goja.Value {
@@ -355,11 +405,50 @@ func (n *nodeEsbuild) buildOpts(v goja.Value) (api.BuildOptions, []api.Plugin) {
 		opts.MinifySyntax = true
 	}
 	opts.EntryPoints = jsStringSlice(o.Get("entryPoints"))
+	opts.External = jsStringSlice(o.Get("external"))
 	if s := jsToString(o.Get("absWorkingDir")); s != "" {
 		opts.AbsWorkingDir = s
 	}
 	if s := jsToString(o.Get("sourceRoot")); s != "" {
 		opts.SourceRoot = s
+	}
+	if s := jsToString(o.Get("outdir")); s != "" {
+		opts.Outdir = s
+	}
+	if s := jsToString(o.Get("outfile")); s != "" {
+		opts.Outfile = s
+	}
+	if b, ok := jsBool(o.Get("splitting")); ok {
+		opts.Splitting = b
+	}
+	if b, ok := jsBool(o.Get("ignoreAnnotations")); ok {
+		opts.IgnoreAnnotations = b
+	}
+	if b, ok := jsBool(o.Get("jsxDev")); ok {
+		opts.JSXDev = b
+	}
+	if banner := jsStringMap(o.Get("banner")); len(banner) > 0 {
+		opts.Banner = banner
+	}
+	opts.LegalComments = parseLegalComments(jsToString(o.Get("legalComments")))
+	opts.LogLevel = parseLogLevel(jsToString(o.Get("logLevel")))
+	if raw := o.Get("tsconfigRaw"); raw != nil && !goja.IsUndefined(raw) && !goja.IsNull(raw) {
+		switch t := raw.Export().(type) {
+		case string:
+			opts.TsconfigRaw = t
+		default:
+			if b, err := json.Marshal(t); err == nil {
+				opts.TsconfigRaw = string(b)
+			}
+		}
+	}
+	if stdin, ok := o.Get("stdin").(*goja.Object); ok && stdin != nil {
+		opts.Stdin = &api.StdinOptions{
+			Contents:   jsToString(stdin.Get("contents")),
+			ResolveDir: jsToString(stdin.Get("resolveDir")),
+			Sourcefile: jsToString(stdin.Get("sourcefile")),
+			Loader:     parseLoader(jsToString(stdin.Get("loader"))),
+		}
 	}
 	opts.MainFields = jsStringSlice(o.Get("mainFields"))
 	if loaders := jsStringMap(o.Get("loader")); len(loaders) > 0 {
@@ -638,6 +727,42 @@ func parseFormat(s string) api.Format {
 		return api.FormatIIFE
 	default:
 		return api.FormatDefault
+	}
+}
+
+func parseLegalComments(s string) api.LegalComments {
+	switch s {
+	case "none":
+		return api.LegalCommentsNone
+	case "inline":
+		return api.LegalCommentsInline
+	case "eof":
+		return api.LegalCommentsEndOfFile
+	case "linked":
+		return api.LegalCommentsLinked
+	case "external":
+		return api.LegalCommentsExternal
+	default:
+		return api.LegalCommentsDefault
+	}
+}
+
+func parseLogLevel(s string) api.LogLevel {
+	switch s {
+	case "verbose":
+		return api.LogLevelVerbose
+	case "debug":
+		return api.LogLevelDebug
+	case "info":
+		return api.LogLevelInfo
+	case "warning":
+		return api.LogLevelWarning
+	case "error":
+		return api.LogLevelError
+	case "silent":
+		return api.LogLevelSilent
+	default:
+		return api.LogLevelSilent
 	}
 }
 

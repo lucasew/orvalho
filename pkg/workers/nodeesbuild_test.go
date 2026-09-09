@@ -77,3 +77,56 @@ func TestEsbuildBuildGuestFS(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestEsbuildContextRebuild(t *testing.T) {
+	fsys := fstest.MapFS{
+		"in.js": {Data: []byte(`export const n = 3;`)},
+	}
+	iso := New("", Options{FS: fsys, Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var esbuild = require("esbuild");
+		if (typeof esbuild.context !== "function") throw new Error("context");
+		var got = "";
+		esbuild.context({ entryPoints: ["in.js"], write: false, format: "cjs" }).then(function (ctx) {
+			if (typeof ctx.rebuild !== "function") throw new Error("rebuild");
+			if (typeof ctx.dispose !== "function") throw new Error("dispose");
+			if (typeof ctx.cancel !== "function") throw new Error("cancel");
+			return ctx.rebuild().then(function (r) {
+				got = r.outputFiles[0].text;
+				if (got.indexOf("3") < 0) throw new Error("rebuild " + got);
+				return ctx.dispose();
+			});
+		});
+		setTimeout(function () {
+			if (!got) throw new Error("no context rebuild");
+		}, 0);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEsbuildContextStdin(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var esbuild = require("esbuild");
+		var got = "";
+		esbuild.context({
+			stdin: { contents: "export const n = 4;", loader: "js" },
+			write: false,
+			format: "cjs"
+		}).then(function (ctx) {
+			return ctx.rebuild().then(function (r) {
+				got = r.outputFiles[0].text;
+				if (got.indexOf("4") < 0) throw new Error("stdin " + got);
+				return ctx.dispose();
+			});
+		});
+		setTimeout(function () {
+			if (!got) throw new Error("no stdin rebuild");
+		}, 0);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
