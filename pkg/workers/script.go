@@ -62,6 +62,7 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 
 	idle := 0
 	for {
+		iso.pollHTTP()
 		if err := iso.drainOneTickLocked(ctx); err != nil {
 			return iso.wrapScriptError(ctx, err)
 		}
@@ -110,6 +111,17 @@ func (iso *Isolate) waitForWorkLocked(ctx context.Context, wait time.Duration) e
 		iso.mu.Lock()
 		iso.dispatchHTTP(job)
 		return nil
+	}
+}
+
+func (iso *Isolate) pollHTTP() {
+	for {
+		select {
+		case job := <-iso.httpCh:
+			iso.dispatchHTTP(job)
+		default:
+			return
+		}
 	}
 }
 

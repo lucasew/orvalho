@@ -304,11 +304,13 @@ func (n *nodeHTTP) serve(ln net.Listener, srv *goja.Object) {
 	_ = http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		_ = r.Body.Close()
+		n.iso.trace("http %s %s", r.Method, r.URL.RequestURI())
 		job := &httpJob{w: w, r: r, body: body, srv: srv, done: make(chan struct{})}
 		select {
 		case n.iso.httpCh <- job:
 			<-job.done
 		case <-r.Context().Done():
+			n.iso.trace("http cancel %s %s", r.Method, r.URL.RequestURI())
 		}
 	}))
 }
@@ -320,7 +322,15 @@ func (iso *Isolate) dispatchHTTP(job *httpJob) {
 	n := &nodeHTTP{iso: iso}
 	req := n.makeReq(job.r, job.body)
 	res := n.makeRes(job.w, job.done)
-	n.emit(job.srv, "request", req, res)
+	if err := n.emit(job.srv, "request", req, res); err != nil {
+		iso.trace("http handler %s %s: %v", job.r.Method, job.r.URL.RequestURI(), err)
+		http.Error(job.w, err.Error(), http.StatusInternalServerError)
+		select {
+		case <-job.done:
+		default:
+			close(job.done)
+		}
+	}
 }
 
 func (n *nodeHTTP) makeReq(r *http.Request, body []byte) *goja.Object {
@@ -333,8 +343,19 @@ func (n *nodeHTTP) makeReq(r *http.Request, body []byte) *goja.Object {
 	for k, vs := range r.Header {
 		mustSet(hdr, strings.ToLower(k), strings.Join(vs, ", "))
 	}
+	if r.Host != "" {
+		mustSet(hdr, "host", r.Host)
+	}
 	mustSet(req, "headers", hdr)
-	mustSet(req, "socket", n.iso.vm.NewObject())
+	sock := n.iso.vm.NewObject()
+	mustSet(sock, "remoteAddress", "127.0.0.1")
+	mustSet(sock, "remotePort", 0)
+	mustSet(sock, "localAddress", "127.0.0.1")
+	mustSet(sock, "encrypted", false)
+	mustSet(req, "socket", sock)
+	mustSet(req, "connection", sock)
+	mustSet(req, "httpVersionMajor", 1)
+	mustSet(req, "httpVersionMinor", 1)
 	var fire goja.Callable
 	fire = func(this goja.Value, args ...goja.Value) (goja.Value, error) {
 		if len(body) > 0 {
@@ -366,7 +387,19 @@ func (n *nodeHTTP) makeRes(w http.ResponseWriter, done chan struct{}) *goja.Obje
 		if len(call.Arguments) >= 2 {
 			st.hdr.Set(call.Argument(0).String(), call.Argument(1).String())
 		}
-		return goja.Undefined()
+		return res
+	})
+	mustSet(res, "appendHeader", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			st.hdr.Add(call.Argument(0).String(), call.Argument(1).String())
+		}
+		return res
+	})
+	mustSet(res, "removeHeader", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) > 0 {
+			st.hdr.Del(call.Argument(0).String())
+		}
+		return res
 	})
 	mustSet(res, "getHeader", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
@@ -392,50 +425,66 @@ func (n *nodeHTTP) makeRes(w http.ResponseWriter, done chan struct{}) *goja.Obje
 		}
 		return res
 	})
-	flush := func(chunk string) {
+	flush := func(chunk []byte) {
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		if !st.wrote {
+			if v := res.Get("statusCode"); v != nil && !goja.IsUndefined(v) {
+				st.status = int(v.ToInteger())
+			}
 			for k, vs := range st.hdr {
-				for _, v := range vs {
-					st.w.Header().Add(k, v)
+				for _, val := range vs {
+					st.w.Header().Add(k, val)
 				}
 			}
 			st.w.WriteHeader(st.status)
 			st.wrote = true
+			mustSet(res, "headersSent", true)
 		}
-		if chunk != "" {
-			_, _ = io.WriteString(st.w, chunk)
+		if len(chunk) > 0 {
+			_, _ = st.w.Write(chunk)
 		}
 	}
+	mustSet(res, "headersSent", false)
+	mustSet(res, "writableEnded", false)
+	mustSet(res, "writable", true)
+	mustSet(res, "finished", false)
+	mustSet(res, "flushHeaders", func(goja.FunctionCall) goja.Value {
+		flush(nil)
+		return res
+	})
 	mustSet(res, "write", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) > 0 {
-			flush(call.Argument(0).String())
+			flush(valueBytes(call.Argument(0)))
 		}
 		return n.iso.vm.ToValue(true)
 	})
 	mustSet(res, "end", func(call goja.FunctionCall) goja.Value {
-		chunk := ""
+		var chunk []byte
 		if len(call.Arguments) > 0 && !goja.IsUndefined(call.Argument(0)) && !goja.IsNull(call.Argument(0)) {
-			chunk = call.Argument(0).String()
+			chunk = valueBytes(call.Argument(0))
 		}
 		flush(chunk)
 		st.ended = true
+		mustSet(res, "writableEnded", true)
+		mustSet(res, "finished", true)
+		n.iso.trace("http end %d %dB", st.status, len(chunk))
 		finish.Do(func() { close(done) })
-		n.emit(res, "finish")
+		_ = n.emit(res, "finish")
 		return res
 	})
 	return res
 }
 
-func (n *nodeHTTP) emit(obj *goja.Object, ev string, args ...goja.Value) {
+func (n *nodeHTTP) emit(obj *goja.Object, ev string, args ...goja.Value) error {
 	emit := obj.Get("emit")
 	fn, ok := goja.AssertFunction(emit)
 	if !ok {
-		return
+		return nil
 	}
 	all := append([]goja.Value{n.iso.vm.ToValue(ev)}, args...)
-	_, _ = fn(obj, all...)
+	_, err := fn(obj, all...)
+	return err
 }
 
 func (n *nodeHTTP) throwDenied(op string) {
