@@ -116,11 +116,17 @@ func newNodeFS(iso *Isolate) *goja.Object {
 	mustSet(obj, "utimesSync", n.jsStub1("utimes", true))
 	mustSet(obj, "watch", n.jsWatch)
 	mustSet(obj, "watchFile", n.jsWatch)
+	mustSet(obj, "write", n.jsWrite)
+	mustSet(obj, "writeSync", n.jsWriteSync)
 	mustSet(obj, "writeFile", n.jsWriteFile)
 	mustSet(obj, "writeFileSync", n.jsWriteFileSync)
 	mustSet(obj, "exists", n.jsExists)
 	mustSet(obj, "existsSync", n.jsExistsSync)
 	mustSet(obj, "promises", newNodeFSPromises(iso, obj))
+	// Go wasm_exec / syscall/fs_js.go does js.Global().Get("fs").
+	if v := iso.vm.Get("fs"); v == nil || goja.IsUndefined(v) {
+		mustRuntimeSet(iso.vm, "fs", obj)
+	}
 	return obj
 }
 
@@ -562,6 +568,33 @@ func (n *nodeFS) throwReadlink(p string) {
 		n.throwMapped("readlink", p, err)
 	}
 	n.throwSys("EINVAL", -22, "readlink", p)
+}
+
+func (n *nodeFS) jsWriteSync(call goja.FunctionCall) goja.Value {
+	fd := int(call.Argument(0).ToInteger())
+	if fd != 1 && fd != 2 {
+		n.throwSys("EBADF", -9, "write", "")
+	}
+	return n.iso.vm.ToValue(n.iso.writeStdio(fd, valueBytes(call.Argument(1))))
+}
+
+func (n *nodeFS) jsWrite(call goja.FunctionCall) goja.Value {
+	fd := int(call.Argument(0).ToInteger())
+	data := valueBytes(call.Argument(1))
+	_, cb := n.optsAndCB(call, 2)
+	if fd != 1 && fd != 2 {
+		if cb != nil {
+			n.nextTick(cb, n.sysObj("EBADF", -9, "write", ""), goja.Undefined())
+			return goja.Undefined()
+		}
+		n.throwSys("EBADF", -9, "write", "")
+	}
+	nw := n.iso.writeStdio(fd, data)
+	if cb != nil {
+		n.nextTick(cb, goja.Null(), n.iso.vm.ToValue(nw))
+		return goja.Undefined()
+	}
+	return n.iso.vm.ToValue(nw)
 }
 
 func (n *nodeFS) jsWriteFileSync(call goja.FunctionCall) goja.Value {

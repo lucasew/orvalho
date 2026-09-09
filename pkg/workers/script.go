@@ -270,6 +270,20 @@ func jsStrings(rt *goja.Runtime, xs []string) *goja.Object {
 	return rt.NewArray(items...)
 }
 
+func (iso *Isolate) writeStdio(fd int, b []byte) int {
+	var w *os.File
+	switch fd {
+	case 1:
+		w = os.Stdout
+	case 2:
+		w = os.Stderr
+	default:
+		return 0
+	}
+	n, _ := w.Write(b)
+	return n
+}
+
 func (iso *Isolate) newStdio(fd int) *goja.Object {
 	s := iso.vm.NewObject()
 	attachEmitter(s)
@@ -282,13 +296,7 @@ func (iso *Isolate) newStdio(fd int) *goja.Object {
 		return iso.vm.ToValue(false)
 	})
 	mustSet(s, "write", func(call goja.FunctionCall) goja.Value {
-		b := valueBytes(call.Argument(0))
-		switch fd {
-		case 1:
-			_, _ = os.Stdout.Write(b)
-		case 2:
-			_, _ = os.Stderr.Write(b)
-		}
+		iso.writeStdio(fd, valueBytes(call.Argument(0)))
 		if cb := lastFunc(call); cb != nil {
 			iso.timers.schedule(cb, []goja.Value{goja.Null()}, 0, 0, iso.now())
 		}

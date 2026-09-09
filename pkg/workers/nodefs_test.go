@@ -238,6 +238,22 @@ func TestNodeFSReadFileAsync(t *testing.T) {
 	`)
 }
 
+func TestNodeFSWriteSyncStdio(t *testing.T) {
+	runNodeFS(t, nodeFSMap(), `
+		var fs = require("fs");
+		if (globalThis.fs !== fs) throw new Error("global fs");
+		if (typeof fs.writeSync !== "function") throw new Error("writeSync");
+		if (fs.writeSync(1, Buffer.from("")) !== 0) throw new Error("empty");
+		if (fs.writeSync(2, Buffer.from("x")) !== 1) throw new Error("stderr");
+		try {
+			fs.writeSync(99, Buffer.from("x"));
+			throw new Error("should EBADF");
+		} catch (e) {
+			if (e.code !== "EBADF") throw new Error("code " + e.code);
+		}
+	`)
+}
+
 func TestNodeFSWriteReadOnly(t *testing.T) {
 	runNodeFS(t, nodeFSMap(), `
 		var fs = require("fs");
