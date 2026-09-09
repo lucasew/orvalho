@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/dop251/goja"
@@ -280,7 +281,17 @@ func (iso *Isolate) newStdio(fd int) *goja.Object {
 	mustSet(s, "hasColors", func(goja.FunctionCall) goja.Value {
 		return iso.vm.ToValue(false)
 	})
-	mustSet(s, "write", func(goja.FunctionCall) goja.Value {
+	mustSet(s, "write", func(call goja.FunctionCall) goja.Value {
+		b := valueBytes(call.Argument(0))
+		switch fd {
+		case 1:
+			_, _ = os.Stdout.Write(b)
+		case 2:
+			_, _ = os.Stderr.Write(b)
+		}
+		if cb := lastFunc(call); cb != nil {
+			iso.timers.schedule(cb, []goja.Value{goja.Null()}, 0, 0, iso.now())
+		}
 		return iso.vm.ToValue(true)
 	})
 	mustSet(s, "end", func(call goja.FunctionCall) goja.Value { return s })
