@@ -212,6 +212,81 @@ func TestNodeChildStdioPipe(t *testing.T) {
 	}
 }
 
+func TestNodeChildSpawnOptionsWithoutStdio(t *testing.T) {
+	done := make(chan SpawnWait, 1)
+	done <- SpawnWait{Code: 0}
+	iso := New("", Options{
+		Imports: NodeScriptImports(),
+		Spawn: func(ctx context.Context, req SpawnReq) (Spawned, error) {
+			return stubSpawned{pid: 5, done: done}, nil
+		},
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var child = require("child_process").spawn("npm", ["config", "get", "registry"], { env: { FOO: "1" } });
+		if (child.pid !== 5) throw new Error("pid " + child.pid);
+		if (!child.stdio || child.stdio.length !== 3) throw new Error("stdio " + (child.stdio && child.stdio.length));
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeChildStdioExtraPipe(t *testing.T) {
+	done := make(chan SpawnWait, 1)
+	done <- SpawnWait{Code: 0}
+	iso := New("", Options{
+		Imports: NodeScriptImports(),
+		Spawn: func(ctx context.Context, req SpawnReq) (Spawned, error) {
+			return stubSpawned{pid: 4, done: done}, nil
+		},
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var Readable = require("stream").Readable;
+		var child = require("child_process").spawn("workerd", ["serve"], {
+			stdio: ["pipe", "pipe", "pipe", "pipe"]
+		});
+		if (!child.stdio || child.stdio.length !== 4) throw new Error("stdio " + (child.stdio && child.stdio.length));
+		if (child.stdio[0] !== child.stdin) throw new Error("stdin slot");
+		if (child.stdio[1] !== child.stdout) throw new Error("stdout slot");
+		if (child.stdio[3] == null) throw new Error("fd3");
+		if (!(child.stdio[3] instanceof Readable)) throw new Error("fd3 not Readable");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeChildSpawnFailStdioAndExit(t *testing.T) {
+	iso := New("", Options{
+		Imports: NodeScriptImports(),
+		Spawn: func(ctx context.Context, req SpawnReq) (Spawned, error) {
+			return nil, ErrSpawnDenied
+		},
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var Readable = require("stream").Readable;
+		var sawError = false;
+		var sawExit = false;
+		var finished = false;
+		var child = require("child_process").spawn("/dev/null", ["serve"], {
+			stdio: ["pipe", "pipe", "pipe", "pipe"]
+		});
+		if (!(child.stdio && child.stdio[3] instanceof Readable)) throw new Error("fd3");
+		child.on("error", function () { sawError = true; });
+		child.on("exit", function () { sawExit = true; });
+		child.stdin.on("finish", function () { finished = true; });
+		child.stdin.end();
+		setTimeout(function () {
+			if (!sawError) throw new Error("no error");
+			if (!sawExit) throw new Error("no exit");
+			if (!finished) throw new Error("no finish");
+		}, 0);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeChildSpawnArgType(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `

@@ -364,6 +364,39 @@ function () {
     return { rows: 0, cols: this.cursor };
   };
 
+  Interface.prototype[Symbol.asyncIterator] = function () {
+    var self = this;
+    var pending = [];
+    var waiters = [];
+    var finished = false;
+    self.on("line", function (line) {
+      if (waiters.length) {
+        waiters.shift()({ value: line, done: false });
+      } else {
+        pending.push(line);
+      }
+    });
+    self.on("close", function () {
+      finished = true;
+      while (waiters.length) {
+        waiters.shift()({ value: undefined, done: true });
+      }
+    });
+    return {
+      next: function () {
+        if (pending.length) {
+          return Promise.resolve({ value: pending.shift(), done: false });
+        }
+        if (finished || self.closed) {
+          return Promise.resolve({ value: undefined, done: true });
+        }
+        return new Promise(function (resolve) {
+          waiters.push(resolve);
+        });
+      }
+    };
+  };
+
   function createInterface(input, output, completer, terminal) {
     return new Interface(input, output, completer, terminal);
   }

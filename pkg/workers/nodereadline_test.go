@@ -51,6 +51,33 @@ function fakeStream() {
 }
 `
 
+func TestNodeReadlineAsyncIterator(t *testing.T) {
+	runNodeReadline(t, readlineFakeStream+`
+		var input = fakeStream();
+		var rl = require("readline").createInterface({ input: input });
+		var it = rl[Symbol.asyncIterator]();
+		if (!it || typeof it.next !== "function") throw new Error("iterator");
+		var got = [];
+		var p = it.next().then(function (a) {
+			got.push(a.value);
+			return it.next();
+		}).then(function (b) {
+			got.push(b.value);
+			return it.next();
+		}).then(function (c) {
+			if (!c.done) throw new Error("not done");
+			if (got.join(",") !== "a,b") throw new Error("got " + got);
+		});
+		input.emit("data", "a\nb\n");
+		input.emit("end");
+		var finished = false;
+		p.then(function () { finished = true; });
+		setTimeout(function () {
+			if (!finished) throw new Error("iterator hung");
+		}, 0);
+	`)
+}
+
 func TestNodeReadlineLines(t *testing.T) {
 	runNodeReadline(t, readlineFakeStream+`
 		var input = fakeStream();

@@ -85,7 +85,7 @@ func (n *nodeChild) jsSpawn(call goja.FunctionCall) goja.Value {
 	if file == "" {
 		n.throwArgType("file")
 	}
-	return n.start(file, args)
+	return n.start(file, args, stdioExtra(spawnOptions(call)))
 }
 
 func (n *nodeChild) jsFork(call goja.FunctionCall) goja.Value {
@@ -99,7 +99,7 @@ func (n *nodeChild) jsFork(call goja.FunctionCall) goja.Value {
 			execPath = v.String()
 		}
 	}
-	return n.start(execPath, append([]string{mod}, args...))
+	return n.start(execPath, append([]string{mod}, args...), 0)
 }
 
 func (n *nodeChild) jsExecFile(call goja.FunctionCall) goja.Value {
@@ -108,7 +108,7 @@ func (n *nodeChild) jsExecFile(call goja.FunctionCall) goja.Value {
 		n.throwArgType("file")
 	}
 	cb := lastFunc(call)
-	child := n.start(file, args).(*goja.Object)
+	child := n.start(file, args, 0).(*goja.Object)
 	if cb != nil {
 		on := child.Get("on")
 		if fn, ok := goja.AssertFunction(on); ok {
@@ -132,7 +132,7 @@ func (n *nodeChild) jsExec(call goja.FunctionCall) goja.Value {
 	}
 	cmd := call.Argument(0).String()
 	cb := lastFunc(call)
-	child := n.start("sh", []string{"-c", cmd}).(*goja.Object)
+	child := n.start("sh", []string{"-c", cmd}, 0).(*goja.Object)
 	if cb != nil {
 		on := child.Get("on")
 		if fn, ok := goja.AssertFunction(on); ok {
@@ -168,7 +168,7 @@ func (n *nodeChild) jsSpawnSync(call goja.FunctionCall) goja.Value {
 	return n.waitSync(file, args)
 }
 
-func (n *nodeChild) start(file string, args []string) goja.Value {
+func (n *nodeChild) start(file string, args []string, extra int) goja.Value {
 	child := n.newChild(0)
 	if n.iso.opts.Spawn == nil {
 		n.throwDenied(file)
@@ -179,7 +179,7 @@ func (n *nodeChild) start(file string, args []string) goja.Value {
 	}
 	stdinR, stdinW := io.Pipe()
 	stdoutR, stdoutW := io.Pipe()
-	n.attachStdio(child, stdinW, stdoutR)
+	n.attachStdio(child, stdinW, stdoutR, extra)
 	n.iso.trace("spawn %s %s", file, strings.Join(args, " "))
 	h, err := n.iso.opts.Spawn(ctx, SpawnReq{
 		File:   file,
@@ -236,7 +236,15 @@ func (n *nodeChild) scheduleChildError(child *goja.Object, err error, file strin
 	}
 	var fire goja.Callable
 	fire = func(this goja.Value, args ...goja.Value) (goja.Value, error) {
-		_, e := fn(child, n.iso.vm.ToValue("error"), o)
+		if _, e := fn(child, n.iso.vm.ToValue("error"), o); e != nil {
+			return goja.Undefined(), e
+		}
+		// Miniflare races waitForPorts against 'exit'. Without this the
+		// control-fd reader hangs after a failed workerd stub spawn.
+		if _, e := fn(child, n.iso.vm.ToValue("exit"), n.iso.vm.ToValue(-1), goja.Null()); e != nil {
+			return goja.Undefined(), e
+		}
+		_, e := fn(child, n.iso.vm.ToValue("close"), n.iso.vm.ToValue(-1), goja.Null())
 		return goja.Undefined(), e
 	}
 	n.iso.timers.schedule(fire, nil, 0, 0, n.iso.now())
@@ -312,10 +320,39 @@ func (n *nodeChild) newChild(pid int) *goja.Object {
 	return child
 }
 
-func (n *nodeChild) attachStdio(child *goja.Object, stdin io.WriteCloser, stdout io.ReadCloser) {
-	mustSet(child, "stdin", n.newStdin(stdin))
-	mustSet(child, "stdout", n.newStdout(stdout))
-	mustSet(child, "stderr", n.newStream())
+func (n *nodeChild) attachStdio(child *goja.Object, stdin io.WriteCloser, stdout io.ReadCloser, extra int) {
+	in := n.newStdin(stdin)
+	out := n.newStdout(stdout)
+	errS := n.newStream()
+	mustSet(child, "stdin", in)
+	mustSet(child, "stdout", out)
+	mustSet(child, "stderr", errS)
+	slots := make([]any, 0, 3+extra)
+	slots = append(slots, in, out, errS)
+	for i := 0; i < extra; i++ {
+		slots = append(slots, n.newReadable())
+	}
+	mustSet(child, "stdio", slots)
+}
+
+func (n *nodeChild) newReadable() *goja.Object {
+	v, err := n.iso.loadModule("node:stream")
+	if err != nil {
+		return n.newStream()
+	}
+	mod, ok := v.(*goja.Object)
+	if !ok {
+		return n.newStream()
+	}
+	ctor, ok := goja.AssertConstructor(mod.Get("Readable"))
+	if !ok {
+		return n.newStream()
+	}
+	inst, err := ctor(nil)
+	if err != nil {
+		return n.newStream()
+	}
+	return inst
 }
 
 func (n *nodeChild) newStream() *goja.Object {
@@ -341,6 +378,8 @@ func (n *nodeChild) newStream() *goja.Object {
 	})
 	mustSet(s, "once", s.Get("on"))
 	mustSet(s, "prependOnceListener", s.Get("prependListener"))
+	mustSet(s, "removeListener", func(goja.FunctionCall) goja.Value { return s })
+	mustSet(s, "off", s.Get("removeListener"))
 	mustSet(s, "emit", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			return goja.Undefined()
@@ -396,6 +435,9 @@ func (n *nodeChild) newStdin(w io.WriteCloser) *goja.Object {
 			}
 		}
 		_ = w.Close()
+		if emit, ok := goja.AssertFunction(s.Get("emit")); ok {
+			_, _ = emit(s, n.iso.vm.ToValue("finish"))
+		}
 		return s
 	})
 	mustSet(s, "destroy", func(goja.FunctionCall) goja.Value {
@@ -547,6 +589,43 @@ func spawnFileName(v goja.Value) string {
 		return ""
 	}
 	return s
+}
+
+func spawnOptions(call goja.FunctionCall) *goja.Object {
+	if len(call.Arguments) >= 3 {
+		o, _ := call.Argument(2).(*goja.Object)
+		return o
+	}
+	if len(call.Arguments) == 2 {
+		arg := call.Argument(1)
+		if arg == nil || goja.IsUndefined(arg) || goja.IsNull(arg) {
+			return nil
+		}
+		if _, isArr := arg.Export().([]any); isArr {
+			return nil
+		}
+		o, _ := arg.(*goja.Object)
+		return o
+	}
+	return nil
+}
+
+func stdioExtra(opts *goja.Object) int {
+	if opts == nil {
+		return 0
+	}
+	v := opts.Get("stdio")
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return 0
+	}
+	arr, ok := v.Export().([]any)
+	if !ok {
+		return 0
+	}
+	if n := len(arr) - 3; n > 0 {
+		return n
+	}
+	return 0
 }
 
 func spawnFileArgs(call goja.FunctionCall) (file string, args []string) {
