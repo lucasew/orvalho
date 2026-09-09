@@ -1,6 +1,7 @@
 package workers
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"net"
@@ -13,11 +14,14 @@ import (
 )
 
 type httpJob struct {
-	w    http.ResponseWriter
-	r    *http.Request
-	body []byte
-	srv  *goja.Object
-	done chan struct{}
+	w       http.ResponseWriter
+	r       *http.Request
+	body    []byte
+	srv     *goja.Object
+	done    chan struct{}
+	upgrade bool
+	conn    net.Conn
+	head    []byte
 }
 
 // nodeHTTPBinding materializes require("http") / require("node:http").
@@ -302,6 +306,10 @@ func (n *nodeHTTP) startListen(srv *goja.Object, ln *net.Listener, once *sync.On
 
 func (n *nodeHTTP) serve(ln net.Listener, srv *goja.Object) {
 	_ = http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			n.serveUpgrade(w, r, srv)
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		_ = r.Body.Close()
 		n.iso.trace("http %s %s", r.Method, r.URL.RequestURI())
@@ -315,11 +323,52 @@ func (n *nodeHTTP) serve(ln net.Listener, srv *goja.Object) {
 	}))
 }
 
+func (n *nodeHTTP) serveUpgrade(w http.ResponseWriter, r *http.Request, srv *goja.Object) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "upgrade: no hijack", http.StatusInternalServerError)
+		return
+	}
+	conn, bufrw, err := hj.Hijack()
+	if err != nil {
+		n.iso.trace("http upgrade hijack: %v", err)
+		return
+	}
+	n.iso.trace("http upgrade %s", r.URL.RequestURI())
+	job := &httpJob{
+		r: r, srv: srv, upgrade: true, conn: conn,
+		head: bufferedHead(bufrw), done: make(chan struct{}),
+	}
+	select {
+	case n.iso.httpCh <- job:
+		<-job.done
+	case <-r.Context().Done():
+		_ = conn.Close()
+	}
+}
+
+func bufferedHead(bufrw *bufio.ReadWriter) []byte {
+	if bufrw == nil || bufrw.Reader == nil {
+		return nil
+	}
+	n := bufrw.Reader.Buffered()
+	if n == 0 {
+		return nil
+	}
+	b := make([]byte, n)
+	_, _ = io.ReadFull(bufrw.Reader, b)
+	return b
+}
+
 func (iso *Isolate) dispatchHTTP(job *httpJob) {
 	if job == nil {
 		return
 	}
 	n := &nodeHTTP{iso: iso}
+	if job.upgrade {
+		n.dispatchUpgrade(job)
+		return
+	}
 	req := n.makeReq(job.r, job.body)
 	res := n.makeRes(job.w, job.done)
 	if err := n.emit(job.srv, "request", req, res); err != nil {
@@ -330,6 +379,33 @@ func (iso *Isolate) dispatchHTTP(job *httpJob) {
 		default:
 			close(job.done)
 		}
+	}
+}
+
+func (n *nodeHTTP) dispatchUpgrade(job *httpJob) {
+	defer func() {
+		select {
+		case <-job.done:
+		default:
+			close(job.done)
+		}
+	}()
+	if job.conn == nil {
+		return
+	}
+	sock := n.bindConn(job.conn)
+	req := n.makeReq(job.r, nil)
+	mustSet(req, "socket", sock)
+	mustSet(req, "connection", sock)
+	mustSet(req, "destroy", func(goja.FunctionCall) goja.Value {
+		if destroy, ok := goja.AssertFunction(sock.Get("destroy")); ok {
+			_, _ = destroy(sock)
+		}
+		return req
+	})
+	if err := n.emit(job.srv, "upgrade", req, sock, jsBytes(n.iso, job.head)); err != nil {
+		n.iso.trace("http upgrade handler: %v", err)
+		_ = job.conn.Close()
 	}
 }
 
@@ -469,11 +545,123 @@ func (n *nodeHTTP) makeRes(w http.ResponseWriter, done chan struct{}) *goja.Obje
 		mustSet(res, "writableEnded", true)
 		mustSet(res, "finished", true)
 		n.iso.trace("http end %d %dB", st.status, len(chunk))
+		if st.status >= 400 && len(chunk) > 0 {
+			snip := chunk
+			if len(snip) > 240 {
+				snip = snip[:240]
+			}
+			n.iso.trace("http error body %q", string(snip))
+		}
 		finish.Do(func() { close(done) })
 		_ = n.emit(res, "finish")
 		return res
 	})
 	return res
+}
+
+func jsBytes(iso *Isolate, b []byte) goja.Value {
+	cp := append([]byte(nil), b...)
+	ab := iso.vm.NewArrayBuffer(cp)
+	if buf := iso.vm.Get("Buffer"); buf != nil && !goja.IsUndefined(buf) {
+		if o, ok := buf.(*goja.Object); ok {
+			if from, ok := goja.AssertFunction(o.Get("from")); ok {
+				if v, err := from(buf, iso.vm.ToValue(ab)); err == nil {
+					return v
+				}
+			}
+		}
+	}
+	return iso.vm.ToValue(ab)
+}
+
+func (n *nodeHTTP) bindConn(conn net.Conn) *goja.Object {
+	sock := n.iso.vm.NewObject()
+	attachEmitter(sock)
+	mustSet(sock, "readable", true)
+	mustSet(sock, "writable", true)
+	mustSet(sock, "destroyed", false)
+	mustSet(sock, "encrypted", false)
+	mustSet(sock, "remoteAddress", "127.0.0.1")
+	mustSet(sock, "remotePort", 0)
+	var closeOnce sync.Once
+	shutdown := func() {
+		closeOnce.Do(func() {
+			_ = conn.Close()
+			mustSet(sock, "destroyed", true)
+			mustSet(sock, "readable", false)
+			mustSet(sock, "writable", false)
+		})
+	}
+	mustSet(sock, "write", func(call goja.FunctionCall) goja.Value {
+		if _, err := conn.Write(valueBytes(call.Argument(0))); err != nil {
+			return n.iso.vm.ToValue(false)
+		}
+		return n.iso.vm.ToValue(true)
+	})
+	mustSet(sock, "end", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) > 0 && !goja.IsUndefined(call.Argument(0)) {
+			_, _ = conn.Write(valueBytes(call.Argument(0)))
+		}
+		shutdown()
+		_ = n.emit(sock, "end")
+		_ = n.emit(sock, "close")
+		return sock
+	})
+	mustSet(sock, "destroy", func(goja.FunctionCall) goja.Value {
+		shutdown()
+		_ = n.emit(sock, "close")
+		return sock
+	})
+	mustSet(sock, "setTimeout", func(goja.FunctionCall) goja.Value { return sock })
+	mustSet(sock, "setNoDelay", func(goja.FunctionCall) goja.Value { return sock })
+	mustSet(sock, "setKeepAlive", func(goja.FunctionCall) goja.Value { return sock })
+	mustSet(sock, "pause", func(goja.FunctionCall) goja.Value { return sock })
+	mustSet(sock, "resume", func(goja.FunctionCall) goja.Value { return sock })
+	mustSet(sock, "unshift", func(call goja.FunctionCall) goja.Value {
+		b := valueBytes(call.Argument(0))
+		if len(b) > 0 {
+			_ = n.emit(sock, "data", jsBytes(n.iso, b))
+		}
+		return sock
+	})
+	ch := make(chan []byte, 8)
+	go func() {
+		defer close(ch)
+		buf := make([]byte, 32*1024)
+		for {
+			nr, err := conn.Read(buf)
+			if nr > 0 {
+				cp := make([]byte, nr)
+				copy(cp, buf[:nr])
+				ch <- cp
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	var poll goja.Callable
+	poll = func(this goja.Value, args ...goja.Value) (goja.Value, error) {
+		for {
+			select {
+			case b, ok := <-ch:
+				if !ok {
+					shutdown()
+					_ = n.emit(sock, "end")
+					_ = n.emit(sock, "close")
+					return goja.Undefined(), nil
+				}
+				if err := n.emit(sock, "data", jsBytes(n.iso, b)); err != nil {
+					return goja.Undefined(), err
+				}
+			default:
+				n.iso.timers.schedule(poll, nil, 0, 0, n.iso.now())
+				return goja.Undefined(), nil
+			}
+		}
+	}
+	n.iso.timers.schedule(poll, nil, 0, 0, n.iso.now())
+	return sock
 }
 
 func (n *nodeHTTP) emit(obj *goja.Object, ev string, args ...goja.Value) error {
