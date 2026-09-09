@@ -6,6 +6,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/dop251/goja"
 	"github.com/lucasew/orvalho/pkg/imports"
@@ -160,6 +161,7 @@ func (iso *Isolate) loadModule(spec string) (goja.Value, error) {
 	if v, ok := iso.cachedExports(spec); ok {
 		return v, nil
 	}
+	iso.trace("require %q", spec)
 	v, err := imports.Resolve(spec, withImportFrom(iso.opts.Imports, iso.importFrom)...)
 	if err != nil {
 		if errors.Is(err, imports.ErrSpecifier) {
@@ -291,14 +293,17 @@ func (iso *Isolate) loadScript(key, source, file string) (goja.Value, error) {
 		delete(iso.loading, key)
 	}()
 
+	iso.trace("eval %s %dB", file, len(source))
 	source = stripShebang(source)
 	if iso.opts.PrepareSource != nil {
+		t0 := time.Now()
 		var err error
 		source, err = iso.opts.PrepareSource(source, file)
 		if err != nil {
 			delete(iso.moduleCache, key)
 			return nil, err
 		}
+		iso.trace("prepare %s %dB %s", file, len(source), time.Since(t0).Round(time.Millisecond))
 	}
 	source = rewriteImportToRequire(source)
 

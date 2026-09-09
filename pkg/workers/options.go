@@ -181,6 +181,10 @@ type Options struct {
 	// PrepareSource rewrites guest source after shebang strip and before
 	// the CommonJS wrap (ESM downlevel). Nil means no extra rewrite.
 	PrepareSource func(source, file string) (string, error)
+
+	// Trace, if set, receives one-line progress (require, eval, listen,
+	// spawn). Nil is silent. The CLI wires this from --verbose / -v.
+	Trace func(format string, args ...any)
 }
 
 func (o Options) withDefaults() Options {

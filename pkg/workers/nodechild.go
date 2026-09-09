@@ -180,6 +180,7 @@ func (n *nodeChild) start(file string, args []string) goja.Value {
 	stdinR, stdinW := io.Pipe()
 	stdoutR, stdoutW := io.Pipe()
 	n.attachStdio(child, stdinW, stdoutR)
+	n.iso.trace("spawn %s %s", file, strings.Join(args, " "))
 	h, err := n.iso.opts.Spawn(ctx, SpawnReq{
 		File:   file,
 		Args:   args,
@@ -189,6 +190,7 @@ func (n *nodeChild) start(file string, args []string) goja.Value {
 		Stdout: stdoutW,
 	})
 	if err != nil {
+		n.iso.trace("spawn fail %s: %v", file, err)
 		_ = stdinW.Close()
 		_ = stdoutW.Close()
 		_ = stdinR.Close()
@@ -198,6 +200,7 @@ func (n *nodeChild) start(file string, args []string) goja.Value {
 		n.scheduleChildError(child, err, file)
 		return child
 	}
+	n.iso.trace("spawn ok %s pid=%d", file, h.PID())
 	mustSet(child, "pid", h.PID())
 	mustSet(child, "kill", func(goja.FunctionCall) bool {
 		_ = h.Kill()
@@ -247,6 +250,7 @@ func (n *nodeChild) waitSync(file string, args []string) goja.Value {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	n.iso.trace("spawn sync %s %s", file, strings.Join(args, " "))
 	h, err := n.iso.opts.Spawn(ctx, SpawnReq{
 		File: file,
 		Args: args,
@@ -254,6 +258,7 @@ func (n *nodeChild) waitSync(file string, args []string) goja.Value {
 		Env:  processEnvSlice(n.iso),
 	})
 	if err != nil {
+		n.iso.trace("spawn sync fail %s: %v", file, err)
 		panic(n.iso.vm.NewGoError(err))
 	}
 	w := <-h.Done()

@@ -2,6 +2,7 @@ package workers
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"strings"
 	"testing"
@@ -14,6 +15,34 @@ func TestScriptMainNoDefaultFetch(t *testing.T) {
 	iso := New("", Options{})
 	if err := iso.ScriptMain(t.Context(), `var x = 1;`, "main.js"); err != nil {
 		t.Fatalf("ScriptMain: %v", err)
+	}
+}
+
+func TestScriptMainTrace(t *testing.T) {
+	var lines []string
+	fsys := fstest.MapFS{
+		"main.js":                           {Data: []byte(`var p = require("leftpad"); if (p.pad("1") !== "01") throw new Error("bad");`)},
+		"node_modules/leftpad/package.json": {Data: []byte(`{"main":"index.js"}`)},
+		"node_modules/leftpad/index.js":     {Data: []byte(`exports.pad = function (s) { return "0" + s; };`)},
+	}
+	src, err := fs.ReadFile(fsys, "main.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	iso := New("", Options{
+		Imports: []imports.Handler[any]{imports.NodeModules{FS: fsys, From: "main.js"}},
+		Trace: func(format string, args ...any) {
+			lines = append(lines, fmt.Sprintf(format, args...))
+		},
+	})
+	if err := iso.ScriptMain(t.Context(), string(src), "main.js"); err != nil {
+		t.Fatalf("ScriptMain: %v", err)
+	}
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{`script main main.js`, `eval main.js`, `require "leftpad"`} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("trace %q missing %q", joined, want)
+		}
 	}
 }
 

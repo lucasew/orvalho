@@ -66,6 +66,13 @@ type Isolate struct {
 // Ensure Isolate implements actor.Actor.
 var _ actor.Actor = (*Isolate)(nil)
 
+func (iso *Isolate) trace(format string, args ...any) {
+	if iso == nil || iso.opts.Trace == nil {
+		return
+	}
+	iso.opts.Trace(format, args...)
+}
+
 // New creates an isolate for script. The script is not executed until the
 // first Tick. Zero-valued opts fields use the documented defaults.
 func New(script string, opts Options) *Isolate {

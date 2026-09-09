@@ -272,7 +272,9 @@ func (n *nodeNet) startListen(srv *goja.Object, ln *net.Listener, once *sync.Onc
 		host = "127.0.0.1"
 	}
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	n.iso.trace("net listen %s", addr)
 	fail := func(code string) {
+		n.iso.trace("net listen fail %s %s", addr, code)
 		err := n.listenErr(code, addr)
 		emit("error", err)
 	}
@@ -293,6 +295,7 @@ func (n *nodeNet) startListen(srv *goja.Object, ln *net.Listener, once *sync.Onc
 		fail(code)
 		return
 	}
+	n.iso.trace("net listen ok %s", l.Addr())
 	*ln = l
 	n.iso.listeners++
 	if cb != nil {

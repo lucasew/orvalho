@@ -55,6 +55,7 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 	if key == "" {
 		key = "."
 	}
+	iso.trace("script main %s %dB", file, len(source))
 	if _, err := iso.loadScript(key, source, file); err != nil {
 		return iso.wrapScriptError(ctx, err)
 	}

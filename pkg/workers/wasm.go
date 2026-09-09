@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"time"
 
 	"github.com/dop251/goja"
 	"github.com/tetratelabs/wazero"
@@ -64,10 +65,14 @@ func (iso *Isolate) ctorWasmModule(call goja.ConstructorCall) *goja.Object {
 		panic(iso.vm.NewTypeError("WebAssembly.Module: first argument must be a BufferSource"))
 	}
 	cp := append([]byte(nil), raw...)
+	iso.trace("wasm compile %dB", len(cp))
+	t0 := time.Now()
 	compiled, err := iso.wasmRuntime().CompileModule(context.Background(), cp)
 	if err != nil {
+		iso.trace("wasm compile fail: %v", err)
 		panic(iso.vm.NewGoError(err))
 	}
+	iso.trace("wasm compile ok %dB %s", len(cp), time.Since(t0).Round(time.Millisecond))
 	iso.wasmCompiled[call.This] = &wasmCompiled{mod: compiled, raw: cp}
 	return nil
 }
@@ -104,11 +109,15 @@ func (iso *Isolate) jsWasmCompile(call goja.FunctionCall) goja.Value {
 		return iso.vm.ToValue(p)
 	}
 	cp := append([]byte(nil), raw...)
+	iso.trace("wasm compile %dB", len(cp))
+	t0 := time.Now()
 	compiled, err := iso.wasmRuntime().CompileModule(context.Background(), cp)
 	if err != nil {
+		iso.trace("wasm compile fail: %v", err)
 		reject(iso.vm.NewGoError(err))
 		return iso.vm.ToValue(p)
 	}
+	iso.trace("wasm compile ok %dB %s", len(cp), time.Since(t0).Round(time.Millisecond))
 	resolve(iso.newWasmModule(compiled, cp))
 	return iso.vm.ToValue(p)
 }
@@ -131,11 +140,15 @@ func (iso *Isolate) jsWasmInstantiate(call goja.FunctionCall) goja.Value {
 		return iso.vm.ToValue(p)
 	}
 	cp := append([]byte(nil), raw...)
+	iso.trace("wasm compile %dB", len(cp))
+	t0 := time.Now()
 	compiled, err := iso.wasmRuntime().CompileModule(context.Background(), cp)
 	if err != nil {
+		iso.trace("wasm compile fail: %v", err)
 		reject(iso.vm.NewGoError(err))
 		return iso.vm.ToValue(p)
 	}
+	iso.trace("wasm compile ok %dB %s", len(cp), time.Since(t0).Round(time.Millisecond))
 	jsMod := iso.newWasmModule(compiled, cp)
 	inst, err := iso.instantiateCompiled(iso.wasmCompiled[jsMod], call.Argument(1))
 	if err != nil {
@@ -273,14 +286,19 @@ func (iso *Isolate) instantiateCompiled(c *wasmCompiled, importObj goja.Value) (
 	if c == nil {
 		return nil, fmt.Errorf("workers: nil wasm module")
 	}
+	iso.trace("wasm instantiate %dB", len(c.raw))
 	if err := iso.instantiateJSImports(c, importObj); err != nil {
+		iso.trace("wasm instantiate fail: %v", err)
 		return nil, err
 	}
 	iso.wasmSeq++
+	t0 := time.Now()
 	mod, err := iso.wasmRuntime().InstantiateModule(context.Background(), c.mod, wazero.NewModuleConfig().WithName(fmt.Sprintf("m%d", iso.wasmSeq)))
 	if err != nil {
+		iso.trace("wasm instantiate fail: %v", err)
 		return nil, err
 	}
+	iso.trace("wasm instantiate ok %dB %s", len(c.raw), time.Since(t0).Round(time.Millisecond))
 	st := &wasmInstance{mod: mod}
 	exports := iso.vm.NewObject()
 	for name := range c.mod.ExportedFunctions() {

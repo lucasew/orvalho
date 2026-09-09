@@ -275,17 +275,21 @@ func (n *nodeHTTP) startListen(srv *goja.Object, ln *net.Listener, once *sync.On
 	if host == "" {
 		host = "127.0.0.1"
 	}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	n.iso.trace("http listen %s", addr)
 	ctx := n.iso.activeCtx
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	l, err := n.iso.opts.Listen(ctx, ListenReq{
 		Network: "tcp",
-		Address: net.JoinHostPort(host, strconv.Itoa(port)),
+		Address: addr,
 	})
 	if err != nil {
+		n.iso.trace("http listen fail %s: %v", addr, err)
 		panic(n.iso.vm.NewGoError(err))
 	}
+	n.iso.trace("http listen ok %s", l.Addr())
 	*ln = l
 	n.iso.listeners++
 	mustSet(srv, "listening", true)

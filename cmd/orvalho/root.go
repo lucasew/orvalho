@@ -15,6 +15,7 @@ import (
 var (
 	dataDir    string
 	configPath string
+	verbose    bool
 )
 
 // rootCmd is the base command for the orvalho CLI.
@@ -42,6 +43,7 @@ func Execute() error {
 func init() {
 	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", "", "host data directory (required for host commands; always explicit)")
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "host orvalho.cue path (default: <data-dir>/orvalho.cue)")
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "print host progress to stderr")
 
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(identityCmd)

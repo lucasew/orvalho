@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -45,6 +46,11 @@ func init() {
 }
 
 func runScriptRun(cmd *cobra.Command, args []string) error {
+	if verbose {
+		if err := os.Setenv("ORVALHO_VERBOSE", "1"); err != nil {
+			return err
+		}
+	}
 	dir, err := os.Getwd()
 	if err != nil {
 		return err
@@ -122,7 +128,7 @@ func runScriptFile(ctx context.Context, dir, file string, extra []string) error 
 	if err != nil {
 		exe = "orvalho"
 	}
-	iso := workers.New("", workers.Options{
+	opts := workers.Options{
 		Argv:       argv,
 		FS:         tree,
 		ProcessEnv: processEnvMap(),
@@ -139,8 +145,24 @@ func runScriptFile(ctx context.Context, dir, file string, extra []string) error 
 			realpathScripts{root: root, inner: imports.NodeModules{FS: tree, From: rel}},
 		),
 		PrepareSource: prepareScriptSource,
-	})
+	}
+	if verboseOn() {
+		opts.Trace = scriptTrace
+	}
+	iso := workers.New("", opts)
 	return iso.ScriptMain(ctx, string(src), rel)
+}
+
+func verboseOn() bool {
+	return verbose || os.Getenv("ORVALHO_VERBOSE") != ""
+}
+
+func scriptTrace(format string, args ...any) {
+	if !verboseOn() {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "orvalho: %s ", time.Now().Format("15:04:05.000"))
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
 }
 
 // evalFSRel resolves symlinks so require walks isolated slot siblings (TEC-17).
@@ -352,6 +374,7 @@ func runPackageScript(ctx context.Context, dir, shellCmd string) error {
 		}
 	}()
 
+	scriptTrace("sh -c %q", shellCmd)
 	cmd := exec.CommandContext(ctx, "sh", "-c", shellCmd)
 	cmd.Dir = dir
 	cmd.Stdin = os.Stdin

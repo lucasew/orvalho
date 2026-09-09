@@ -347,6 +347,54 @@ func TestScriptRunCLIFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("script run: %v\n%s", err, out)
 	}
+	if strings.Contains(string(out), "orvalho: ") {
+		t.Fatalf("quiet run leaked verbose output %q", out)
+	}
+}
+
+func TestScriptRunCLIVerbose(t *testing.T) {
+	exe := orvalhoExe(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.js"), []byte(`var x = 1;`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-v", "script", "run", "main.js")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("script run -v: %v\n%s", err, out)
+	}
+	got := string(out)
+	if !strings.Contains(got, "script main") {
+		t.Fatalf("verbose output %q missing script main", got)
+	}
+	if !strings.Contains(got, "eval ") {
+		t.Fatalf("verbose output %q missing eval", got)
+	}
+}
+
+func TestScriptRunCLIVerboseTrampoline(t *testing.T) {
+	exe := orvalhoExe(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"scripts":{"hello":"node main.js"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.js"), []byte(`var x = 1;`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-v", "script", "run", "hello")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("script run -v hello: %v\n%s", err, out)
+	}
+	got := string(out)
+	if !strings.Contains(got, "sh -c") {
+		t.Fatalf("verbose output %q missing sh -c", got)
+	}
+	if !strings.Contains(got, "script main") {
+		t.Fatalf("verbose output %q missing nested script main", got)
+	}
 }
 
 func TestScriptRunCLIMissing(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dop251/goja"
 	"github.com/evanw/esbuild/pkg/api"
@@ -78,10 +79,14 @@ func (n *nodeEsbuild) promiseTransform(call goja.FunctionCall) goja.Value {
 func (n *nodeEsbuild) doTransform(call goja.FunctionCall) (goja.Value, goja.Value) {
 	code := jsToString(call.Argument(0))
 	opts := transformOpts(call.Argument(1))
+	n.iso.trace("esbuild transform %dB", len(code))
+	t0 := time.Now()
 	res := api.Transform(code, opts)
 	if len(res.Errors) > 0 {
+		n.iso.trace("esbuild transform fail %s", time.Since(t0).Round(time.Millisecond))
 		return nil, n.fail(res.Errors, res.Warnings)
 	}
+	n.iso.trace("esbuild transform ok %dB %s", len(res.Code), time.Since(t0).Round(time.Millisecond))
 	return n.transformOK(res), nil
 }
 
@@ -148,10 +153,14 @@ func (n *nodeEsbuild) doBuild(call goja.FunctionCall) (goja.Value, goja.Value) {
 	opts.Plugins = append(opts.Plugins, n.guestFSPlugin())
 	opts.Plugins = append(opts.Plugins, plugins...)
 	opts.Write = false
+	n.iso.trace("esbuild build %s", strings.Join(opts.EntryPoints, " "))
+	t0 := time.Now()
 	res := api.Build(opts)
 	if len(res.Errors) > 0 {
+		n.iso.trace("esbuild build fail %s", time.Since(t0).Round(time.Millisecond))
 		return nil, n.fail(res.Errors, res.Warnings)
 	}
+	n.iso.trace("esbuild build ok %s", time.Since(t0).Round(time.Millisecond))
 	return n.buildOK(res), nil
 }
 
