@@ -5,7 +5,8 @@ go 1.27.0
 require (
 	cuelang.org/go v0.14.1
 	filippo.io/age v1.3.1
-	github.com/btcsuite/btcd/btcutil v1.1.6
+	github.com/btcsuite/btcd/btcutil v1.2.0
+	github.com/btcsuite/btcd/btcutil/v2 v2.0.1
 	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9
 	github.com/fetchurl/fetchurl v0.0.0-20260824103541-49881a25d469
 	github.com/lewtec/lewkit v0.0.0-20260903000910-52886154b6dd
