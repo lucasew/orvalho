@@ -102,6 +102,8 @@ func (iso *Isolate) installTimers() {
 	iso.vm.Set("clearTimeout", iso.jsClearTimeout)
 	iso.vm.Set("setInterval", iso.jsSetInterval)
 	iso.vm.Set("clearInterval", iso.jsClearInterval)
+	iso.vm.Set("setImmediate", iso.jsSetImmediate)
+	iso.vm.Set("clearImmediate", iso.jsClearTimeout)
 }
 
 // Tick runs one host-controlled step: first-time script evaluation, then up to
@@ -165,6 +167,15 @@ func (iso *Isolate) PendingTimers() int {
 
 func (iso *Isolate) jsSetTimeout(call goja.FunctionCall) goja.Value {
 	return iso.scheduleFromJS(call, false)
+}
+
+func (iso *Isolate) jsSetImmediate(call goja.FunctionCall) goja.Value {
+	// Node setImmediate(fn[, ...args]) has no delay slot.
+	args := []goja.Value{call.Argument(0), iso.vm.ToValue(0)}
+	if len(call.Arguments) > 1 {
+		args = append(args, call.Arguments[1:]...)
+	}
+	return iso.scheduleFromJS(goja.FunctionCall{This: call.This, Arguments: args}, false)
 }
 
 func (iso *Isolate) jsSetInterval(call goja.FunctionCall) goja.Value {
