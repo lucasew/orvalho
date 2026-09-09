@@ -171,9 +171,25 @@ func (iso *Isolate) compiledOf(v goja.Value) *wasmCompiled {
 }
 
 func (iso *Isolate) newWasmModule(compiled wazero.CompiledModule, raw []byte) *goja.Object {
-	o := iso.vm.NewObject()
+	o := iso.wasmBrandObject("Module")
 	iso.wasmCompiled[o] = &wasmCompiled{mod: compiled, raw: raw}
 	return o
+}
+
+func (iso *Isolate) wasmBrandObject(ctorName string) *goja.Object {
+	wa, ok := iso.vm.Get("WebAssembly").(*goja.Object)
+	if !ok || wa == nil {
+		return iso.vm.NewObject()
+	}
+	ctor, ok := wa.Get(ctorName).(*goja.Object)
+	if !ok || ctor == nil {
+		return iso.vm.NewObject()
+	}
+	proto, ok := ctor.Get("prototype").(*goja.Object)
+	if !ok || proto == nil {
+		return iso.vm.NewObject()
+	}
+	return iso.vm.CreateObject(proto)
 }
 
 func (iso *Isolate) instantiateJSImports(c *wasmCompiled, importObj goja.Value) error {
@@ -322,7 +338,7 @@ func (iso *Isolate) instantiateCompiled(c *wasmCompiled, importObj goja.Value) (
 		mustSet(o, "value", globalJS(g))
 		mustSet(exports, name, o)
 	}
-	inst := iso.vm.NewObject()
+	inst := iso.wasmBrandObject("Instance")
 	mustSet(inst, "exports", exports)
 	return inst, nil
 }

@@ -70,6 +70,29 @@ func TestWebAssemblyMemExportName(t *testing.T) {
 	}
 }
 
+func TestWebAssemblyInstanceof(t *testing.T) {
+	raw, err := hex.DecodeString(addWasmHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iso := New("", Options{})
+	err = iso.ScriptMain(t.Context(), `
+		var bytes = new Uint8Array([`+bytesToJS(raw)+`]);
+		var n = 0;
+		WebAssembly.instantiate(bytes).then(function (r) {
+			if (!(r.instance instanceof WebAssembly.Instance)) throw new Error("instance");
+			if (!(r.module instanceof WebAssembly.Module)) throw new Error("module");
+			n = 1;
+		});
+		setTimeout(function () {
+			if (n !== 1) throw new Error("no result");
+		}, 0);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWebAssemblyCompileThenInstantiate(t *testing.T) {
 	raw, err := hex.DecodeString(addWasmHex)
 	if err != nil {
