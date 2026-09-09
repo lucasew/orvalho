@@ -10,7 +10,7 @@ require (
 	github.com/fetchurl/fetchurl v0.0.0-20260824103541-49881a25d469
 	github.com/lewtec/lewkit v0.0.0-20260903000910-52886154b6dd
 	github.com/spf13/cobra v1.10.2
-	github.com/stellar/go v0.0.0-20251023205731-8cd5ab33bcdd
+	github.com/stellar/go v0.0.0-20251210100531-aab2ea4aca88
 	github.com/tyler-smith/go-bip39 v1.1.0
 	golang.org/x/crypto v0.46.0
 )
