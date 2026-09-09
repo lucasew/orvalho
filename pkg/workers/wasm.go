@@ -29,6 +29,7 @@ type wasmCompiled struct {
 
 type wasmInstance struct {
 	mod    api.Module
+	mem    api.Memory
 	jsBuf  []byte
 	jsAB   goja.ArrayBuffer
 	memObj *goja.Object
@@ -289,8 +290,10 @@ func (iso *Isolate) instantiateCompiled(c *wasmCompiled, importObj goja.Value) (
 		}
 		mustSet(exports, name, iso.wrapWasmFn(st, fn))
 	}
-	if mem := liveMemory(mod.ExportedMemory("memory")); mem != nil {
-		st.attachMemory(iso, exports, mem)
+	for name := range mod.ExportedMemoryDefinitions() {
+		if mem := liveMemory(mod.ExportedMemory(name)); mem != nil {
+			st.attachMemory(iso, exports, name, mem)
+		}
 	}
 	for _, name := range exportedGlobalNames(mod) {
 		g := mod.ExportedGlobal(name)
@@ -388,7 +391,7 @@ func (iso *Isolate) wrapWasmFn(st *wasmInstance, fn api.Function) func(goja.Func
 	}
 }
 
-func (st *wasmInstance) attachMemory(iso *Isolate, exports *goja.Object, mem api.Memory) {
+func (st *wasmInstance) attachMemory(iso *Isolate, exports *goja.Object, name string, mem api.Memory) {
 	size := mem.Size()
 	st.jsBuf = make([]byte, size)
 	if data, ok := mem.Read(0, size); ok {
@@ -417,11 +420,15 @@ func (st *wasmInstance) attachMemory(iso *Isolate, exports *goja.Object, mem api
 		st.syncFromWasm()
 		return iso.vm.ToValue(prev)
 	})
-	mustSet(exports, "memory", st.memObj)
+	st.mem = mem
+	mustSet(exports, name, st.memObj)
+	if name != "memory" && exports.Get("memory") == nil {
+		mustSet(exports, "memory", st.memObj)
+	}
 }
 
 func (st *wasmInstance) rebindMemory(iso *Isolate) {
-	mem := liveMemory(st.mod.ExportedMemory("memory"))
+	mem := liveMemory(st.mem)
 	if mem == nil || st.memObj == nil {
 		return
 	}
@@ -443,7 +450,7 @@ func (st *wasmInstance) syncToWasm() {
 	if st.mod == nil {
 		return
 	}
-	mem := st.mod.ExportedMemory("memory")
+	mem := st.mem
 	if mem == nil || st.jsBuf == nil {
 		return
 	}
@@ -458,7 +465,7 @@ func (st *wasmInstance) syncFromWasm() {
 	if st.mod == nil {
 		return
 	}
-	mem := st.mod.ExportedMemory("memory")
+	mem := st.mem
 	if mem == nil || st.jsBuf == nil {
 		return
 	}
