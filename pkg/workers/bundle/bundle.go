@@ -215,7 +215,55 @@ func importCallLen(src string, i int) int {
 	if j >= len(src) || src[j] != '(' {
 		return 0
 	}
+	if importMethodDef(src, j) {
+		return 0
+	}
 	return j + 1 - i // consume through '('
+}
+
+func importMethodDef(src string, open int) bool {
+	close := skipBalancedParen(src, open)
+	if close < 0 {
+		return false
+	}
+	k := close + 1
+	for k < len(src) && (src[k] == ' ' || src[k] == '\t' || src[k] == '\n' || src[k] == '\r') {
+		k++
+	}
+	return k < len(src) && src[k] == '{'
+}
+
+func skipBalancedParen(src string, i int) int {
+	if i >= len(src) || src[i] != '(' {
+		return -1
+	}
+	depth := 0
+	for i < len(src) {
+		switch src[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		case '\'', '"', '`':
+			q := src[i]
+			i++
+			for i < len(src) {
+				if src[i] == '\\' && i+1 < len(src) {
+					i += 2
+					continue
+				}
+				if src[i] == q {
+					break
+				}
+				i++
+			}
+		}
+		i++
+	}
+	return -1
 }
 
 func isIdentByte(c byte) bool {

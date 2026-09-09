@@ -165,6 +165,20 @@ func TestRewriteImportSkipsMethodCall(t *testing.T) {
 	}
 }
 
+func TestRewriteImportSkipsMethodDefinition(t *testing.T) {
+	src := "return { import(src) { return env.runner.import(src); } }; import(\"./x.js\");"
+	got := rewriteImportToRequire(src)
+	if !strings.Contains(got, "import(src)") {
+		t.Fatalf("method definition rewritten: %s", got)
+	}
+	if strings.Contains(got, "__import(src)") {
+		t.Fatalf("method name became __import: %s", got)
+	}
+	if !strings.Contains(got, `__import("./x.js")`) {
+		t.Fatalf("dynamic import missed: %s", got)
+	}
+}
+
 func TestRequireCircularScripts(t *testing.T) {
 	iso := New(`
 		var a = require("orvalho:a");
