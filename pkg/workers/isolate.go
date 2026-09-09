@@ -61,6 +61,7 @@ type Isolate struct {
 	wasmCompiled map[*goja.Object]*wasmCompiled
 	wasmSeq      uint64
 	wasmActive   *wasmInstance
+	wasmGo       *wasmGoJS
 }
 
 // Ensure Isolate implements actor.Actor.

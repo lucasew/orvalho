@@ -215,14 +215,30 @@ func (iso *Isolate) instantiateJSImports(c *wasmCompiled, importObj goja.Value) 
 			params := def.ParamTypes()
 			results := def.ResultTypes()
 			jsFn := jsImportFn(jsRoot, modName, name)
+			gojsName := name
+			useGoJS := modName == "gojs"
 			b.NewFunctionBuilder().
 				WithGoModuleFunction(api.GoModuleFunc(func(ctx context.Context, m api.Module, stack []uint64) {
-					if jsFn == nil {
-						return
-					}
 					if inst := iso.wasmActive; inst != nil {
 						inst.rebindMemory(iso)
 						inst.syncFromWasm()
+					}
+					if useGoJS {
+						if iso.wasmGo == nil {
+							iso.wasmGo = newWasmGoJS(iso)
+						}
+						sp := uint32(0)
+						if len(stack) > 0 {
+							sp = uint32(stack[0])
+						}
+						iso.wasmGo.handle(gojsName, sp)
+						if inst := iso.wasmActive; inst != nil {
+							inst.syncToWasm()
+						}
+						return
+					}
+					if jsFn == nil {
+						return
 					}
 					args := make([]goja.Value, len(params))
 					for i, t := range params {
@@ -377,7 +393,13 @@ func (iso *Isolate) wrapWasmFn(st *wasmInstance, fn api.Function) func(goja.Func
 	return func(call goja.FunctionCall) goja.Value {
 		prev := iso.wasmActive
 		iso.wasmActive = st
-		defer func() { iso.wasmActive = prev }()
+		defer func() {
+			// Keep the instance after exports.run returns so Go wasm
+			// _resume / transform callbacks can still reach memory.
+			if prev != nil {
+				iso.wasmActive = prev
+			}
+		}()
 		st.syncToWasm()
 		params := fn.Definition().ParamTypes()
 		args := make([]uint64, len(params))
@@ -425,10 +447,19 @@ func (iso *Isolate) wrapWasmFn(st *wasmInstance, fn api.Function) func(goja.Func
 	}
 }
 
+// wasmJSMemMin is the JS ArrayBuffer we hand to wasm_exec. Go caches
+// this.mem = new DataView(exports.mem.buffer) and never refreshes it
+// unless resetMemoryDataView runs. Growing the wasm memory past this
+// view makes valueGet/setUint32 miss and return undefined.
+const wasmJSMemMin = 64 << 20
+
 func (st *wasmInstance) attachMemory(iso *Isolate, exports *goja.Object, name string, mem api.Memory) {
 	size := mem.Size()
+	if size < wasmJSMemMin {
+		size = wasmJSMemMin
+	}
 	st.jsBuf = make([]byte, size)
-	if data, ok := mem.Read(0, size); ok {
+	if data, ok := mem.Read(0, mem.Size()); ok {
 		copy(st.jsBuf, data)
 	}
 	st.memObj = iso.vm.NewObject()
@@ -444,14 +475,7 @@ func (st *wasmInstance) attachMemory(iso *Isolate, exports *goja.Object, name st
 			panic(iso.vm.NewGoError(fmt.Errorf("WebAssembly.Memory.grow failed")))
 		}
 		st.syncToWasm()
-		newSize := mem.Size()
-		nb := make([]byte, newSize)
-		copy(nb, st.jsBuf)
-		st.jsBuf = nb
-		st.jsAB.Detach()
-		st.jsAB = iso.vm.NewArrayBuffer(st.jsBuf)
-		mustSet(st.memObj, "buffer", st.jsAB)
-		st.syncFromWasm()
+		st.rebindMemory(iso)
 		return iso.vm.ToValue(prev)
 	})
 	st.mem = mem
@@ -462,22 +486,10 @@ func (st *wasmInstance) attachMemory(iso *Isolate, exports *goja.Object, name st
 }
 
 func (st *wasmInstance) rebindMemory(iso *Isolate) {
-	mem := liveMemory(st.mem)
-	if mem == nil || st.memObj == nil {
-		return
-	}
-	newSize := mem.Size()
-	if uint32(len(st.jsBuf)) == newSize {
-		return
-	}
-	nb := make([]byte, newSize)
-	if data, ok := mem.Read(0, newSize); ok {
-		copy(nb, data)
-	}
-	st.jsBuf = nb
-	st.jsAB.Detach()
-	st.jsAB = iso.vm.NewArrayBuffer(st.jsBuf)
-	mustSet(st.memObj, "buffer", st.jsAB)
+	// Keep the original ArrayBuffer. wasm_exec caches
+	// this.mem = new DataView(exports.mem.buffer); Detach/replace makes
+	// syscall/js.valueGet read zeros and return undefined.
+	st.syncFromWasm()
 }
 
 func (st *wasmInstance) syncToWasm() {

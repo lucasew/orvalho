@@ -3,6 +3,8 @@ package workers
 import (
 	"encoding/hex"
 	"testing"
+
+	"github.com/dop251/goja"
 )
 
 // add.wasm: (module (func (export "add") (param i32 i32) (result i32) local.get 0 local.get 1 i32.add))
@@ -64,6 +66,54 @@ func TestWebAssemblyMemExportName(t *testing.T) {
 		if (!inst.exports.mem) throw new Error("no mem");
 		if (!inst.exports.mem.buffer) throw new Error("no buffer");
 		if (inst.exports.mem.buffer.byteLength < 65536) throw new Error("size");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGojaArrowThisFromGo(t *testing.T) {
+	iso := New("", Options{})
+	err := iso.ScriptMain(t.Context(), `
+		class C {
+			constructor() {
+				this.x = 7;
+				globalThis._arrow = () => this.x;
+			}
+		}
+		new C();
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn, ok := goja.AssertFunction(iso.vm.Get("_arrow"))
+	if !ok {
+		t.Fatal("no arrow")
+	}
+	v, err := fn(goja.Undefined())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.ToInteger() != 7 {
+		t.Fatalf("arrow this from Go: got %v", v.Export())
+	}
+}
+
+func TestWebAssemblyMemoryViewSurvivesGrow(t *testing.T) {
+	// (module (memory (export "mem") 1))
+	raw, err := hex.DecodeString("0061736d010000000503010001070701036d656d0200")
+	if err != nil {
+		t.Fatal(err)
+	}
+	iso := New("", Options{})
+	err = iso.ScriptMain(t.Context(), `
+		var bytes = new Uint8Array([`+bytesToJS(raw)+`]);
+		var inst = new WebAssembly.Instance(new WebAssembly.Module(bytes));
+		var buf = inst.exports.mem.buffer;
+		var dv = new DataView(buf);
+		dv.setUint8(0, 42);
+		inst.exports.mem.grow(1);
+		if (dv.getUint8(0) !== 42) throw new Error("view lost after grow");
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)
