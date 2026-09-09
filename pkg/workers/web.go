@@ -62,12 +62,30 @@ func (iso *Isolate) installWebTypes() {
 	headersProto.Set("has", iso.headersHas)
 	headersProto.Set("delete", iso.headersDelete)
 	headersProto.Set("append", iso.headersAppend)
-	headersProto.Set("entries", iso.headersEntries)
-	headersProto.Set("keys", iso.headersKeys)
-	headersProto.Set("values", iso.headersValues)
+	headersProto.Set("_orvalhoPairs", iso.headersPairs)
 	headersProto.Set("forEach", iso.headersForEach)
 	headersProto.Set("getSetCookie", iso.headersGetSetCookie)
-	_, _ = iso.vm.RunString(`Headers.prototype[Symbol.iterator] = function () { return this.entries()[Symbol.iterator](); };`)
+	_, _ = iso.vm.RunString(`(function () {
+  function iter(pairs) {
+    var i = 0;
+    var it = {
+      next: function () {
+        if (i >= pairs.length) return { done: true, value: undefined };
+        return { done: false, value: pairs[i++] };
+      }
+    };
+    it[Symbol.iterator] = function () { return it; };
+    return it;
+  }
+  Headers.prototype.entries = function () { return iter(this._orvalhoPairs()); };
+  Headers.prototype.keys = function () {
+    return iter(this._orvalhoPairs().map(function (p) { return p[0]; }));
+  };
+  Headers.prototype.values = function () {
+    return iter(this._orvalhoPairs().map(function (p) { return p[1]; }));
+  };
+  Headers.prototype[Symbol.iterator] = Headers.prototype.entries;
+})();`)
 
 	reqProto := iso.vm.Get("Request").ToObject(iso.vm).Get("prototype").ToObject(iso.vm)
 	mustAccessor(reqProto, "method", iso.vm.ToValue(iso.requestGetMethod))
@@ -177,31 +195,13 @@ func (iso *Isolate) fillHeaders(h *headerBag, init goja.Value) error {
 	return nil
 }
 
-func (iso *Isolate) headersEntries(call goja.FunctionCall) goja.Value {
+func (iso *Isolate) headersPairs(call goja.FunctionCall) goja.Value {
 	h := iso.headerBagOf(call)
 	pairs := make([]any, 0, len(h.m))
 	for k, v := range h.m {
 		pairs = append(pairs, iso.vm.NewArray(k, v))
 	}
 	return iso.vm.NewArray(pairs...)
-}
-
-func (iso *Isolate) headersKeys(call goja.FunctionCall) goja.Value {
-	h := iso.headerBagOf(call)
-	keys := make([]any, 0, len(h.m))
-	for k := range h.m {
-		keys = append(keys, k)
-	}
-	return iso.vm.NewArray(keys...)
-}
-
-func (iso *Isolate) headersValues(call goja.FunctionCall) goja.Value {
-	h := iso.headerBagOf(call)
-	vals := make([]any, 0, len(h.m))
-	for _, v := range h.m {
-		vals = append(vals, v)
-	}
-	return iso.vm.NewArray(vals...)
 }
 
 func (iso *Isolate) headersForEach(call goja.FunctionCall) goja.Value {
