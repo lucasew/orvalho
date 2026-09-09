@@ -106,6 +106,70 @@ func TestEsbuildContextRebuild(t *testing.T) {
 	}
 }
 
+func TestEsbuildContextSvelteScan(t *testing.T) {
+	fsys := fstest.MapFS{
+		"App.svelte": {Data: []byte(`<script lang="ts">
+  import Foo from "./Foo.svelte";
+  export let title: string;
+</script>
+<div>{title}</div>
+`)},
+		"Foo.svelte": {Data: []byte(`<script lang="ts">
+  const n: number = 1;
+</script>
+<span>{n}</span>
+`)},
+	}
+	iso := New("", Options{FS: fsys, Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var esbuild = require("esbuild");
+		var ok = false;
+		esbuild.context({
+			stdin: { contents: 'import "./App.svelte";', loader: "js" },
+			bundle: true,
+			write: false,
+			format: "esm"
+		}).then(function (ctx) {
+			return ctx.rebuild().then(function (r) {
+				if (r.errors && r.errors.length) throw new Error("errors " + JSON.stringify(r.errors));
+				ok = true;
+				return ctx.dispose();
+			});
+		});
+		setTimeout(function () {
+			if (!ok) throw new Error("svelte scan failed");
+		}, 0);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEsbuildEntryPointStub(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var esbuild = require("esbuild");
+		var ok = false;
+		esbuild.context({
+			entryPoints: ["svelte_internal"],
+			write: false,
+			format: "esm"
+		}).then(function (ctx) {
+			return ctx.rebuild().then(function (r) {
+				if (r.errors && r.errors.length) throw new Error("errors " + JSON.stringify(r.errors));
+				ok = true;
+				return ctx.dispose();
+			});
+		});
+		setTimeout(function () {
+			if (!ok) throw new Error("entry stub failed");
+		}, 0);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEsbuildContextStdin(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `

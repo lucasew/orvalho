@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -208,8 +209,9 @@ func (n *nodeEsbuild) wrapContext(ctx api.BuildContext) goja.Value {
 
 func (n *nodeEsbuild) prepareBuild(v goja.Value) api.BuildOptions {
 	opts, plugins := n.buildOpts(v)
-	opts.Plugins = append(opts.Plugins, n.guestFSPlugin())
+	// Guest JS plugins first so Vite can claim .svelte / flattened ids.
 	opts.Plugins = append(opts.Plugins, plugins...)
+	opts.Plugins = append(opts.Plugins, n.guestFSPlugin())
 	opts.Write = false
 	return opts
 }
@@ -253,16 +255,24 @@ func (n *nodeEsbuild) guestFSPlugin() api.Plugin {
 				if n.guestFile(rel) != "" {
 					return api.OnResolveResult{Path: rel, Namespace: "orvalho"}, nil
 				}
+				if args.Kind == api.ResolveEntryPoint {
+					// Flattened Vite ids are not files; stub them instead of marking external.
+					return api.OnResolveResult{Path: p, Namespace: "orvalho"}, nil
+				}
 				return api.OnResolveResult{Path: p, External: true}, nil
 			})
 			b.OnLoad(api.OnLoadOptions{Filter: ".*", Namespace: "orvalho"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				file := n.guestFile(args.Path)
 				if file == "" {
-					return api.OnLoadResult{}, fs.ErrNotExist
+					empty := "export default {}\n"
+					return api.OnLoadResult{Contents: &empty, Loader: api.LoaderJS}, nil
 				}
 				data, err := fs.ReadFile(n.iso.opts.FS, file)
 				if err != nil {
 					return api.OnLoadResult{}, err
+				}
+				if js, ok := htmlLikeScanJS(string(data), file); ok {
+					return api.OnLoadResult{Contents: &js, Loader: api.LoaderJS}, nil
 				}
 				s := string(data)
 				return api.OnLoadResult{Contents: &s, Loader: loaderForPath(file)}, nil
@@ -460,25 +470,6 @@ func (n *nodeEsbuild) buildOpts(v goja.Value) (api.BuildOptions, []api.Plugin) {
 	return opts, n.jsPlugins(o.Get("plugins"))
 }
 
-func resolveKindString(k api.ResolveKind) string {
-	switch k {
-	case api.ResolveEntryPoint:
-		return "entry-point"
-	case api.ResolveJSImportStatement:
-		return "import-statement"
-	case api.ResolveJSRequireCall:
-		return "require-call"
-	case api.ResolveJSDynamicImport:
-		return "dynamic-import"
-	case api.ResolveJSRequireResolve:
-		return "require-resolve"
-	case api.ResolveCSSImportRule:
-		return "import-rule"
-	default:
-		return ""
-	}
-}
-
 func (n *nodeEsbuild) jsPlugins(v goja.Value) []api.Plugin {
 	arr, ok := v.(*goja.Object)
 	if !ok || arr == nil {
@@ -500,21 +491,8 @@ func (n *nodeEsbuild) jsPlugins(v goja.Value) []api.Plugin {
 			continue
 		}
 		name := jsToString(po.Get("name"))
-		var resolves []jsOnResolve
 		stub := n.iso.vm.NewObject()
-		mustSet(stub, "onResolve", func(call goja.FunctionCall) goja.Value {
-			filter := ".*"
-			if o, ok := call.Argument(0).(*goja.Object); ok {
-				if s := jsRegexpSource(o.Get("filter")); s != "" {
-					filter = s
-				}
-			}
-			fn, ok := goja.AssertFunction(call.Argument(1))
-			if ok {
-				resolves = append(resolves, jsOnResolve{filter: filter, fn: fn})
-			}
-			return goja.Undefined()
-		})
+		mustSet(stub, "onResolve", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
 		mustSet(stub, "onLoad", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
 		mustSet(stub, "onStart", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
 		mustSet(stub, "onEnd", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
@@ -522,46 +500,32 @@ func (n *nodeEsbuild) jsPlugins(v goja.Value) []api.Plugin {
 		if _, err := setup(po, stub); err != nil {
 			continue
 		}
-		hooks := resolves
-		out = append(out, api.Plugin{
-			Name: name,
-			Setup: func(b api.PluginBuild) {
-				for _, h := range hooks {
-					h := h
-					b.OnResolve(api.OnResolveOptions{Filter: h.filter}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
-						arg := n.iso.vm.NewObject()
-						mustSet(arg, "path", args.Path)
-						mustSet(arg, "importer", args.Importer)
-						mustSet(arg, "kind", resolveKindString(args.Kind))
-						mustSet(arg, "namespace", args.Namespace)
-						ret, err := h.fn(goja.Undefined(), arg)
-						if err != nil || ret == nil || goja.IsUndefined(ret) || goja.IsNull(ret) {
-							return api.OnResolveResult{}, err
-						}
-						if _, ok := goja.AssertFunction(ret.ToObject(n.iso.vm).Get("then")); ok {
-							// Async plugin hooks are not waited; treat as no-op.
-							return api.OnResolveResult{}, nil
-						}
-						ro, ok := ret.(*goja.Object)
-						if !ok {
-							return api.OnResolveResult{}, nil
-						}
-						ext, _ := jsBool(ro.Get("external"))
-						return api.OnResolveResult{
-							Path:     jsToString(ro.Get("path")),
-							External: ext,
-						}, nil
-					})
-				}
-			},
-		})
+		// setup() runs on the isolate thread. Do not register JS onResolve/onLoad:
+		// esbuild invokes those on worker goroutines and goja is not safe there.
+		out = append(out, api.Plugin{Name: name, Setup: func(api.PluginBuild) {}})
 	}
 	return out
 }
 
-type jsOnResolve struct {
-	filter string
-	fn     goja.Callable
+var htmlImportRE = regexp.MustCompile(`(?m)(?:^|[;\s])import\s+(?:type\s+)?(?:[\w*{}\s,]+from\s+)?["']([^"']+)["']`)
+
+func htmlLikeScanJS(src, file string) (string, bool) {
+	switch strings.ToLower(path.Ext(file)) {
+	case ".svelte", ".vue", ".astro", ".html", ".imba":
+	default:
+		return "", false
+	}
+	var b strings.Builder
+	for _, m := range htmlImportRE.FindAllStringSubmatch(src, -1) {
+		if len(m) > 1 && m[1] != "" {
+			b.WriteString("import ")
+			b.WriteByte('"')
+			b.WriteString(m[1])
+			b.WriteString("\"\n")
+		}
+	}
+	b.WriteString("export default {}\n")
+	return b.String(), true
 }
 
 func jsMessages(v goja.Value) []api.Message {
