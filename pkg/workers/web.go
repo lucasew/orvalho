@@ -62,6 +62,12 @@ func (iso *Isolate) installWebTypes() {
 	headersProto.Set("has", iso.headersHas)
 	headersProto.Set("delete", iso.headersDelete)
 	headersProto.Set("append", iso.headersAppend)
+	headersProto.Set("entries", iso.headersEntries)
+	headersProto.Set("keys", iso.headersKeys)
+	headersProto.Set("values", iso.headersValues)
+	headersProto.Set("forEach", iso.headersForEach)
+	headersProto.Set("getSetCookie", iso.headersGetSetCookie)
+	_, _ = iso.vm.RunString(`Headers.prototype[Symbol.iterator] = function () { return this.entries()[Symbol.iterator](); };`)
 
 	reqProto := iso.vm.Get("Request").ToObject(iso.vm).Get("prototype").ToObject(iso.vm)
 	mustAccessor(reqProto, "method", iso.vm.ToValue(iso.requestGetMethod))
@@ -150,6 +156,16 @@ func (iso *Isolate) fillHeaders(h *headerBag, init goja.Value) error {
 			return nil
 		}
 	}
+	if pairs, ok := init.Export().([]any); ok {
+		for _, item := range pairs {
+			pair, ok := item.([]any)
+			if !ok || len(pair) < 2 {
+				continue
+			}
+			h.set(fmt.Sprint(pair[0]), fmt.Sprint(pair[1]))
+		}
+		return nil
+	}
 	o := init.ToObject(iso.vm)
 	for _, key := range o.Keys() {
 		v := o.Get(key)
@@ -159,6 +175,61 @@ func (iso *Isolate) fillHeaders(h *headerBag, init goja.Value) error {
 		h.set(key, v.String())
 	}
 	return nil
+}
+
+func (iso *Isolate) headersEntries(call goja.FunctionCall) goja.Value {
+	h := iso.headerBagOf(call)
+	pairs := make([]any, 0, len(h.m))
+	for k, v := range h.m {
+		pairs = append(pairs, iso.vm.NewArray(k, v))
+	}
+	return iso.vm.NewArray(pairs...)
+}
+
+func (iso *Isolate) headersKeys(call goja.FunctionCall) goja.Value {
+	h := iso.headerBagOf(call)
+	keys := make([]any, 0, len(h.m))
+	for k := range h.m {
+		keys = append(keys, k)
+	}
+	return iso.vm.NewArray(keys...)
+}
+
+func (iso *Isolate) headersValues(call goja.FunctionCall) goja.Value {
+	h := iso.headerBagOf(call)
+	vals := make([]any, 0, len(h.m))
+	for _, v := range h.m {
+		vals = append(vals, v)
+	}
+	return iso.vm.NewArray(vals...)
+}
+
+func (iso *Isolate) headersForEach(call goja.FunctionCall) goja.Value {
+	h := iso.headerBagOf(call)
+	fn, ok := goja.AssertFunction(call.Argument(0))
+	if !ok {
+		panic(iso.vm.NewTypeError("Headers.forEach requires a function"))
+	}
+	this := call.This
+	if len(call.Arguments) > 1 {
+		this = call.Argument(1)
+	}
+	for k, v := range h.m {
+		_, err := fn(this, iso.vm.ToValue(v), iso.vm.ToValue(k), call.This)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return goja.Undefined()
+}
+
+func (iso *Isolate) headersGetSetCookie(call goja.FunctionCall) goja.Value {
+	h := iso.headerBagOf(call)
+	v, ok := h.get("set-cookie")
+	if !ok || v == "" {
+		return iso.vm.ToValue([]any{})
+	}
+	return iso.vm.ToValue([]any{v})
 }
 
 func (iso *Isolate) headerBagOf(call goja.FunctionCall) *headerBag {
