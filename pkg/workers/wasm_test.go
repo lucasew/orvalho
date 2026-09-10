@@ -143,6 +143,22 @@ func TestWebAssemblyInstanceof(t *testing.T) {
 	}
 }
 
+func TestGojsPromiseThenIsAsync(t *testing.T) {
+	iso := New("", Options{})
+	iso.wasmGo = newWasmGoJS(iso)
+	err := iso.ScriptMain(t.Context(), `
+		var sync = false;
+		Promise.resolve(1).then(function () { sync = true; });
+		if (sync) throw new Error("then ran synchronously");
+		setTimeout(function () {
+			if (!sync) throw new Error("then never ran");
+		}, 0);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWebAssemblyCompileThenInstantiate(t *testing.T) {
 	raw, err := hex.DecodeString(addWasmHex)
 	if err != nil {

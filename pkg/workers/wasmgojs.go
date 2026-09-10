@@ -41,7 +41,38 @@ func newWasmGoJS(iso *Isolate) *wasmGoJS {
 	g.ids[iso.vm.ToValue(false)] = 4
 	g.ids[iso.vm.Get("globalThis")] = 5
 	g.ids[g.values[6]] = 6
+	g.deferPromiseThen()
 	return g
+}
+
+// deferPromiseThen makes Promise.then queue the callback on a timer.
+// The Astro compiler Await uses an unbuffered channel: a fulfilled
+// Promise that runs then() inside syscall/js.valueCall deadlocks the
+// wasm guest (transform returns undefined; later checkdead).
+func (g *wasmGoJS) deferPromiseThen() {
+	_, err := g.iso.vm.RunString(`(function () {
+  var proto = Promise && Promise.prototype;
+  if (!proto || proto.__orvalhoThenDefer) return;
+  var orig = proto.then;
+  proto.then = function (onFulfilled, onRejected) {
+    var self = this;
+    return new Promise(function (resolve, reject) {
+      setTimeout(function () {
+        orig.call(self, function (v) {
+          if (typeof onFulfilled !== "function") { resolve(v); return; }
+          try { resolve(onFulfilled(v)); } catch (e) { reject(e); }
+        }, function (e) {
+          if (typeof onRejected !== "function") { reject(e); return; }
+          try { resolve(onRejected(e)); } catch (e2) { reject(e2); }
+        });
+      }, 0);
+    });
+  };
+  proto.__orvalhoThenDefer = true;
+})();`)
+	if err != nil {
+		g.iso.trace("gojs deferPromiseThen: %v", err)
+	}
 }
 
 func (g *wasmGoJS) makeGoObj() *goja.Object {
@@ -117,7 +148,7 @@ func (g *wasmGoJS) handle(name string, sp uint32) {
 		recv := g.load(st, sp+8)
 		key := g.loadString(st, sp+16)
 		var got goja.Value = goja.Undefined()
-		if o, ok := recv.(*goja.Object); ok && o != nil {
+		if o := g.asObject(recv); o != nil {
 			got = o.Get(key)
 			if got == nil {
 				got = goja.Undefined()
@@ -246,13 +277,23 @@ func (g *wasmGoJS) handle(name string, sp uint32) {
 	}
 }
 
+func (g *wasmGoJS) asObject(v goja.Value) *goja.Object {
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return nil
+	}
+	if o, ok := v.(*goja.Object); ok {
+		return o
+	}
+	return v.ToObject(g.iso.vm)
+}
+
 func (g *wasmGoJS) valueCall(st *wasmInstance, sp uint32, _ bool) {
 	recv := g.load(st, sp+8)
 	name := g.loadString(st, sp+16)
 	args := g.loadSlice(st, sp+32)
 	var ret goja.Value = goja.Undefined()
 	ok := byte(0)
-	if o, isObj := recv.(*goja.Object); isObj && o != nil {
+	if o := g.asObject(recv); o != nil {
 		if fn, isFn := goja.AssertFunction(o.Get(name)); isFn {
 			out, err := fn(recv, args...)
 			if err == nil {
