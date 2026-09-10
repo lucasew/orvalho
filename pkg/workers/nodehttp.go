@@ -23,6 +23,7 @@ type httpJob struct {
 	upgrade bool
 	conn    net.Conn
 	head    []byte
+	ended   bool
 }
 
 // nodeHTTPBinding materializes require("http") / require("node:http").
@@ -227,20 +228,7 @@ func (n *nodeHTTP) jsCreateServer(call goja.FunctionCall) goja.Value {
 			args = call.Arguments[1:]
 		}
 		for _, fn := range listeners[ev] {
-			v, err := fn(srv, args...)
-			if err != nil {
-				panic(err)
-			}
-			if ev != "request" && ev != "upgrade" {
-				continue
-			}
-			ctx := n.iso.activeCtx
-			if ctx == nil {
-				ctx = context.Background()
-			}
-			if _, err := n.iso.awaitPromiseLocked(ctx, v, 0); err != nil {
-				panic(n.iso.vm.NewGoError(err))
-			}
+			_, _ = fn(srv, args...)
 		}
 		return goja.Undefined()
 	})
@@ -374,36 +362,43 @@ func bufferedHead(bufrw *bufio.ReadWriter) []byte {
 	return b
 }
 
+func (iso *Isolate) finishHTTP(job *httpJob) {
+	if job == nil || job.ended {
+		return
+	}
+	job.ended = true
+	if iso.inFlight > 0 {
+		iso.inFlight--
+	}
+	select {
+	case <-job.done:
+	default:
+		close(job.done)
+	}
+	iso.kick()
+}
+
 func (iso *Isolate) dispatchHTTP(job *httpJob) {
 	if job == nil {
 		return
 	}
+	iso.inFlight++
 	n := &nodeHTTP{iso: iso}
 	if job.upgrade {
 		n.dispatchUpgrade(job)
+		iso.finishHTTP(job)
 		return
 	}
 	req := n.makeReq(job.r, job.body)
-	res := n.makeRes(job.w, job.done)
+	res := n.makeRes(job.w, func() { iso.finishHTTP(job) })
 	if err := n.emit(job.srv, "request", req, res); err != nil {
 		iso.trace("http handler %s %s: %v", job.r.Method, job.r.URL.RequestURI(), err)
 		http.Error(job.w, err.Error(), http.StatusInternalServerError)
-		select {
-		case <-job.done:
-		default:
-			close(job.done)
-		}
+		iso.finishHTTP(job)
 	}
 }
 
 func (n *nodeHTTP) dispatchUpgrade(job *httpJob) {
-	defer func() {
-		select {
-		case <-job.done:
-		default:
-			close(job.done)
-		}
-	}()
 	if job.conn == nil {
 		return
 	}
@@ -467,7 +462,7 @@ type httpResState struct {
 	mu     sync.Mutex
 }
 
-func (n *nodeHTTP) makeRes(w http.ResponseWriter, done chan struct{}) *goja.Object {
+func (n *nodeHTTP) makeRes(w http.ResponseWriter, onEnd func()) *goja.Object {
 	st := &httpResState{w: w, status: 200, hdr: make(http.Header)}
 	var finish sync.Once
 	res := n.iso.vm.NewObject()
@@ -566,7 +561,7 @@ func (n *nodeHTTP) makeRes(w http.ResponseWriter, done chan struct{}) *goja.Obje
 			}
 			n.iso.trace("http error body %q", string(snip))
 		}
-		finish.Do(func() { close(done) })
+		finish.Do(onEnd)
 		_ = n.emit(res, "finish")
 		return res
 	})

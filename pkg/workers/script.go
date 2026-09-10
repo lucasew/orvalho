@@ -69,7 +69,8 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 		}
 		deadline, hasTimer := iso.timers.nextDeadline()
 		listening := iso.listeners > 0
-		if !hasTimer && !listening {
+		busy := iso.inFlight > 0
+		if !hasTimer && !listening && !busy {
 			idle++
 			if idle >= 64 {
 				return iso.finishScript(rejected)
@@ -78,11 +79,14 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 		}
 		idle = 0
 		var wait time.Duration
-		if hasTimer {
+		switch {
+		case hasTimer:
 			wait = deadline.Sub(iso.now())
 			if wait <= 0 {
 				continue
 			}
+		case busy:
+			wait = scriptIdlePoll
 		}
 		if err := iso.waitForWorkLocked(ctx, wait); err != nil {
 			return err

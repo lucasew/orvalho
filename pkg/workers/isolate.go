@@ -58,6 +58,8 @@ type Isolate struct {
 	wake chan struct{}
 	// listeners is how many guest servers are currently listening.
 	listeners int
+	// inFlight is HTTP/upgrade jobs that have not finished (res.end / upgrade return).
+	inFlight int
 
 	wasmRt       wazero.Runtime
 	wasmCompiled map[*goja.Object]*wasmCompiled
