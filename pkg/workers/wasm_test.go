@@ -185,6 +185,23 @@ func TestGojsPromiseThenIsAsync(t *testing.T) {
 	}
 }
 
+func TestGojsPromiseThenUngatedIsNotTimer(t *testing.T) {
+	iso := New("", Options{})
+	iso.wasmGo = newWasmGoJS(iso)
+	err := iso.ScriptMain(t.Context(), `
+		if (typeof Promise.prototype.then !== "function") throw new Error("then");
+		if (!Promise.prototype.__orvalhoThenHold) throw new Error("hold missing");
+		var n = 0;
+		Promise.resolve(2).then(function (v) { n = v; });
+		setTimeout(function () {
+			if (n !== 2) throw new Error("n " + n);
+		}, 0);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWebAssemblyCompileThenInstantiate(t *testing.T) {
 	raw, err := hex.DecodeString(addWasmHex)
 	if err != nil {

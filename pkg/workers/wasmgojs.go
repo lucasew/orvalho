@@ -18,6 +18,7 @@ import (
 type wasmGoJS struct {
 	iso    *Isolate
 	inst   *wasmInstance
+	hold   int
 	values []goja.Value
 	ids    map[goja.Value]int
 	refs   []int
@@ -42,20 +43,31 @@ func newWasmGoJS(iso *Isolate) *wasmGoJS {
 	g.ids[iso.vm.ToValue(false)] = 4
 	g.ids[iso.vm.Get("globalThis")] = 5
 	g.ids[g.values[6]] = 6
-	g.deferPromiseThen()
+	g.installThenHold()
 	return g
 }
 
-// deferPromiseThen makes Promise.then queue the callback on a timer.
-// The Astro compiler Await uses an unbuffered channel: a fulfilled
-// Promise that runs then() inside syscall/js.valueCall deadlocks the
-// wasm guest (transform returns undefined; later checkdead).
-func (g *wasmGoJS) deferPromiseThen() {
+func (g *wasmGoJS) holdJobs(delta int) {
+	g.hold += delta
+	if g.hold < 0 {
+		g.hold = 0
+	}
+	if gt, ok := g.iso.vm.Get("globalThis").(*goja.Object); ok && gt != nil {
+		_ = gt.Set("__orvalhoGojs", g.hold > 0)
+	}
+}
+
+// installThenHold leaves Promise.prototype.then alone unless gojs is
+// inside valueCall. A fulfilled then() there runs the compiler Await
+// callback before select and deadlocks; Vite's own then() must stay
+// a microtask or the module runner pays a timer per import.
+func (g *wasmGoJS) installThenHold() {
 	_, err := g.iso.vm.RunString(`(function () {
   var proto = Promise && Promise.prototype;
-  if (!proto || proto.__orvalhoThenDefer) return;
+  if (!proto || proto.__orvalhoThenHold) return;
   var orig = proto.then;
   proto.then = function (onFulfilled, onRejected) {
+    if (!globalThis.__orvalhoGojs) return orig.call(this, onFulfilled, onRejected);
     var self = this;
     return new Promise(function (resolve, reject) {
       setTimeout(function () {
@@ -69,10 +81,10 @@ func (g *wasmGoJS) deferPromiseThen() {
       }, 0);
     });
   };
-  proto.__orvalhoThenDefer = true;
+  proto.__orvalhoThenHold = true;
 })();`)
 	if err != nil {
-		g.iso.trace("gojs deferPromiseThen: %v", err)
+		g.iso.trace("gojs installThenHold: %v", err)
 	}
 }
 
@@ -298,6 +310,8 @@ func (g *wasmGoJS) asObject(v goja.Value) *goja.Object {
 }
 
 func (g *wasmGoJS) valueCall(st *wasmInstance, sp uint32, _ bool) {
+	g.holdJobs(1)
+	defer g.holdJobs(-1)
 	recv := g.load(st, sp+8)
 	name := g.loadString(st, sp+16)
 	args := g.loadSlice(st, sp+32)
@@ -320,6 +334,8 @@ func (g *wasmGoJS) valueCall(st *wasmInstance, sp uint32, _ bool) {
 }
 
 func (g *wasmGoJS) valueInvoke(st *wasmInstance, sp uint32) {
+	g.holdJobs(1)
+	defer g.holdJobs(-1)
 	fnv := g.load(st, sp+8)
 	args := g.loadSlice(st, sp+16)
 	var ret goja.Value = goja.Undefined()
@@ -339,6 +355,8 @@ func (g *wasmGoJS) valueInvoke(st *wasmInstance, sp uint32) {
 }
 
 func (g *wasmGoJS) valueNew(st *wasmInstance, sp uint32) {
+	g.holdJobs(1)
+	defer g.holdJobs(-1)
 	ctor := g.load(st, sp+8)
 	args := g.loadSlice(st, sp+16)
 	var ret goja.Value = goja.Undefined()
