@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/lewtec/lewkit/x/profile"
 	"github.com/spf13/cobra"
 
 	"github.com/lucasew/orvalho/pkg/cuex"
@@ -16,6 +18,7 @@ var (
 	dataDir    string
 	configPath string
 	verbose    bool
+	pprofDir   string
 )
 
 // rootCmd is the base command for the orvalho CLI.
@@ -33,7 +36,9 @@ flag when host state is required — there is no implicit discovery path.`,
 
 // Execute runs the root command.
 func Execute() error {
-	if err := rootCmd.Execute(); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "orvalho: %v\n", err)
 		return err
 	}
@@ -44,6 +49,15 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", "", "host data directory (required for host commands; always explicit)")
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "host orvalho.cue path (default: <data-dir>/orvalho.cue)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "print host progress to stderr")
+	rootCmd.PersistentFlags().StringVar(&pprofDir, "pprof-dir", "", "when set, write runtime/pprof snapshots into this directory")
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if pprofDir == "" {
+			return nil
+		}
+		p := profile.NewProfile(pprofDir)
+		go p.Run(cmd.Context())
+		return nil
+	}
 
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(identityCmd)

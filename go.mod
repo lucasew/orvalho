@@ -8,11 +8,11 @@ require (
 	github.com/btcsuite/btcd/btcutil v1.1.6
 	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9
 	github.com/fetchurl/fetchurl v0.0.0-20260824103541-49881a25d469
-	github.com/lewtec/lewkit v0.0.0-20260903000910-52886154b6dd
+	github.com/lewtec/lewkit v0.0.0-20260910013007-48dd615c43ee
 	github.com/spf13/cobra v1.10.2
 	github.com/stellar/go v0.0.0-20251023205731-8cd5ab33bcdd
 	github.com/tyler-smith/go-bip39 v1.1.0
-	golang.org/x/crypto v0.46.0
+	golang.org/x/crypto v0.56.0
 )
 
 require (
@@ -31,9 +31,9 @@ require (
 	github.com/shogo82148/go-sfv v0.3.3 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/tetratelabs/wazero v1.9.0 // indirect
-	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
-	golang.org/x/text v0.33.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
