@@ -106,6 +106,10 @@ func TestNodeFSStatSync(t *testing.T) {
 		if (!st.isFile()) throw new Error("file");
 		if (st.isDirectory()) throw new Error("not dir");
 		if (st.size !== 2) throw new Error("size " + st.size);
+		if (typeof st.mtimeMs !== "number" || isNaN(st.mtimeMs)) throw new Error("mtimeMs " + st.mtimeMs);
+		if (!st.mtime || typeof st.mtime.toUTCString !== "function") throw new Error("mtime " + typeof st.mtime);
+		if (typeof st.mtime.toUTCString() !== "string") throw new Error("toUTCString");
+		if (typeof st.mtime.getTime !== "function" || st.mtime.getTime() !== st.mtimeMs) throw new Error("getTime " + st.mtime.getTime() + " " + st.mtimeMs);
 		var d = fs.statSync("dir");
 		if (!d.isDirectory()) throw new Error("dir");
 		if (d.isFile()) throw new Error("dir is file");

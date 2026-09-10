@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/dop251/goja"
 )
@@ -1042,8 +1043,33 @@ func (n *nodeFS) statObj(info fs.FileInfo) *goja.Object {
 	mustSet(o, "isCharacterDevice", n.statFlag(false))
 	mustSet(o, "isFIFO", n.statFlag(false))
 	mustSet(o, "isSocket", n.statFlag(false))
-	mustSet(o, "mtimeMs", float64(info.ModTime().UnixMilli()))
+	mt := info.ModTime()
+	if mt.IsZero() {
+		mt = time.Unix(0, 0)
+	}
+	ms := float64(mt.UnixMilli())
+	when := n.jsDate(mt)
+	mustSet(o, "mtime", when)
+	mustSet(o, "mtimeMs", ms)
+	mustSet(o, "atime", when)
+	mustSet(o, "atimeMs", ms)
+	mustSet(o, "ctime", when)
+	mustSet(o, "ctimeMs", ms)
+	mustSet(o, "birthtime", when)
+	mustSet(o, "birthtimeMs", ms)
 	return o
+}
+
+func (n *nodeFS) jsDate(t time.Time) goja.Value {
+	ctor, ok := goja.AssertConstructor(n.iso.vm.Get("Date"))
+	if !ok {
+		return n.iso.vm.ToValue(t.UnixMilli())
+	}
+	d, err := ctor(nil, n.iso.vm.ToValue(t.UnixMilli()))
+	if err != nil {
+		return n.iso.vm.ToValue(t.UnixMilli())
+	}
+	return d
 }
 
 func (n *nodeFS) statFlag(v bool) func(goja.FunctionCall) goja.Value {
