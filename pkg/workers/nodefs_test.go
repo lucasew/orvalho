@@ -99,6 +99,19 @@ func TestNodeFSExistsSync(t *testing.T) {
 	`)
 }
 
+func TestNodeFSCreateReadStream(t *testing.T) {
+	runNodeFS(t, nodeFSMap(), `
+		var fs = require("fs");
+		if (typeof fs.createReadStream !== "function") throw new Error("createReadStream");
+		var got = "";
+		var rs = fs.createReadStream("hello.txt");
+		rs.on("data", function (c) { got += String(c); });
+		rs.on("end", function () {
+			if (got !== "hi") throw new Error("data " + got);
+		});
+	`)
+}
+
 func TestNodeFSStatSync(t *testing.T) {
 	runNodeFS(t, nodeFSMap(), `
 		var fs = require("fs");

@@ -124,6 +124,13 @@ func newNodeFS(iso *Isolate) *goja.Object {
 	mustSet(obj, "exists", n.jsExists)
 	mustSet(obj, "existsSync", n.jsExistsSync)
 	mustSet(obj, "promises", newNodeFSPromises(iso, obj))
+	if fn, err := runNamedScript(iso.vm, "node:fs/createReadStream", "("+nodeFSCreateReadStreamSource+")"); err == nil {
+		if make, ok := goja.AssertFunction(fn); ok {
+			if rs, err := make(goja.Undefined(), obj); err == nil {
+				mustSet(obj, "createReadStream", rs)
+			}
+		}
+	}
 	// Go wasm_exec / syscall/fs_js.go does js.Global().Get("fs").
 	if v := iso.vm.Get("fs"); v == nil || goja.IsUndefined(v) {
 		mustRuntimeSet(iso.vm, "fs", obj)
@@ -168,6 +175,35 @@ func newNodeFSPromises(iso *Isolate, fs *goja.Object) *goja.Object {
 	}
 	return o
 }
+
+// nodeFSCreateReadStreamSource builds createReadStream(path, opts).
+// Vite sirv does fs.createReadStream(file).pipe(res); push after a
+// turn so pipe() can attach data/end listeners first.
+const nodeFSCreateReadStreamSource = `
+function (fs) {
+  return function createReadStream(path, opts) {
+    var Readable = require("stream").Readable;
+    var rs = new Readable();
+    var start = opts && opts.start;
+    var end = opts && opts.end;
+    setTimeout(function () {
+      try {
+        var data = fs.readFileSync(path);
+        if (typeof start === "number" || typeof end === "number") {
+          var s = typeof start === "number" ? start : 0;
+          var e = typeof end === "number" ? end + 1 : (data.length != null ? data.length : data.byteLength);
+          data = data.subarray ? data.subarray(s, e) : data.slice(s, e);
+        }
+        rs.push(data);
+        rs.push(null);
+      } catch (e) {
+        rs.destroy(e);
+      }
+    }, 0);
+    return rs;
+  };
+}
+`
 
 // nodeFSPromisesSource wraps callback fs methods as Promises.
 const nodeFSPromisesSource = `
