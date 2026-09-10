@@ -67,6 +67,21 @@ func TestNodeCryptoRandomFill(t *testing.T) {
 	`)
 }
 
+func TestNodeCryptoTimingSafeEqual(t *testing.T) {
+	runNodeCrypto(t, `
+		var crypto = require("crypto");
+		if (typeof crypto.timingSafeEqual !== "function") throw new Error("missing");
+		var a = Buffer.from("vite-token");
+		var b = Buffer.from("vite-token");
+		var c = Buffer.from("vite-XXXXX");
+		if (!crypto.timingSafeEqual(a, b)) throw new Error("equal");
+		if (crypto.timingSafeEqual(a, c)) throw new Error("unequal");
+		var threw = false;
+		try { crypto.timingSafeEqual(a, Buffer.from("short")); } catch (e) { threw = e.code === "ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH"; }
+		if (!threw) throw new Error("length");
+	`)
+}
+
 func TestNodeCryptoGetRandomValues(t *testing.T) {
 	runNodeCrypto(t, `
 		var crypto = require("crypto");

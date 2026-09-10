@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -47,6 +48,7 @@ func newNodeCrypto(iso *Isolate) *goja.Object {
 	mustSet(obj, "randomFill", n.jsRandomFill)
 	mustSet(obj, "randomUUID", n.jsRandomUUID)
 	mustSet(obj, "createHash", n.jsCreateHash)
+	mustSet(obj, "timingSafeEqual", n.jsTimingSafeEqual)
 	mustSet(obj, "hash", n.jsHash)
 	mustSet(obj, "getHashes", n.jsGetHashes)
 	mustSet(obj, "getRandomValues", n.jsGetRandomValues)
@@ -344,6 +346,21 @@ func (n *nodeCrypto) uint8Array(b []byte) goja.Value {
 
 func (n *nodeCrypto) nextTick(fn goja.Callable, args ...goja.Value) {
 	n.iso.timers.schedule(fn, args, 0, 0, n.iso.now())
+}
+
+func (n *nodeCrypto) jsTimingSafeEqual(call goja.FunctionCall) goja.Value {
+	a, okA := asByteView(call.Argument(0))
+	b, okB := asByteView(call.Argument(1))
+	if !okA {
+		n.throwType("ERR_INVALID_ARG_TYPE", `The "buf1" argument must be an instance of Buffer, TypedArray, or DataView.`)
+	}
+	if !okB {
+		n.throwType("ERR_INVALID_ARG_TYPE", `The "buf2" argument must be an instance of Buffer, TypedArray, or DataView.`)
+	}
+	if len(a) != len(b) {
+		n.throwRange("ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH", "Input buffers must have the same byte length")
+	}
+	return n.iso.vm.ToValue(subtle.ConstantTimeCompare(a, b) == 1)
 }
 
 func (n *nodeCrypto) throwType(code, msg string) {
