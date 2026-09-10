@@ -17,6 +17,7 @@ import (
 // undefined (Astro compiler fs_js.go init).
 type wasmGoJS struct {
 	iso    *Isolate
+	inst   *wasmInstance
 	values []goja.Value
 	ids    map[goja.Value]int
 	refs   []int
@@ -101,9 +102,17 @@ func (g *wasmGoJS) makeGoObj() *goja.Object {
 	return o
 }
 
+func (g *wasmGoJS) goInst() *wasmInstance {
+	if g.inst != nil {
+		return g.inst
+	}
+	return g.iso.wasmActive
+}
+
 func (g *wasmGoJS) resume() {
-	st := g.iso.wasmActive
+	st := g.goInst()
 	if st == nil || st.mod == nil {
+		g.iso.trace("gojs resume missing")
 		return
 	}
 	fn := st.mod.ExportedFunction("resume")
@@ -111,6 +120,7 @@ func (g *wasmGoJS) resume() {
 		g.iso.trace("gojs resume missing")
 		return
 	}
+	g.iso.wasmActive = st
 	st.syncToWasm()
 	_, err := fn.Call(context.Background())
 	st.syncFromWasm()
@@ -120,7 +130,7 @@ func (g *wasmGoJS) resume() {
 }
 
 func (g *wasmGoJS) getsp() uint32 {
-	st := g.iso.wasmActive
+	st := g.goInst()
 	if st == nil || st.mod == nil {
 		return 0
 	}

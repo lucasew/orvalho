@@ -143,6 +143,32 @@ func TestWebAssemblyInstanceof(t *testing.T) {
 	}
 }
 
+func TestWasmActiveKeepsResumeModule(t *testing.T) {
+	// (module (func (export "resume")))
+	resumeHex := "0061736d0100000001040160000003020100070a0106726573756d6500000a040102000b"
+	rawAdd, err := hex.DecodeString(addWasmHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawResume, err := hex.DecodeString(resumeHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iso := New("", Options{})
+	err = iso.ScriptMain(t.Context(), `
+		var add = new WebAssembly.Instance(new WebAssembly.Module(new Uint8Array([`+bytesToJS(rawAdd)+`])));
+		if (add.exports.add(2, 3) !== 5) throw new Error("add");
+		var goLike = new WebAssembly.Instance(new WebAssembly.Module(new Uint8Array([`+bytesToJS(rawResume)+`])));
+		goLike.exports.resume();
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if iso.wasmActive == nil || !iso.wasmActive.hasResume() {
+		t.Fatal("wasmActive lost resume module after a prior instantiate")
+	}
+}
+
 func TestGojsPromiseThenIsAsync(t *testing.T) {
 	iso := New("", Options{})
 	iso.wasmGo = newWasmGoJS(iso)

@@ -36,6 +36,10 @@ type wasmInstance struct {
 	memObj *goja.Object
 }
 
+func (st *wasmInstance) hasResume() bool {
+	return st != nil && st.mod != nil && st.mod.ExportedFunction("resume") != nil
+}
+
 func (iso *Isolate) wasmRuntime() wazero.Runtime {
 	if iso.wasmRt == nil {
 		iso.wasmRt = wazero.NewRuntime(context.Background())
@@ -356,6 +360,9 @@ func (iso *Isolate) instantiateCompiled(c *wasmCompiled, importObj goja.Value) (
 	}
 	inst := iso.wasmBrandObject("Instance")
 	mustSet(inst, "exports", exports)
+	if iso.wasmGo != nil && mod.ExportedFunction("resume") != nil {
+		iso.wasmGo.inst = st
+	}
 	return inst, nil
 }
 
@@ -394,11 +401,13 @@ func (iso *Isolate) wrapWasmFn(st *wasmInstance, fn api.Function) func(goja.Func
 		prev := iso.wasmActive
 		iso.wasmActive = st
 		defer func() {
-			// Keep the instance after exports.run returns so Go wasm
-			// _resume / transform callbacks can still reach memory.
-			if prev != nil {
-				iso.wasmActive = prev
+			// Go wasm parks in run() and later resume()s from
+			// _makeFuncWrapper. A prior module (xxhash) must not
+			// steal wasmActive back or gojs hits the wrong instance.
+			if st.hasResume() {
+				return
 			}
+			iso.wasmActive = prev
 		}()
 		st.syncToWasm()
 		params := fn.Definition().ParamTypes()
