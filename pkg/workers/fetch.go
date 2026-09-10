@@ -12,6 +12,11 @@ import (
 // Default max wait while a fetch handler Promise is pending and timers advance.
 const defaultFetchWait = 30 * time.Second
 
+// scriptIdlePoll is how long to block when work is pending but no guest
+// timer is scheduled (Promise jobs, in-flight HTTP). Zero would sleep
+// on httpCh forever; spinning would burn a core.
+const scriptIdlePoll = time.Millisecond
+
 // PrepareGuestScript rewrites common Workers module syntax so the script can
 // run under goja via RunString. Currently: `export default` → `globalThis.default =`.
 // Full ESM / esbuild downlevel is a separate pipeline.
@@ -150,7 +155,10 @@ func (iso *Isolate) lookupDefaultFetchLocked() (goja.Callable, error) {
 }
 
 func (iso *Isolate) awaitPromiseLocked(ctx context.Context, v goja.Value, maxWait time.Duration) (goja.Value, error) {
-	deadline := iso.now().Add(maxWait)
+	var deadline time.Time
+	if maxWait > 0 {
+		deadline = iso.now().Add(maxWait)
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -175,15 +183,35 @@ func (iso *Isolate) awaitPromiseLocked(ctx context.Context, v goja.Value, maxWai
 			}
 			return nil, ErrFetchRejected
 		case goja.PromiseStatePending:
-			if !iso.now().Before(deadline) {
+			if !deadline.IsZero() && !iso.now().Before(deadline) {
 				return nil, fmt.Errorf("%w after %s", ErrFetchTimeout, maxWait)
 			}
-			// Advance host-driven timers; also re-enter the VM so microtasks can run.
+			iso.pollHTTP()
 			if err := iso.drainOneTickLocked(ctx); err != nil {
 				return nil, err
 			}
+			if p2, ok := exportPromise(v); ok && p2.State() == goja.PromiseStatePending {
+				if w := iso.pumpWait(); w > 0 {
+					if err := iso.waitForWorkLocked(ctx, w); err != nil {
+						return nil, err
+					}
+				}
+			}
 		}
 	}
+}
+
+// pumpWait is the block used while a Promise is pending. Prefer the next
+// guest timer; otherwise a short poll so Fetch and script-run share one loop.
+func (iso *Isolate) pumpWait() time.Duration {
+	if d, ok := iso.timers.nextDeadline(); ok {
+		w := d.Sub(iso.now())
+		if w < 0 {
+			return 0
+		}
+		return w
+	}
+	return scriptIdlePoll
 }
 
 func exportPromise(v goja.Value) (*goja.Promise, bool) {

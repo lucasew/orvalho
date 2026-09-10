@@ -144,6 +144,52 @@ func TestNodeHTTPRequest(t *testing.T) {
 	<-errc
 }
 
+func TestNodeHTTPAsyncHandler(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	iso := New("", Options{
+		Imports: NodeScriptImports(),
+		Listen: func(ctx context.Context, req ListenReq) (net.Listener, error) {
+			return ln, nil
+		},
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- iso.ScriptMain(ctx, `
+			require("http").createServer(async function (req, res) {
+				await new Promise(function (resolve) { setTimeout(resolve, 20); });
+				res.end("later");
+			}).listen(0, "127.0.0.1");
+		`, "t.js")
+	}()
+	var resp *http.Response
+	for i := 0; i < 50; i++ {
+		resp, err = http.Get("http://" + addr + "/")
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "later" {
+		t.Fatalf("body %q", body)
+	}
+	cancel()
+	<-errc
+}
+
 func TestNodeHTTPRequestWithDueTimers(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

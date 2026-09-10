@@ -67,28 +67,25 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 		if err := iso.drainOneTickLocked(ctx); err != nil {
 			return iso.wrapScriptError(ctx, err)
 		}
-		deadline, ok := iso.timers.nextDeadline()
-		if ok {
-			idle = 0
-			wait := deadline.Sub(iso.now())
+		deadline, hasTimer := iso.timers.nextDeadline()
+		listening := iso.listeners > 0
+		if !hasTimer && !listening {
+			idle++
+			if idle >= 64 {
+				return iso.finishScript(rejected)
+			}
+			continue
+		}
+		idle = 0
+		var wait time.Duration
+		if hasTimer {
+			wait = deadline.Sub(iso.now())
 			if wait <= 0 {
 				continue
 			}
-			if err := iso.waitForWorkLocked(ctx, wait); err != nil {
-				return err
-			}
-			continue
 		}
-		if iso.listeners > 0 {
-			idle = 0
-			if err := iso.waitForWorkLocked(ctx, 0); err != nil {
-				return err
-			}
-			continue
-		}
-		idle++
-		if idle >= 64 {
-			return iso.finishScript(rejected)
+		if err := iso.waitForWorkLocked(ctx, wait); err != nil {
+			return err
 		}
 	}
 }

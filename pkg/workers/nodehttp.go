@@ -226,7 +226,20 @@ func (n *nodeHTTP) jsCreateServer(call goja.FunctionCall) goja.Value {
 			args = call.Arguments[1:]
 		}
 		for _, fn := range listeners[ev] {
-			_, _ = fn(srv, args...)
+			v, err := fn(srv, args...)
+			if err != nil {
+				panic(err)
+			}
+			if ev != "request" && ev != "upgrade" {
+				continue
+			}
+			ctx := n.iso.activeCtx
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			if _, err := n.iso.awaitPromiseLocked(ctx, v, 0); err != nil {
+				panic(n.iso.vm.NewGoError(err))
+			}
 		}
 		return goja.Undefined()
 	})
