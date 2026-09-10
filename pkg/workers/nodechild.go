@@ -149,7 +149,8 @@ func (n *nodeChild) jsExecSync(call goja.FunctionCall) goja.Value {
 	if len(call.Arguments) == 0 || goja.IsUndefined(call.Argument(0)) {
 		n.throwArgType("command")
 	}
-	return n.waitSync("sh", []string{"-c", call.Argument(0).String()})
+	n.waitSync("sh", []string{"-c", call.Argument(0).String()})
+	return n.syncStdout(call)
 }
 
 func (n *nodeChild) jsExecFileSync(call goja.FunctionCall) goja.Value {
@@ -157,7 +158,29 @@ func (n *nodeChild) jsExecFileSync(call goja.FunctionCall) goja.Value {
 	if file == "" {
 		n.throwArgType("file")
 	}
-	return n.waitSync(file, args)
+	n.waitSync(file, args)
+	return n.syncStdout(call)
+}
+
+// syncStdout is Node execSync/execFileSync: stdout only. encoding
+// utf8 is a string (detect-libc does out.split). Otherwise a Buffer.
+func (n *nodeChild) syncStdout(call goja.FunctionCall) goja.Value {
+	enc := encodingOf(lastOptions(call))
+	if isUTF8Enc(enc) {
+		return n.iso.vm.ToValue("")
+	}
+	return jsBytes(n.iso, nil)
+}
+
+func lastOptions(call goja.FunctionCall) goja.Value {
+	if len(call.Arguments) == 0 {
+		return nil
+	}
+	a := call.Argument(len(call.Arguments) - 1)
+	if _, isFn := goja.AssertFunction(a); isFn {
+		return nil
+	}
+	return a
 }
 
 func (n *nodeChild) jsSpawnSync(call goja.FunctionCall) goja.Value {

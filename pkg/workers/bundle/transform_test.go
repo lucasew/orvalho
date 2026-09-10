@@ -32,6 +32,25 @@ func TestTransformEvalCJSKeepsTopLevelAwait(t *testing.T) {
 	}
 }
 
+func TestTransformCJSASIAfterDefaultMember(t *testing.T) {
+	src := "var x = require('m').default\nvar y = 1\n"
+	out, err := bundle.TransformCJS(src, "n.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, ".default;") {
+		t.Fatalf("ASI after default:\n%s", out)
+	}
+	obj := "var o = {\n  a: m.default\n};\n"
+	got, err := bundle.TransformCJS(obj, "o.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, ".default;") {
+		t.Fatalf("ASI inside object:\n%s", got)
+	}
+}
+
 func TestTransformCJSStillTransformsExport(t *testing.T) {
 	src := "export const n = 1;\n"
 	out, err := bundle.TransformCJS(src, "mod.js")

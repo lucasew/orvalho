@@ -11,6 +11,7 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/evanw/esbuild/pkg/api"
+	"github.com/lucasew/orvalho/pkg/imports"
 )
 
 // nodeEsbuildBinding is require("esbuild") backed by the linked Go API.
@@ -255,6 +256,11 @@ func (n *nodeEsbuild) guestFSPlugin() api.Plugin {
 				if n.guestFile(rel) != "" {
 					return api.OnResolveResult{Path: rel, Namespace: "orvalho"}, nil
 				}
+				if !strings.HasPrefix(p, ".") && !path.IsAbs(p) {
+					if resolved := n.resolveBare(p); resolved != "" {
+						return api.OnResolveResult{Path: resolved, Namespace: "orvalho"}, nil
+					}
+				}
 				if args.Kind == api.ResolveEntryPoint {
 					// Flattened Vite ids are not files; stub them instead of marking external.
 					return api.OnResolveResult{Path: p, Namespace: "orvalho"}, nil
@@ -264,7 +270,7 @@ func (n *nodeEsbuild) guestFSPlugin() api.Plugin {
 			b.OnLoad(api.OnLoadOptions{Filter: ".*", Namespace: "orvalho"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				file := n.guestFile(args.Path)
 				if file == "" {
-					empty := "export default {}\n"
+					empty := "export default function () {}\n"
 					return api.OnLoadResult{Contents: &empty, Loader: api.LoaderJS}, nil
 				}
 				data, err := fs.ReadFile(n.iso.opts.FS, file)
@@ -524,8 +530,27 @@ func htmlLikeScanJS(src, file string) (string, bool) {
 			b.WriteString("\"\n")
 		}
 	}
-	b.WriteString("export default {}\n")
+	b.WriteString("export default function () {}\n")
 	return b.String(), true
+}
+
+func (n *nodeEsbuild) resolveBare(spec string) string {
+	if n.iso == nil || spec == "" {
+		return ""
+	}
+	v, err := imports.Resolve(spec, withImportFrom(n.iso.opts.Imports, n.iso.importFrom)...)
+	if err != nil {
+		return ""
+	}
+	s, ok := v.(imports.Script)
+	if !ok || s.File == "" {
+		return ""
+	}
+	rel := n.toGuest(s.File)
+	if n.guestFile(rel) != "" {
+		return rel
+	}
+	return ""
 }
 
 func jsMessages(v goja.Value) []api.Message {

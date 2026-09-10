@@ -57,6 +57,7 @@ func NodeScriptImports() []imports.Handler[any] {
 		imports.Alias[any]{From: "util", To: "node:util"},
 		imports.Alias[any]{From: "util/types", To: "node:util/types"},
 		imports.Alias[any]{From: "v8", To: "node:v8"},
+		imports.Alias[any]{From: "vm", To: "node:vm"},
 		imports.Alias[any]{From: "worker_threads", To: "node:worker_threads"},
 		imports.Alias[any]{From: "zlib", To: "node:zlib"},
 		imports.Map[any]{
@@ -101,12 +102,19 @@ func NodeScriptImports() []imports.Handler[any] {
 			"node:util":                nodehostScript("nodehost/util.js"),
 			"node:util/types":          nodehostScript("nodehost/types.js"),
 			"node:v8":                  nodeV8Binding{},
+			"node:vm":                  nodeVMBinding{},
 			"node:worker_threads":      nodeWorkerThreadsBinding{},
 			"node:zlib":                nodeZlibBinding{},
 		},
 		imports.Func[any](func(spec string, next imports.Resolver[any]) (any, error) {
 			if spec == "esbuild" || strings.HasPrefix(spec, "esbuild/") {
 				return nodeEsbuildBinding{}, nil
+			}
+			if strings.HasPrefix(spec, "lightningcss-") {
+				return nodeLightningCSSBinding{}, nil
+			}
+			if spec == "@tailwindcss/oxide" {
+				return nodeOxideBinding{}, nil
 			}
 			if spec == "workerd" || strings.HasPrefix(spec, "@cloudflare/workerd-") {
 				return nodehostScript("nodehost/workerd_stub.js"), nil

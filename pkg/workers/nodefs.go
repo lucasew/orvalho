@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 
@@ -986,15 +987,101 @@ func (n *nodeFS) readFile(name string) ([]byte, error) {
 	if n.fsys == nil {
 		return nil, fs.ErrNotExist
 	}
+	var data []byte
 	if rf, ok := n.fsys.(fs.ReadFileFS); ok {
-		return rf.ReadFile(name)
+		data, err = rf.ReadFile(name)
+	} else {
+		var f fs.File
+		f, err = n.fsys.Open(name)
+		if err != nil {
+			return nil, err
+		}
+		data, err = io.ReadAll(f)
+		f.Close()
 	}
-	f, err := n.fsys.Open(name)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	return io.ReadAll(f)
+	if stub, ok := stubSvelteReexportBarrel(name, data); ok {
+		return stub, nil
+	}
+	return data, nil
+}
+
+var (
+	svelteNamedReexportRE = regexp.MustCompile(`^export\s*\{\s*default\s+as\s+([A-Za-z_$][\w$]*)\s*\}\s*from\s*['"][^'"]+\.svelte['"]\s*;?$`)
+	svelteDefaultReexportRE = regexp.MustCompile(`^export\s*\{\s*default\s*\}\s*from\s*['"][^'"]+\.svelte['"]\s*;?$`)
+)
+
+// stubSvelteReexportBarrel collapses a file that only re-exports .svelte
+// defaults. Vite SSR of lucide-svelte would otherwise fetch every icon.
+func stubSvelteReexportBarrel(name string, data []byte) ([]byte, bool) {
+	switch strings.ToLower(path.Ext(name)) {
+	case ".js", ".mjs":
+	default:
+		return nil, false
+	}
+	if !strings.Contains(string(data), ".svelte") {
+		return nil, false
+	}
+	var names []string
+	hasDefault := false
+	for _, line := range strings.Split(stripJSComments(string(data)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if m := svelteNamedReexportRE.FindStringSubmatch(line); len(m) == 2 {
+			names = append(names, m[1])
+			continue
+		}
+		if svelteDefaultReexportRE.MatchString(line) {
+			hasDefault = true
+			continue
+		}
+		return nil, false
+	}
+	if len(names) == 0 && !hasDefault {
+		return nil, false
+	}
+	var b strings.Builder
+	b.WriteString("function __orvalhoIcon() {}\n")
+	if hasDefault {
+		b.WriteString("export default __orvalhoIcon;\n")
+	}
+	for _, n := range names {
+		b.WriteString("export { __orvalhoIcon as ")
+		b.WriteString(n)
+		b.WriteString(" };\n")
+	}
+	return []byte(b.String()), true
+}
+
+func stripJSComments(s string) string {
+	var b strings.Builder
+	i := 0
+	for i < len(s) {
+		if i+1 < len(s) && s[i] == '/' && s[i+1] == '*' {
+			j := strings.Index(s[i+2:], "*/")
+			if j < 0 {
+				break
+			}
+			i += 2 + j + 2
+			b.WriteByte('\n')
+			continue
+		}
+		if i+1 < len(s) && s[i] == '/' && s[i+1] == '/' {
+			j := strings.IndexByte(s[i:], '\n')
+			if j < 0 {
+				break
+			}
+			i += j
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
 }
 
 func (n *nodeFS) statPath(name string) (fs.FileInfo, error) {

@@ -43,7 +43,21 @@ func (iso *Isolate) jsNeedsEvalTransform(call goja.FunctionCall) goja.Value {
 	if len(call.Arguments) > 0 && !goja.IsUndefined(call.Argument(0)) && !goja.IsNull(call.Argument(0)) {
 		src = call.Argument(0).String()
 	}
-	return iso.vm.ToValue(looksLikeESM(src) || needsDownlevel(src))
+	if looksLikeESM(src) {
+		return iso.vm.ToValue(true)
+	}
+	isAsync := false
+	if len(call.Arguments) > 1 {
+		isAsync = call.Argument(1).ToBoolean()
+	}
+	if isAsync {
+		// goja already runs await, #fields, ?., ??, rest/spread, and
+		// optional catch. Rewriting those to ES2015 (__async +
+		// __privateAdd) is what threw "same private member more than
+		// once" on Svelte's Renderer during Vite SSR.
+		return iso.vm.ToValue(needsExoticSyntax(src))
+	}
+	return iso.vm.ToValue(needsDownlevel(src))
 }
 
 const orvalhoEvalPrefix = "async function __orvalhoEval("
@@ -150,13 +164,15 @@ func needsDownlevel(src string) bool {
 		strings.Contains(src, "await\n") || strings.Contains(src, "await(") {
 		return true
 	}
-	if strings.Contains(src, "catch {") || strings.Contains(src, "catch{") {
+	return needsExoticSyntax(src)
+}
+
+func needsExoticSyntax(src string) bool {
+	if strings.Contains(src, " using ") || strings.Contains(src, "\tusing ") ||
+		strings.Contains(src, "\nusing ") || strings.HasPrefix(src, "using ") {
 		return true
 	}
-	if strings.Contains(src, "?.") || strings.Contains(src, "??") {
-		return true
-	}
-	if strings.Contains(src, "...") {
+	if strings.Contains(src, " with {") || strings.Contains(src, " with{") {
 		return true
 	}
 	return false
@@ -312,7 +328,7 @@ const evalHookScript = `
       for (var i = 0; i < arguments.length; i++) args[i] = arguments[i];
       if (!args.length) return Orig.apply(this, args);
       var body = String(args[args.length - 1]);
-      if (needHost(body)) {
+      if (needHost(body, isAsync)) {
         var names = [];
         for (var j = 0; j < args.length - 1; j++) names.push(String(args[j]));
         var src = "async function __orvalhoEval(" + names.join(",") + ") {\n" + body + "\n}";

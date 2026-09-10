@@ -117,6 +117,7 @@ func (iso *Isolate) installWebTypes() {
 	mustAccessor(resProto, "statusText", iso.vm.ToValue(iso.responseGetStatusText))
 	mustAccessor(resProto, "ok", iso.vm.ToValue(iso.responseGetOK))
 	mustAccessor(resProto, "headers", iso.vm.ToValue(iso.responseGetHeaders))
+	mustAccessor(resProto, "body", iso.vm.ToValue(iso.responseGetBody))
 	mustSet(resProto, "text", iso.responseText)
 	mustSet(resProto, "arrayBuffer", iso.responseArrayBuffer)
 	mustSet(resProto, "json", iso.responseJSON)
@@ -460,6 +461,40 @@ func (iso *Isolate) responseGetOK(call goja.FunctionCall) goja.Value {
 func (iso *Isolate) responseGetHeaders(call goja.FunctionCall) goja.Value {
 	r := iso.responseBagOf(call)
 	return iso.newHeadersObject(r.headers)
+}
+
+func (iso *Isolate) responseGetBody(call goja.FunctionCall) goja.Value {
+	r := iso.responseBagOf(call)
+	if r.bodyStream != nil {
+		return r.bodyStream
+	}
+	return iso.stringReadableStream(r.body)
+}
+
+func (iso *Isolate) stringReadableStream(s string) goja.Value {
+	ctor, ok := goja.AssertConstructor(iso.vm.Get("ReadableStream"))
+	if !ok {
+		return goja.Null()
+	}
+	src := iso.vm.NewObject()
+	mustSet(src, "start", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			return goja.Undefined()
+		}
+		ctrl := call.Argument(0).ToObject(iso.vm)
+		if enqueue, ok := goja.AssertFunction(ctrl.Get("enqueue")); ok {
+			_, _ = enqueue(ctrl, jsBytes(iso, []byte(s)))
+		}
+		if close, ok := goja.AssertFunction(ctrl.Get("close")); ok {
+			_, _ = close(ctrl)
+		}
+		return goja.Undefined()
+	})
+	v, err := ctor(nil, src)
+	if err != nil {
+		return goja.Null()
+	}
+	return v
 }
 
 func (iso *Isolate) responseText(call goja.FunctionCall) goja.Value {

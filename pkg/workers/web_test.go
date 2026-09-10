@@ -235,6 +235,25 @@ func TestHostMakeRequestReadableByJS(t *testing.T) {
 	}
 }
 
+func TestResponseBodyGetReader(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var res = new Response("<html>ok</html>", {status: 200, headers: {"Content-Type": "text/html"}});
+		if (!res.body || typeof res.body.getReader !== "function") throw new Error("body");
+		var got = "";
+		res.body.getReader().read().then(function (r) {
+			if (r.done) throw new Error("done");
+			var v = r.value;
+			if (typeof Buffer !== "undefined") got = Buffer.from(v).toString();
+			else got = String.fromCharCode.apply(null, v);
+			if (got.indexOf("<html>") < 0) throw new Error("chunk " + got);
+		});
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestJSResponseRoundTripViaHost(t *testing.T) {
 	iso := New(`
 		globalThis.handle = function(req) {

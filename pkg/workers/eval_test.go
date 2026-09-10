@@ -88,6 +88,30 @@ func TestDownlevelEvalWrappedESM(t *testing.T) {
 	}
 }
 
+func TestAsyncFunctionKeepsNativePrivateFields(t *testing.T) {
+	iso := New("", Options{})
+	err := iso.ScriptMain(t.Context(), `
+		var AsyncFunction = async function () {}.constructor;
+		var fn = new AsyncFunction(
+			"exports",
+			"class R { static #open() { return new R(); } #out = []; static render() { return this.#open(); } child() { return new R(); } }\n" +
+			"var a = R.render(); var b = a.child(); exports.ok = !!(a && b && a !== b);\n"
+		);
+		var exports = {};
+		var n = 0;
+		Promise.resolve(fn(exports)).then(function () {
+			if (!exports.ok) throw new Error("private");
+			n = 1;
+		});
+		setTimeout(function () {
+			if (n !== 1) throw new Error("no result");
+		}, 0);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFunctionAwaitBody(t *testing.T) {
 	iso := New("", Options{})
 	err := iso.ScriptMain(t.Context(), `

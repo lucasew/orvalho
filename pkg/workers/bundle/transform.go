@@ -579,6 +579,9 @@ func rewritePlainCJS(src string) string {
 	if strings.Contains(src, "cachedUint8ArrayMemory0") || strings.Contains(src, "cachedDataViewMemory0") {
 		src = rewriteWasmMemoryCache(src)
 	}
+	if strings.Contains(src, ".default") {
+		src = insertASIAfterReservedMember(src)
+	}
 	return src
 }
 
@@ -609,6 +612,62 @@ func isIdentCont(c byte) bool {
 	return c == '_' || c == '$' ||
 		(c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
 		(c >= '0' && c <= '9')
+}
+
+func isIdentStart(c byte) bool {
+	return c == '_' || c == '$' ||
+		(c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+}
+
+// goja accepts obj.default; but not obj.default<newline>var — ASI
+// does not fire after a reserved-word member. Insert `;`.
+func insertASIAfterReservedMember(src string) string {
+	const word = "default"
+	var b strings.Builder
+	b.Grow(len(src) + 8)
+	i := 0
+	for i < len(src) {
+		if n := jsCommentLen(src, i); n > 0 {
+			b.WriteString(src[i : i+n])
+			i += n
+			continue
+		}
+		if n := jsStringLen(src, i); n > 0 {
+			b.WriteString(src[i : i+n])
+			i += n
+			continue
+		}
+		if src[i] == '.' && strings.HasPrefix(src[i+1:], word) {
+			end := i + 1 + len(word)
+			if end == len(src) || !isIdentCont(src[end]) {
+				b.WriteString(".default")
+				if reservedMemberNeedsASI(src, end) {
+					b.WriteByte(';')
+				}
+				i = end
+				continue
+			}
+		}
+		b.WriteByte(src[i])
+		i++
+	}
+	return b.String()
+}
+
+func reservedMemberNeedsASI(src string, i int) bool {
+	for i < len(src) && (src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r') {
+		i++
+	}
+	if i >= len(src) {
+		return false
+	}
+	switch src[i] {
+	case '.', '(', '[', ';', ',', '?', ':', '+', '-', '*', '/', '%',
+		'=', '&', '|', '<', '>', '!', '`', '}', ')':
+		return false
+	default:
+		return true
+	}
 }
 
 func loaderFor(file string) api.Loader {

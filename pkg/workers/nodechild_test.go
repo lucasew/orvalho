@@ -66,6 +66,26 @@ func TestNodeChildPropNames(t *testing.T) {
 	}
 }
 
+func TestNodeChildExecSyncStdoutString(t *testing.T) {
+	done := make(chan SpawnWait, 1)
+	done <- SpawnWait{Code: 0}
+	iso := New("", Options{
+		Imports: NodeScriptImports(),
+		Spawn: func(ctx context.Context, req SpawnReq) (Spawned, error) {
+			return stubSpawned{pid: 4, done: done}, nil
+		},
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var out = require("child_process").execSync("true", {encoding: "utf8"});
+		if (typeof out !== "string") throw new Error("type " + typeof out);
+		if (typeof out.split !== "function") throw new Error("split");
+		out.split(/[\r\n]+/);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeChildESMExecFile(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports(), PrepareSource: bundle.TransformCJS})
 	err := iso.ScriptMain(t.Context(), `

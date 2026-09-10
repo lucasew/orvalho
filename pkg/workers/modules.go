@@ -249,6 +249,9 @@ func (iso *Isolate) rewriteRelative(spec string) string {
 	if mapped, ok := iso.fileURLSpec(spec); ok {
 		return mapped
 	}
+	if mapped, ok := iso.absHostSpec(spec); ok {
+		return mapped
+	}
 	if iso.importFrom == "" {
 		return spec
 	}
@@ -256,6 +259,31 @@ func (iso *Isolate) rewriteRelative(spec string) string {
 		return path.Clean(path.Join(path.Dir(iso.importFrom), spec))
 	}
 	return spec
+}
+
+func (iso *Isolate) absHostSpec(spec string) (string, bool) {
+	if spec == "" || spec[0] != '/' {
+		return "", false
+	}
+	cwd, mount := "", ""
+	if iso != nil {
+		cwd = iso.cwd
+		mount = iso.opts.Cwd
+	}
+	p := stripCwdPrefix(spec, cwd)
+	if mount != "" && mount != cwd {
+		if alt := stripCwdPrefix(spec, mount); alt != spec && (p == spec || len(alt) < len(p)) {
+			p = alt
+		}
+	}
+	if p == spec {
+		return "", false
+	}
+	p = strings.TrimLeft(strings.ReplaceAll(p, "\\", "/"), "/")
+	if p == "" {
+		return ".", true
+	}
+	return p, true
 }
 
 func (iso *Isolate) fileURLSpec(spec string) (string, bool) {
@@ -351,7 +379,7 @@ func wrapCJSFn(source string, async bool) string {
 	} else {
 		b.WriteString("(function (require, module, exports, __orvalhoFilename, __orvalhoDirname) {\n")
 	}
-	b.WriteString("function __import(s){return Promise.resolve(require(s));}\n")
+	b.WriteString("function __import(s){var m=require(s);if(m&&(typeof m==='object'||typeof m==='function')&&'default' in m)return Promise.resolve(m);var ns={default:m};if(m&&typeof m==='object'){for(var k in m)ns[k]=m[k];}return Promise.resolve(ns);}\n")
 	b.WriteString("function __orvalhoFileURL(f){\n")
 	b.WriteString("  if(!f) f = __orvalhoFilename;\n")
 	b.WriteString("  if(!f) return 'file:///script.js';\n")

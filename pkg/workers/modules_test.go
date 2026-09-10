@@ -225,6 +225,27 @@ func TestRequireCircularESMReassign(t *testing.T) {
 	}
 }
 
+func TestDynamicImportCJSDefault(t *testing.T) {
+	iso := New("", Options{
+		Imports: importMap(map[string]any{
+			"plug": imports.Script{
+				File:   "plug.js",
+				Source: "function plug() { return 7; }\nplug.postcss = true;\nmodule.exports = plug;\n",
+			},
+		}),
+	})
+	err := iso.ScriptMain(t.Context(), `
+		import("plug").then(function (m) {
+			if (typeof m.default !== "function") throw new Error("default " + typeof m.default);
+			if (m.default() !== 7) throw new Error("call");
+			if (m.default.postcss !== true) throw new Error("postcss");
+		});
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMissingSourceMapDoesNotFailParse(t *testing.T) {
 	iso := New("", Options{
 		Imports: importMap(map[string]any{
@@ -363,6 +384,24 @@ func TestRequireNodeModules(t *testing.T) {
 	tickOK(t, iso)
 	if got := iso.vm.Get("got").String(); got != "01" {
 		t.Fatalf("got=%q want 01", got)
+	}
+}
+
+func TestRequireAbsHostConfig(t *testing.T) {
+	fsys := fstest.MapFS{
+		"postcss.config.js": {Data: []byte("module.exports = { plugins: { x: true } };\n")},
+	}
+	iso := New("", Options{
+		FS:      fsys,
+		Cwd:     "/proj",
+		Imports: []imports.Handler[any]{imports.NodeModules{FS: fsys}},
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var m = require("/proj/postcss.config.js");
+		if (!m || !m.plugins || !m.plugins.x) throw new Error("cfg");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

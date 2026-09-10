@@ -55,13 +55,13 @@ func newNodeZlib(iso *Isolate) *goja.Object {
 	mustSet(obj, "inflateSync", n.syncCodec(zlibDecode))
 	mustSet(obj, "deflateRawSync", n.syncCodec(rawEncode))
 	mustSet(obj, "inflateRawSync", n.syncCodec(rawDecode))
-	mustSet(obj, "createGzip", n.jsCreateStream)
-	mustSet(obj, "createGunzip", n.jsCreateStream)
-	mustSet(obj, "createDeflate", n.jsCreateStream)
-	mustSet(obj, "createInflate", n.jsCreateStream)
-	mustSet(obj, "createUnzip", n.jsCreateStream)
-	mustSet(obj, "createDeflateRaw", n.jsCreateStream)
-	mustSet(obj, "createInflateRaw", n.jsCreateStream)
+	mustSet(obj, "createGzip", n.makeCreateStream(gzipEncode))
+	mustSet(obj, "createGunzip", n.makeCreateStream(gzipDecode))
+	mustSet(obj, "createDeflate", n.makeCreateStream(zlibEncode))
+	mustSet(obj, "createInflate", n.makeCreateStream(zlibDecode))
+	mustSet(obj, "createUnzip", n.makeCreateStream(gzipDecode))
+	mustSet(obj, "createDeflateRaw", n.makeCreateStream(rawEncode))
+	mustSet(obj, "createInflateRaw", n.makeCreateStream(rawDecode))
 	mustSet(obj, "default", obj)
 	return obj
 }
@@ -126,21 +126,51 @@ func (n *nodeZlib) encode(data []byte) goja.Value {
 	return v
 }
 
-func (n *nodeZlib) jsCreateStream(goja.FunctionCall) goja.Value {
-	s := n.iso.vm.NewObject()
-	attachEmitter(s)
-	mustSet(s, "write", func(goja.FunctionCall) goja.Value { return n.iso.vm.ToValue(true) })
-	mustSet(s, "end", func(call goja.FunctionCall) goja.Value { return s })
-	mustSet(s, "pipe", func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) > 0 {
-			return call.Argument(0)
+func (n *nodeZlib) makeCreateStream(fn func([]byte) ([]byte, error)) func(goja.FunctionCall) goja.Value {
+	return func(goja.FunctionCall) goja.Value {
+		var buf []byte
+		s := n.iso.vm.NewObject()
+		attachEmitter(s)
+		emit := func(ev string, args ...goja.Value) {
+			if fn, ok := goja.AssertFunction(s.Get("emit")); ok {
+				call := append([]goja.Value{n.iso.vm.ToValue(ev)}, args...)
+				_, _ = fn(s, call...)
+			}
 		}
+		mustSet(s, "write", func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) > 0 && !goja.IsUndefined(call.Argument(0)) && !goja.IsNull(call.Argument(0)) {
+				buf = append(buf, valueBytes(call.Argument(0))...)
+			}
+			return n.iso.vm.ToValue(true)
+		})
+		mustSet(s, "end", func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) > 0 && !goja.IsUndefined(call.Argument(0)) && !goja.IsNull(call.Argument(0)) {
+				if _, isFn := goja.AssertFunction(call.Argument(0)); !isFn {
+					buf = append(buf, valueBytes(call.Argument(0))...)
+				}
+			}
+			out, err := fn(buf)
+			if err != nil {
+				emit("error", n.iso.vm.NewGoError(err))
+				return s
+			}
+			if len(out) > 0 {
+				emit("data", n.encode(out))
+			}
+			emit("end")
+			return s
+		})
+		mustSet(s, "pipe", func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) > 0 {
+				return call.Argument(0)
+			}
+			return s
+		})
+		mustSet(s, "pause", func(call goja.FunctionCall) goja.Value { return s })
+		mustSet(s, "resume", func(call goja.FunctionCall) goja.Value { return s })
+		mustSet(s, "destroy", func(call goja.FunctionCall) goja.Value { return s })
 		return s
-	})
-	mustSet(s, "pause", func(call goja.FunctionCall) goja.Value { return s })
-	mustSet(s, "resume", func(call goja.FunctionCall) goja.Value { return s })
-	mustSet(s, "destroy", func(call goja.FunctionCall) goja.Value { return s })
-	return s
+	}
 }
 
 func gzipEncode(in []byte) ([]byte, error) {

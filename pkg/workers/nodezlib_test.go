@@ -22,6 +22,22 @@ func TestNodeZlibIdentity(t *testing.T) {
 	`)
 }
 
+func TestNodeZlibCreateGzipEmits(t *testing.T) {
+	runNodeZlib(t, `
+		var zlib = require("zlib");
+		var chunks = [];
+		var ended = false;
+		var z = zlib.createGzip();
+		z.on("data", function (c) { chunks.push(c); });
+		z.on("end", function () { ended = true; });
+		z.end("hello gzip stream");
+		if (!ended) throw new Error("end");
+		if (!chunks.length) throw new Error("data");
+		var out = Buffer.concat(chunks.map(function (c) { return Buffer.from(c); }));
+		if (zlib.gunzipSync(out).toString() !== "hello gzip stream") throw new Error("round " + out.length);
+	`)
+}
+
 func TestNodeZlibGzipRoundtrip(t *testing.T) {
 	runNodeZlib(t, `
 		var zlib = require("zlib");
