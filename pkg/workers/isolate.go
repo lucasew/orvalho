@@ -54,6 +54,8 @@ type Isolate struct {
 
 	// httpCh delivers accepted HTTP requests to ScriptMain (Listen DI).
 	httpCh chan *httpJob
+	// wake unblocks waitForWorkLocked for socket I/O (HMR frames).
+	wake chan struct{}
 	// listeners is how many guest servers are currently listening.
 	listeners int
 
@@ -89,6 +91,7 @@ func New(script string, opts Options) *Isolate {
 		timers: newTimerTable(),
 		now:    time.Now,
 		httpCh: make(chan *httpJob, 16),
+		wake:   make(chan struct{}, 1),
 	}
 	iso.installTimers()
 	iso.installWebTypes()

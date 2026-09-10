@@ -145,29 +145,86 @@ func (n *nodeWorkerThreads) initWorker(w *goja.Object) *goja.Object {
 	return w
 }
 
+type eeListener struct {
+	val  *goja.Object
+	fn   goja.Callable
+	once bool
+}
+
 func attachEmitter(obj *goja.Object) {
-	listeners := map[string][]goja.Callable{}
-	mustSet(obj, "on", func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) >= 2 {
-			if fn, ok := goja.AssertFunction(call.Argument(1)); ok {
-				ev := call.Argument(0).String()
-				listeners[ev] = append(listeners[ev], fn)
+	listeners := map[string][]eeListener{}
+	add := func(ev string, val goja.Value, front, once bool) {
+		fn, ok := goja.AssertFunction(val)
+		if !ok {
+			return
+		}
+		o, _ := val.(*goja.Object)
+		l := eeListener{val: o, fn: fn, once: once}
+		if front {
+			listeners[ev] = append([]eeListener{l}, listeners[ev]...)
+			return
+		}
+		listeners[ev] = append(listeners[ev], l)
+	}
+	drop := func(ev string, val goja.Value) {
+		want, _ := val.(*goja.Object)
+		arr := listeners[ev]
+		for i, l := range arr {
+			if l.val == want {
+				listeners[ev] = append(arr[:i], arr[i+1:]...)
+				return
 			}
 		}
+	}
+	on := func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			add(call.Argument(0).String(), call.Argument(1), false, false)
+		}
 		return obj
-	})
+	}
+	once := func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			add(call.Argument(0).String(), call.Argument(1), false, true)
+		}
+		return obj
+	}
+	off := func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			drop(call.Argument(0).String(), call.Argument(1))
+		}
+		return obj
+	}
+	mustSet(obj, "on", on)
+	mustSet(obj, "addListener", on)
 	mustSet(obj, "prependListener", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) >= 2 {
-			if fn, ok := goja.AssertFunction(call.Argument(1)); ok {
-				ev := call.Argument(0).String()
-				listeners[ev] = append([]goja.Callable{fn}, listeners[ev]...)
-			}
+			add(call.Argument(0).String(), call.Argument(1), true, false)
 		}
 		return obj
 	})
-	mustSet(obj, "once", obj.Get("on"))
-	mustSet(obj, "prependOnceListener", obj.Get("prependListener"))
-	mustSet(obj, "off", func(call goja.FunctionCall) goja.Value { return obj })
+	mustSet(obj, "once", once)
+	mustSet(obj, "prependOnceListener", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			add(call.Argument(0).String(), call.Argument(1), true, true)
+		}
+		return obj
+	})
+	mustSet(obj, "off", off)
+	mustSet(obj, "removeListener", off)
+	mustSet(obj, "removeAllListeners", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			clear(listeners)
+			return obj
+		}
+		delete(listeners, call.Argument(0).String())
+		return obj
+	})
+	mustSet(obj, "listenerCount", func(call goja.FunctionCall) int {
+		if len(call.Arguments) == 0 {
+			return 0
+		}
+		return len(listeners[call.Argument(0).String()])
+	})
 	mustSet(obj, "emit", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			return goja.Undefined()
@@ -177,8 +234,12 @@ func attachEmitter(obj *goja.Object) {
 		if len(call.Arguments) > 1 {
 			args = call.Arguments[1:]
 		}
-		for _, fn := range listeners[ev] {
-			_, _ = fn(obj, args...)
+		arr := append([]eeListener(nil), listeners[ev]...)
+		for _, l := range arr {
+			if l.once {
+				drop(ev, l.val)
+			}
+			_, _ = l.fn(obj, args...)
 		}
 		return goja.Undefined()
 	})

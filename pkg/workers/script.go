@@ -105,10 +105,23 @@ func (iso *Isolate) waitForWorkLocked(ctx context.Context, wait time.Duration) e
 	case <-timerC:
 		iso.mu.Lock()
 		return nil
+	case <-iso.wake:
+		iso.mu.Lock()
+		return nil
 	case job := <-iso.httpCh:
 		iso.mu.Lock()
 		iso.dispatchHTTP(job)
 		return nil
+	}
+}
+
+func (iso *Isolate) kick() {
+	if iso == nil || iso.wake == nil {
+		return
+	}
+	select {
+	case iso.wake <- struct{}{}:
+	default:
 	}
 }
 

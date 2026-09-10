@@ -308,6 +308,14 @@ func TestNodeHTTPUpgrade(t *testing.T) {
 				if (!socket.readable || !socket.writable) throw new Error("flags");
 				if (String(req.headers.upgrade).toLowerCase() !== "websocket") throw new Error("hdr");
 				if (!head || typeof head.length !== "number") throw new Error("head");
+				if (typeof socket.removeListener !== "function") throw new Error("removeListener");
+				if (typeof socket.cork !== "function" || typeof socket.uncork !== "function") throw new Error("cork");
+				var n = 0;
+				function onerr() { n++; }
+				socket.on("error", onerr);
+				socket.removeListener("error", onerr);
+				socket.emit("error");
+				if (n !== 0) throw new Error("error still bound");
 				socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
 			}).listen(0, "127.0.0.1");
 		`, "t.js")

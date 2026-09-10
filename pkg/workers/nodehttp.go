@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dop251/goja"
 )
@@ -605,8 +606,18 @@ func (n *nodeHTTP) bindConn(conn net.Conn) *goja.Object {
 			mustSet(sock, "writable", false)
 		})
 	}
+	mustSet(sock, "cork", func(goja.FunctionCall) goja.Value { return sock })
+	mustSet(sock, "uncork", func(goja.FunctionCall) goja.Value { return sock })
 	mustSet(sock, "write", func(call goja.FunctionCall) goja.Value {
-		if _, err := conn.Write(valueBytes(call.Argument(0))); err != nil {
+		_, err := conn.Write(valueBytes(call.Argument(0)))
+		if cb, ok := goja.AssertFunction(call.Argument(1)); ok {
+			var args []goja.Value
+			if err != nil {
+				args = []goja.Value{n.iso.vm.NewGoError(err)}
+			}
+			n.iso.timers.schedule(cb, args, 0, 0, n.iso.now())
+		}
+		if err != nil {
 			return n.iso.vm.ToValue(false)
 		}
 		return n.iso.vm.ToValue(true)
@@ -647,6 +658,7 @@ func (n *nodeHTTP) bindConn(conn net.Conn) *goja.Object {
 				cp := make([]byte, nr)
 				copy(cp, buf[:nr])
 				ch <- cp
+				n.iso.kick()
 			}
 			if err != nil {
 				return
@@ -668,7 +680,7 @@ func (n *nodeHTTP) bindConn(conn net.Conn) *goja.Object {
 					return goja.Undefined(), err
 				}
 			default:
-				n.iso.timers.schedule(poll, nil, 0, 0, n.iso.now())
+				n.iso.timers.schedule(poll, nil, 16*time.Millisecond, 0, n.iso.now())
 				return goja.Undefined(), nil
 			}
 		}
