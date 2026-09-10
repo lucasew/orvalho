@@ -102,6 +102,19 @@ func (iso *Isolate) waitForWorkLocked(ctx context.Context, wait time.Duration) e
 		defer timer.Stop()
 		timerC = timer.C
 	}
+	if iso.dispatching > 0 {
+		select {
+		case <-ctx.Done():
+			iso.mu.Lock()
+			return ctx.Err()
+		case <-timerC:
+			iso.mu.Lock()
+			return nil
+		case <-iso.wake:
+			iso.mu.Lock()
+			return nil
+		}
+	}
 	select {
 	case <-ctx.Done():
 		iso.mu.Lock()
@@ -130,6 +143,9 @@ func (iso *Isolate) kick() {
 }
 
 func (iso *Isolate) pollHTTP() {
+	if iso.dispatching > 0 {
+		return
+	}
 	for {
 		select {
 		case job := <-iso.httpCh:

@@ -383,6 +383,8 @@ func (iso *Isolate) dispatchHTTP(job *httpJob) {
 		return
 	}
 	iso.inFlight++
+	iso.dispatching++
+	defer func() { iso.dispatching-- }()
 	n := &nodeHTTP{iso: iso}
 	if job.upgrade {
 		n.dispatchUpgrade(job)

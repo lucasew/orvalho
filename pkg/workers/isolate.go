@@ -60,6 +60,9 @@ type Isolate struct {
 	listeners int
 	// inFlight is HTTP/upgrade jobs that have not finished (res.end / upgrade return).
 	inFlight int
+	// dispatching is the nest depth of dispatchHTTP. waitForWork must not
+	// take another job while this is > 0 or HMR reconnect overflows the stack.
+	dispatching int
 
 	wasmRt       wazero.Runtime
 	wasmCompiled map[*goja.Object]*wasmCompiled
