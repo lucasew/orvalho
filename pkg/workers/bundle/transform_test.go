@@ -10,6 +10,20 @@ import (
 	"github.com/lucasew/orvalho/pkg/workers/bundle"
 )
 
+func TestTransformCJSKeepsPrivateFields(t *testing.T) {
+	src := "export class R { #x = 1; static #y = 2; n() { return this.#x; } }\n"
+	out, err := bundle.TransformCJS(src, "r.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "__privateAdd") {
+		t.Fatalf("downleveled private fields:\n%s", out)
+	}
+	if !strings.Contains(out, "#x") {
+		t.Fatalf("lost #x:\n%s", out)
+	}
+}
+
 func TestTransformCJSSkipsPlainCJS(t *testing.T) {
 	src := "module.exports = { n: 1 };\n"
 	out, err := bundle.TransformCJS(src, "plain.js")

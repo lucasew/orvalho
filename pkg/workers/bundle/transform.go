@@ -24,6 +24,19 @@ var (
 	awaitBareCall        = regexp.MustCompile(`(?m)^await ([A-Za-z_$][\w$]*\(\);)\s*$`)
 )
 
+// GojaSupported keeps syntax goja already parses so esbuild ES2015
+// does not rewrite it to __privateAdd / __async (Svelte 5 Renderer).
+var GojaSupported = map[string]bool{
+	"dynamic-import":                false,
+	"class-private-field":           true,
+	"class-private-method":          true,
+	"class-private-static-field":    true,
+	"class-private-static-method":   true,
+	"class-private-accessor":        true,
+	"class-private-static-accessor": true,
+	"class-private-brand-check":     true,
+}
+
 // pAtom maps property names regexp2 rejects under Unicode (the /u flag)
 // to a single category or POSIX class it accepts. Keys are lower-case.
 var pAtom = map[string]string{
@@ -85,7 +98,7 @@ func transformCJS(source, file string, allowTLA bool) (string, error) {
 		Target:     api.ES2015,
 		Platform:   api.PlatformNeutral,
 		Charset:    api.CharsetASCII,
-		Supported:  map[string]bool{"dynamic-import": false},
+		Supported:  GojaSupported,
 	})
 	if len(result.Errors) > 0 {
 		return "", fmt.Errorf("bundle: transform %s: %s", file, result.Errors[0].Text)

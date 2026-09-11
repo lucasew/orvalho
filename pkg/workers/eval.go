@@ -132,10 +132,11 @@ func downlevelAwaitBody(src string) (string, error) {
 
 func downlevelEval(src string) (string, error) {
 	r := api.Transform(src, api.TransformOptions{
-		Loader:  api.LoaderJS,
-		Target:  api.ES2015,
-		Format:  api.FormatDefault,
-		Charset: api.CharsetASCII,
+		Loader:    api.LoaderJS,
+		Target:    api.ES2015,
+		Format:    api.FormatDefault,
+		Charset:   api.CharsetASCII,
+		Supported: bundle.GojaSupported,
 	})
 	if len(r.Errors) > 0 {
 		return "", fmt.Errorf("downlevel: %s", r.Errors[0].Text)
@@ -145,10 +146,11 @@ func downlevelEval(src string) (string, error) {
 
 func downlevelSyntax(src string) string {
 	r := api.Transform(src, api.TransformOptions{
-		Loader:  api.LoaderJS,
-		Target:  api.ES2015,
-		Format:  api.FormatDefault,
-		Charset: api.CharsetASCII,
+		Loader:    api.LoaderJS,
+		Target:    api.ES2015,
+		Format:    api.FormatDefault,
+		Charset:   api.CharsetASCII,
+		Supported: bundle.GojaSupported,
 	})
 	if len(r.Errors) == 0 {
 		return string(r.Code)
