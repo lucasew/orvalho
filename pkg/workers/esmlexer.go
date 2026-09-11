@@ -36,7 +36,10 @@ type esmExport struct {
 }
 
 func isESMLexerFile(file string) bool {
-	return strings.Contains(file, "es-module-lexer") && strings.HasSuffix(file, "lexer.js")
+	if !strings.Contains(file, "es-module-lexer") {
+		return false
+	}
+	return strings.HasSuffix(file, "lexer.js") || strings.HasSuffix(file, "lexer.cjs")
 }
 
 func (iso *Isolate) patchESMLexer(exports goja.Value) goja.Value {
