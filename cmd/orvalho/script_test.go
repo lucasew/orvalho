@@ -135,10 +135,16 @@ func TestHostTreeFSWriteAndEscape(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "escape.txt")); err == nil {
 		t.Fatal("wrote outside root")
 	}
-	if err := h.Remove("a.txt"); err != nil {
+	if err := h.Rename("a.txt", "b.txt"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "a.txt")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(dir, "b.txt")); err != nil {
+		t.Fatalf("rename dest: %v", err)
+	}
+	if err := h.Remove("b.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "b.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("remove: %v", err)
 	}
 }

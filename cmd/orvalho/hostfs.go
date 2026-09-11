@@ -60,6 +60,21 @@ func (h hostTreeFS) Remove(name string) error {
 	return os.Remove(full)
 }
 
+func (h hostTreeFS) Rename(oldpath, newpath string) error {
+	from, err := h.resolve(oldpath)
+	if err != nil {
+		return err
+	}
+	to, err := h.resolve(newpath)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		return err
+	}
+	return os.Rename(from, to)
+}
+
 func (h hostTreeFS) Realpath(name string) (string, error) {
 	full, err := h.resolve(name)
 	if err != nil {

@@ -18,6 +18,7 @@ type WriteFS interface {
 	WriteFile(name string, data []byte, perm fs.FileMode) error
 	Mkdir(name string, perm fs.FileMode) error
 	Remove(name string) error
+	Rename(oldpath, newpath string) error
 }
 
 // RealpathFS is an optional symlink-resolving surface a mounted [fs.FS]
@@ -98,8 +99,8 @@ func newNodeFS(iso *Isolate) *goja.Object {
 	mustSet(obj, "readlinkSync", n.jsReadlinkSync)
 	n.setNative(obj, "realpath", n.jsRealpath)
 	n.setNative(obj, "realpathSync", n.jsRealpathSync)
-	mustSet(obj, "rename", n.jsStub2("rename", "oldPath", "newPath", false))
-	mustSet(obj, "renameSync", n.jsStub2("rename", "oldPath", "newPath", true))
+	mustSet(obj, "rename", n.jsRename)
+	mustSet(obj, "renameSync", n.jsRenameSync)
 	mustSet(obj, "rm", n.jsRm)
 	mustSet(obj, "rmSync", n.jsRmSync)
 	mustSet(obj, "rmdir", n.jsRmdir)
@@ -632,6 +633,37 @@ func (n *nodeFS) jsWrite(call goja.FunctionCall) goja.Value {
 		return goja.Undefined()
 	}
 	return n.iso.vm.ToValue(nw)
+}
+
+func (n *nodeFS) jsRenameSync(call goja.FunctionCall) goja.Value {
+	n.rename(call, true)
+	return goja.Undefined()
+}
+
+func (n *nodeFS) jsRename(call goja.FunctionCall) goja.Value {
+	n.rename(call, false)
+	return goja.Undefined()
+}
+
+func (n *nodeFS) rename(call goja.FunctionCall, sync bool) {
+	src, dest := n.mustTwo(call, "oldPath", "newPath")
+	var cb goja.Callable
+	if !sync {
+		_, cb = n.optsAndCB(call, 2)
+		n.requireCB(cb)
+	}
+	w := n.writer()
+	if w == nil {
+		n.fail("rename", src, errReadOnly, sync, cb, true)
+		return
+	}
+	if err := w.Rename(src, dest); err != nil {
+		n.fail("rename", src, err, sync, cb, false)
+		return
+	}
+	if !sync {
+		n.nextTick(cb, goja.Null())
+	}
 }
 
 func (n *nodeFS) jsWriteFileSync(call goja.FunctionCall) goja.Value {
