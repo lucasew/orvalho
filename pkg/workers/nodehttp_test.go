@@ -416,6 +416,65 @@ func TestNodeHTTPSocketData(t *testing.T) {
 	<-errc
 }
 
+func TestNodeHTTPSocketEndIdempotent(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	iso := New("", Options{
+		Imports: NodeScriptImports(),
+		Listen: func(ctx context.Context, req ListenReq) (net.Listener, error) {
+			return ln, nil
+		},
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- iso.ScriptMain(ctx, `
+			require("http").createServer(function (req, res) {
+				res.end("no");
+			}).on("upgrade", function (req, socket) {
+				var n = 0;
+				socket.on("end", function () { n++; socket.end(); });
+				socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
+				socket.end();
+				if (n < 1) throw new Error("end not emitted");
+			}).listen(0, "127.0.0.1");
+		`, "t.js")
+	}()
+	var conn net.Conn
+	for i := 0; i < 50; i++ {
+		conn, err = net.Dial("tcp", addr)
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	raw := "GET / HTTP/1.1\r\nHost: " + addr + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+	if _, err := conn.Write([]byte(raw)); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 256)
+	n, err := conn.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(buf[:n]), "101") {
+		t.Fatalf("upgrade resp %q", buf[:n])
+	}
+	cancel()
+	if err := <-errc; err != nil && ctx.Err() == nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeHTTPStreamPipe(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

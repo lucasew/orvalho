@@ -592,6 +592,7 @@ func (n *nodeHTTP) bindConn(conn net.Conn) *goja.Object {
 	mustSet(sock, "remoteAddress", "127.0.0.1")
 	mustSet(sock, "remotePort", 0)
 	var closeOnce sync.Once
+	var finished bool
 	shutdown := func() {
 		closeOnce.Do(func() {
 			_ = conn.Close()
@@ -599,6 +600,17 @@ func (n *nodeHTTP) bindConn(conn net.Conn) *goja.Object {
 			mustSet(sock, "readable", false)
 			mustSet(sock, "writable", false)
 		})
+	}
+	finish := func(sendEnd bool) {
+		if finished {
+			return
+		}
+		finished = true
+		shutdown()
+		if sendEnd {
+			_ = n.emit(sock, "end")
+		}
+		_ = n.emit(sock, "close")
 	}
 	mustSet(sock, "cork", func(goja.FunctionCall) goja.Value { return sock })
 	mustSet(sock, "uncork", func(goja.FunctionCall) goja.Value { return sock })
@@ -617,17 +629,14 @@ func (n *nodeHTTP) bindConn(conn net.Conn) *goja.Object {
 		return n.iso.vm.ToValue(true)
 	})
 	mustSet(sock, "end", func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) > 0 && !goja.IsUndefined(call.Argument(0)) {
+		if len(call.Arguments) > 0 && !goja.IsUndefined(call.Argument(0)) && !finished {
 			_, _ = conn.Write(valueBytes(call.Argument(0)))
 		}
-		shutdown()
-		_ = n.emit(sock, "end")
-		_ = n.emit(sock, "close")
+		finish(true)
 		return sock
 	})
 	mustSet(sock, "destroy", func(goja.FunctionCall) goja.Value {
-		shutdown()
-		_ = n.emit(sock, "close")
+		finish(false)
 		return sock
 	})
 	mustSet(sock, "setTimeout", func(goja.FunctionCall) goja.Value { return sock })
@@ -655,9 +664,7 @@ func (n *nodeHTTP) bindConn(conn net.Conn) *goja.Object {
 			}
 			if err != nil {
 				n.iso.postJob(func() {
-					shutdown()
-					_ = n.emit(sock, "end")
-					_ = n.emit(sock, "close")
+					finish(true)
 				})
 				return
 			}
