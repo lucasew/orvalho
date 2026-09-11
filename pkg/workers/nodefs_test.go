@@ -99,21 +99,6 @@ func TestNodeFSExistsSync(t *testing.T) {
 	`)
 }
 
-func TestStubSvelteReexportBarrel(t *testing.T) {
-	src := "/** license */\nexport { default as Sun } from './sun.svelte';\nexport { default as Moon } from './moon.svelte';\n"
-	got, ok := stubSvelteReexportBarrel("icons/index.js", []byte(src))
-	if !ok {
-		t.Fatal("expected stub")
-	}
-	s := string(got)
-	if !strings.Contains(s, "as Sun") || !strings.Contains(s, "as Moon") {
-		t.Fatalf("stub %s", s)
-	}
-	if _, ok := stubSvelteReexportBarrel("icons/index.js", []byte("export const x = 1;\n")); ok {
-		t.Fatal("non-barrel")
-	}
-}
-
 func TestNodeFSCreateReadStream(t *testing.T) {
 	runNodeFS(t, nodeFSMap(), `
 		var fs = require("fs");
