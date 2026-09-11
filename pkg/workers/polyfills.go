@@ -18,6 +18,7 @@ func (iso *Isolate) installHostPolyfills() {
 
 	// atob / btoa / URL / streams / crypto / Intl — one script for guest globals.
 	_, _ = iso.vm.RunString(hostPolyfillScript)
+	iso.installTextCodec()
 	iso.installWebAssembly()
 	iso.installEvalHook()
 }
@@ -85,38 +86,6 @@ const hostPolyfillScript = `
         if (e4 !== 64) str += String.fromCharCode(c3);
       }
       return str;
-    };
-  }
-  if (typeof globalThis.TextEncoder !== "function") {
-    globalThis.TextEncoder = function TextEncoder() {};
-    globalThis.TextEncoder.prototype.encode = function (s) {
-      s = String(s);
-      var arr = [];
-      for (var i = 0; i < s.length; i++) {
-        var c = s.charCodeAt(i);
-        if (c < 128) arr.push(c);
-        else if (c < 2048) arr.push(192 | (c >> 6), 128 | (c & 63));
-        else arr.push(224 | (c >> 12), 128 | ((c >> 6) & 63), 128 | (c & 63));
-      }
-      return new Uint8Array(arr);
-    };
-  }
-  if (typeof globalThis.TextDecoder !== "function") {
-    globalThis.TextDecoder = function TextDecoder() {};
-    globalThis.TextDecoder.prototype.decode = function (buf) {
-      if (!buf) return "";
-      var a = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-      var out = "", i = 0;
-      while (i < a.length) {
-        var c = a[i++];
-        if (c < 128) out += String.fromCharCode(c);
-        else if (c > 191 && c < 224) {
-          out += String.fromCharCode(((c & 31) << 6) | (a[i++] & 63));
-        } else {
-          out += String.fromCharCode(((c & 15) << 12) | ((a[i++] & 63) << 6) | (a[i++] & 63));
-        }
-      }
-      return out;
     };
   }
   // Always install URLSearchParams: goja has none, and a stub get() that

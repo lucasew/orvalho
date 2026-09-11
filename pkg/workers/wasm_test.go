@@ -120,6 +120,14 @@ func TestWebAssemblyMemoryViewSurvivesGrow(t *testing.T) {
 		if (fresh.getUint8(0) !== 42) throw new Error("content lost after grow");
 		fresh.setUint8(before, 7);
 		if (fresh.getUint8(before) !== 7) throw new Error("write into grown pages");
+		var oldDead = false;
+		try { dv.getUint8(0); } catch (e) { oldDead = true; }
+		if (!oldDead) throw new Error("old DataView still live after grow");
+		var cached = new Uint8Array(inst.exports.mem.buffer);
+		inst.exports.mem.grow(1);
+		if (cached.byteLength !== 0) throw new Error("cached view byteLength " + cached.byteLength);
+		var again = new Uint8Array(inst.exports.mem.buffer);
+		if (again[0] !== 42) throw new Error("content lost after second grow");
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)

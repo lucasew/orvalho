@@ -504,20 +504,27 @@ func (st *wasmInstance) attachMemory(iso *Isolate, exports *goja.Object, name st
 }
 
 // bindJSMem makes memory.buffer a fresh ArrayBuffer whose length is
-// mem.Size(). The WebAssembly JS API replaces the buffer on grow;
-// es-module-lexer sizes its copy from byteLength.
+// mem.Size() and detaches the previous one. The WebAssembly JS API
+// detaches on grow; rollup's wasm-bindgen cache only refreshes a
+// Uint8Array when its byteLength is 0, so a live stale view writes
+// into the old buffer and parse then slices a garbage length (OOM).
 func (st *wasmInstance) bindJSMem(iso *Isolate) {
 	size := st.mem.Size()
-	buf := make([]byte, size)
-	if st.jsBuf != nil {
-		copy(buf, st.jsBuf)
+	if size > wasmJSMemMax {
+		panic(iso.vm.NewTypeError("WebAssembly.Memory: exceeds maximum"))
 	}
+	buf := make([]byte, size)
+	copy(buf, st.jsBuf)
 	if data, ok := st.mem.Read(0, size); ok {
 		copy(buf, data)
 	}
+	prev := st.jsAB
 	st.jsBuf = buf
 	st.jsAB = iso.vm.NewArrayBuffer(st.jsBuf)
 	mustSet(st.memObj, "buffer", st.jsAB)
+	if prev != (goja.ArrayBuffer{}) {
+		prev.Detach()
+	}
 }
 
 func (st *wasmInstance) rebindMemory(iso *Isolate) {
