@@ -79,8 +79,7 @@ func TestParseESMLarge(t *testing.T) {
 
 func TestESMLexerPatch(t *testing.T) {
 	iso := New("", Options{})
-	obj := iso.vm.NewObject()
-	iso.patchESMLexer(obj)
+	obj := iso.patchESMLexer(iso.vm.NewObject())
 	iso.vm.Set("$lex", obj)
 	err := iso.ScriptMain(t.Context(), `
 		var r = $lex.parse("import { a } from 'mod'; export var p = 5;");

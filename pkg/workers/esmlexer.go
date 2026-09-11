@@ -39,16 +39,20 @@ func isESMLexerFile(file string) bool {
 	return strings.Contains(file, "es-module-lexer") && strings.HasSuffix(file, "lexer.js")
 }
 
-func (iso *Isolate) patchESMLexer(exports goja.Value) {
-	obj, ok := exports.(*goja.Object)
-	if !ok || obj == nil {
-		return
-	}
+func (iso *Isolate) patchESMLexer(exports goja.Value) goja.Value {
+	obj := iso.vm.NewObject()
 	mustSet(obj, "parse", iso.jsESMParse)
 	p, resolve, _ := iso.vm.NewPromise()
 	resolve(goja.Undefined())
 	mustSet(obj, "init", iso.vm.ToValue(p))
 	mustSet(obj, "initSync", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
+	if src, ok := exports.(*goja.Object); ok && src != nil {
+		if it := src.Get("ImportType"); it != nil && !goja.IsUndefined(it) {
+			mustSet(obj, "ImportType", it)
+		}
+	}
+	mustSet(obj, "default", obj)
+	return obj
 }
 
 func (iso *Isolate) jsESMParse(call goja.FunctionCall) goja.Value {

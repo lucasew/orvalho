@@ -365,7 +365,8 @@ func (iso *Isolate) loadScript(key, source, file string) (goja.Value, error) {
 	}
 	final := module.Get("exports")
 	if isESMLexerFile(file) {
-		iso.patchESMLexer(final)
+		final = iso.patchESMLexer(final)
+		_ = module.Set("exports", final)
 	}
 	iso.moduleCache[key] = final
 	return final, nil
