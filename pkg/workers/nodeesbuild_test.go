@@ -185,6 +185,38 @@ func TestEsbuildContextRebuild(t *testing.T) {
 	}
 }
 
+func TestEsbuildResolveKind(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var esbuild = require("esbuild");
+		var kind = "";
+		esbuild.build({
+			stdin: { contents: 'export { n } from "virt:x";', loader: "js" },
+			bundle: true,
+			write: false,
+			format: "esm",
+			plugins: [{
+				name: "virt",
+				setup: function (b) {
+					b.onResolve({ filter: /^virt:/ }, function (args) {
+						kind = args.kind;
+						return { path: args.path, namespace: "virt" };
+					});
+					b.onLoad({ filter: /.*/, namespace: "virt" }, function () {
+						return { contents: "export const n = 1;", loader: "js" };
+					});
+				}
+			}]
+		}).then(function () {});
+		setTimeout(function () {
+			if (kind !== "import-statement") throw new Error("kind " + kind);
+		}, 200);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEsbuildJSPluginOnLoad(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `

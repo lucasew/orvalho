@@ -332,10 +332,20 @@ func (n *nodeEsbuild) hostFile(guest string) string {
 		return ""
 	}
 	full := filepath.Join(root, filepath.FromSlash(guest))
-	if _, err := os.Stat(full); err != nil {
+	st, err := os.Stat(full)
+	if err != nil {
 		return ""
 	}
-	return full
+	if !st.IsDir() {
+		return full
+	}
+	for _, idx := range []string{"index.js", "index.mjs", "index.cjs", "index.ts"} {
+		p := filepath.Join(full, idx)
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p
+		}
+	}
+	return ""
 }
 
 func (n *nodeEsbuild) toGuest(raw string) string {
@@ -707,6 +717,7 @@ func (n *nodeEsbuild) callOnResolve(fn goja.Callable, args api.OnResolveArgs) (a
 		mustSet(o, "importer", args.Importer)
 		mustSet(o, "namespace", args.Namespace)
 		mustSet(o, "resolveDir", args.ResolveDir)
+		mustSet(o, "kind", resolveKindString(args.Kind))
 		v, e := fn(goja.Undefined(), o)
 		if e != nil {
 			err = e
@@ -741,6 +752,29 @@ func (n *nodeEsbuild) callOnResolve(fn goja.Callable, args api.OnResolveArgs) (a
 		}
 	})
 	return out, err
+}
+
+func resolveKindString(k api.ResolveKind) string {
+	switch k {
+	case api.ResolveEntryPoint:
+		return "entry-point"
+	case api.ResolveJSImportStatement:
+		return "import-statement"
+	case api.ResolveJSRequireCall:
+		return "require-call"
+	case api.ResolveJSDynamicImport:
+		return "dynamic-import"
+	case api.ResolveJSRequireResolve:
+		return "require-resolve"
+	case api.ResolveCSSImportRule:
+		return "import-rule"
+	case api.ResolveCSSComposesFrom:
+		return "composes-from"
+	case api.ResolveCSSURLToken:
+		return "url-token"
+	default:
+		return "import-statement"
+	}
 }
 
 func (n *nodeEsbuild) resolveBare(spec string) string {
