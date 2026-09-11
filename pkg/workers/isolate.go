@@ -63,6 +63,12 @@ type Isolate struct {
 	// dispatching is the nest depth of dispatchHTTP. waitForWork must not
 	// take another job while this is > 0 or HMR reconnect overflows the stack.
 	dispatching int
+	// pluginCh runs esbuild JS onLoad/onResolve on this isolate (esbuild
+	// calls those from worker goroutines; goja is not safe there).
+	pluginCh chan func()
+	// esbuildBusy is isolate-thread builds waiting off-thread (so the
+	// loop does not go idle before onLoad callbacks arrive).
+	esbuildBusy int
 
 	wasmRt       wazero.Runtime
 	wasmCompiled map[*goja.Object]*wasmCompiled
@@ -90,13 +96,14 @@ func New(script string, opts Options) *Isolate {
 	// absent. Maps are not a Binding.
 	vm.SetParserOptions(parser.WithDisableSourceMaps)
 	iso := &Isolate{
-		vm:     vm,
-		script: script,
-		opts:   opts.withDefaults(),
-		timers: newTimerTable(),
-		now:    time.Now,
-		httpCh: make(chan *httpJob, 16),
-		wake:   make(chan struct{}, 1),
+		vm:       vm,
+		script:   script,
+		opts:     opts.withDefaults(),
+		timers:   newTimerTable(),
+		now:      time.Now,
+		httpCh:   make(chan *httpJob, 16),
+		wake:     make(chan struct{}, 1),
+		pluginCh: make(chan func(), 32),
 	}
 	iso.installTimers()
 	iso.installWebTypes()

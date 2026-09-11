@@ -100,7 +100,7 @@ func TestEsbuildMetafileObject(t *testing.T) {
 			if (!r) throw new Error("no result");
 			if (!r.metafile || typeof r.metafile !== "object") throw new Error("metafile " + typeof r.metafile);
 			if (!r.metafile.outputs) throw new Error("outputs");
-		}, 0);
+		}, 200);
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func TestEsbuildBuildGuestFS(t *testing.T) {
 		});
 		setTimeout(function () {
 			if (!got) throw new Error("no build");
-		}, 0);
+		}, 200);
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)
@@ -178,71 +178,45 @@ func TestEsbuildContextRebuild(t *testing.T) {
 		});
 		setTimeout(function () {
 			if (!got) throw new Error("no context rebuild");
-		}, 0);
+		}, 200);
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestEsbuildContextSvelteScan(t *testing.T) {
-	fsys := fstest.MapFS{
-		"App.svelte": {Data: []byte(`<script lang="ts">
-  import Foo from "./Foo.svelte";
-  export let title: string;
-</script>
-<div>{title}</div>
-`)},
-		"Foo.svelte": {Data: []byte(`<script lang="ts">
-  const n: number = 1;
-</script>
-<span>{n}</span>
-`)},
-	}
-	iso := New("", Options{FS: fsys, Imports: NodeScriptImports()})
-	err := iso.ScriptMain(t.Context(), `
-		var esbuild = require("esbuild");
-		var ok = false;
-		esbuild.context({
-			stdin: { contents: 'import "./App.svelte";', loader: "js" },
-			bundle: true,
-			write: false,
-			format: "esm"
-		}).then(function (ctx) {
-			return ctx.rebuild().then(function (r) {
-				if (r.errors && r.errors.length) throw new Error("errors " + JSON.stringify(r.errors));
-				ok = true;
-				return ctx.dispose();
-			});
-		});
-		setTimeout(function () {
-			if (!ok) throw new Error("svelte scan failed");
-		}, 0);
-	`, "t.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestEsbuildEntryPointStub(t *testing.T) {
+func TestEsbuildJSPluginOnLoad(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `
 		var esbuild = require("esbuild");
-		var ok = false;
-		esbuild.context({
-			entryPoints: ["svelte_internal"],
+		var r = null;
+		var hit = 0;
+		esbuild.build({
+			stdin: { contents: 'export { n } from "virt:x";', loader: "js" },
+			bundle: true,
 			write: false,
-			format: "esm"
-		}).then(function (ctx) {
-			return ctx.rebuild().then(function (r) {
-				if (r.errors && r.errors.length) throw new Error("errors " + JSON.stringify(r.errors));
-				ok = true;
-				return ctx.dispose();
-			});
-		});
+			format: "esm",
+			plugins: [{
+				name: "virt",
+				setup: function (b) {
+					b.onResolve({ filter: /^virt:/ }, function (args) {
+						hit++;
+						return { path: args.path, namespace: "virt" };
+					});
+					b.onLoad({ filter: /.*/, namespace: "virt" }, function () {
+						hit += 10;
+						return { contents: "export const n = 9;", loader: "js" };
+					});
+				}
+			}]
+		}).then(function (out) { r = out; });
 		setTimeout(function () {
-			if (!ok) throw new Error("entry stub failed");
-		}, 0);
+			if (!r) throw new Error("no result hit=" + hit);
+			if (r.errors && r.errors.length) throw new Error("errors " + JSON.stringify(r.errors) + " hit=" + hit);
+			var files = r.outputFiles || [];
+			var text = files[0] && files[0].text || "";
+			if (text.indexOf("9") < 0) throw new Error("plugin hit=" + hit + " files=" + files.length + " " + text);
+		}, 200);
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)
@@ -267,7 +241,7 @@ func TestEsbuildContextStdin(t *testing.T) {
 		});
 		setTimeout(function () {
 			if (!got) throw new Error("no stdin rebuild");
-		}, 0);
+		}, 200);
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)

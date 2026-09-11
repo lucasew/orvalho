@@ -64,12 +64,13 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 	idle := 0
 	for {
 		iso.pollHTTP()
+		iso.pollPlugins()
 		if err := iso.drainOneTickLocked(ctx); err != nil {
 			return iso.wrapScriptError(ctx, err)
 		}
 		deadline, hasTimer := iso.timers.nextDeadline()
 		listening := iso.listeners > 0
-		busy := iso.inFlight > 0
+		busy := iso.inFlight > 0 || iso.esbuildBusy > 0
 		if !hasTimer && !listening && !busy {
 			idle++
 			if idle >= 64 {
@@ -113,6 +114,10 @@ func (iso *Isolate) waitForWorkLocked(ctx context.Context, wait time.Duration) e
 		case <-iso.wake:
 			iso.mu.Lock()
 			return nil
+		case fn := <-iso.pluginCh:
+			iso.mu.Lock()
+			fn()
+			return nil
 		}
 	}
 	select {
@@ -124,6 +129,10 @@ func (iso *Isolate) waitForWorkLocked(ctx context.Context, wait time.Duration) e
 		return nil
 	case <-iso.wake:
 		iso.mu.Lock()
+		return nil
+	case fn := <-iso.pluginCh:
+		iso.mu.Lock()
+		fn()
 		return nil
 	case job := <-iso.httpCh:
 		iso.mu.Lock()
@@ -140,6 +149,37 @@ func (iso *Isolate) kick() {
 	case iso.wake <- struct{}{}:
 	default:
 	}
+}
+
+func (iso *Isolate) pollPlugins() {
+	if iso == nil || iso.pluginCh == nil {
+		return
+	}
+	for {
+		select {
+		case fn := <-iso.pluginCh:
+			fn()
+		default:
+			return
+		}
+	}
+}
+
+func (iso *Isolate) runOnIsolate(fn func()) {
+	if iso == nil || fn == nil {
+		return
+	}
+	if iso.pluginCh == nil {
+		fn()
+		return
+	}
+	done := make(chan struct{})
+	iso.pluginCh <- func() {
+		fn()
+		close(done)
+	}
+	iso.kick()
+	<-done
 }
 
 func (iso *Isolate) pollHTTP() {

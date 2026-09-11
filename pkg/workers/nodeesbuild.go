@@ -1,12 +1,12 @@
 package workers
 
 import (
+	"context"
 	"encoding/json"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -136,25 +136,32 @@ func (n *nodeEsbuild) doFormat(call goja.FunctionCall) (goja.Value, goja.Value) 
 
 func (n *nodeEsbuild) jsBuild(call goja.FunctionCall) goja.Value {
 	p, resolve, reject := n.iso.vm.NewPromise()
-	out, err := n.doBuild(call)
-	if err != nil {
-		reject(err)
-	} else {
-		resolve(out)
-	}
+	opts := call.Argument(0)
+	n.iso.esbuildBusy++
+	go func() {
+		out, err := n.doBuild(opts)
+		n.iso.runOnIsolate(func() {
+			n.iso.esbuildBusy--
+			if err != nil {
+				reject(err)
+			} else {
+				resolve(out)
+			}
+		})
+	}()
 	return n.iso.vm.ToValue(p)
 }
 
 func (n *nodeEsbuild) jsBuildSync(call goja.FunctionCall) goja.Value {
-	out, err := n.doBuild(call)
+	out, err := n.doBuild(call.Argument(0))
 	if err != nil {
 		panic(err)
 	}
 	return out
 }
 
-func (n *nodeEsbuild) doBuild(call goja.FunctionCall) (goja.Value, goja.Value) {
-	opts := n.prepareBuild(call.Argument(0))
+func (n *nodeEsbuild) doBuild(v goja.Value) (goja.Value, goja.Value) {
+	opts := n.prepareBuild(v)
 	n.iso.trace("esbuild build %s", strings.Join(opts.EntryPoints, " "))
 	t0 := time.Now()
 	res := api.Build(opts)
@@ -184,19 +191,25 @@ func (n *nodeEsbuild) wrapContext(ctx api.BuildContext) goja.Value {
 	mustSet(o, "rebuild", func(goja.FunctionCall) goja.Value {
 		p, resolve, reject := n.iso.vm.NewPromise()
 		n.iso.trace("esbuild context rebuild")
-		t0 := time.Now()
-		res := ctx.Rebuild()
-		if len(res.Errors) > 0 {
-			msg := ""
-			if len(res.Errors) > 0 {
-				msg = res.Errors[0].Text
-			}
-			n.iso.trace("esbuild context rebuild fail %s %s", time.Since(t0).Round(time.Millisecond), msg)
-			reject(n.fail(res.Errors, res.Warnings))
-		} else {
-			n.iso.trace("esbuild context rebuild ok %s files=%d", time.Since(t0).Round(time.Millisecond), len(res.OutputFiles))
-			resolve(n.buildOK(res))
-		}
+		n.iso.esbuildBusy++
+		go func() {
+			t0 := time.Now()
+			res := ctx.Rebuild()
+			n.iso.runOnIsolate(func() {
+				n.iso.esbuildBusy--
+				if len(res.Errors) > 0 {
+					msg := ""
+					if len(res.Errors) > 0 {
+						msg = res.Errors[0].Text
+					}
+					n.iso.trace("esbuild context rebuild fail %s %s", time.Since(t0).Round(time.Millisecond), msg)
+					reject(n.fail(res.Errors, res.Warnings))
+					return
+				}
+				n.iso.trace("esbuild context rebuild ok %s files=%d", time.Since(t0).Round(time.Millisecond), len(res.OutputFiles))
+				resolve(n.buildOK(res))
+			})
+		}()
 		return n.iso.vm.ToValue(p)
 	})
 	mustSet(o, "cancel", func(goja.FunctionCall) goja.Value {
@@ -251,16 +264,6 @@ func (n *nodeEsbuild) guestFSPlugin() api.Plugin {
 	return api.Plugin{
 		Name: "orvalho-fs",
 		Setup: func(b api.PluginBuild) {
-			// Vite dep-scan must keep htmlLike stubs. The optimizeDeps
-			// bundle (write+outdir) must leave .svelte on the host path
-			// so vite-plugin-svelte:optimize can compile them.
-			scanLike := !b.InitialOptions.Write || b.InitialOptions.Outdir == ""
-			for _, p := range b.InitialOptions.Plugins {
-				if p.Name == "vite:dep-scan" {
-					scanLike = true
-					break
-				}
-			}
 			b.OnResolve(api.OnResolveOptions{Filter: ".*"}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				p := args.Path
 				if isNodeBuiltinSpec(p) || strings.HasPrefix(p, "node:") {
@@ -269,42 +272,46 @@ func (n *nodeEsbuild) guestFSPlugin() api.Plugin {
 				if strings.Contains(p, "://") && !strings.HasPrefix(p, "file:") {
 					return api.OnResolveResult{Path: p, External: true}, nil
 				}
-				rel := n.toGuest(p)
 				if args.Importer != "" && (p == "." || p == ".." || strings.HasPrefix(p, "./") || strings.HasPrefix(p, "../")) {
-					rel = path.Join(path.Dir(n.toGuest(args.Importer)), p)
-				}
-				rel = path.Clean(rel)
-				if n.guestFile(rel) != "" {
-					if !scanLike {
-						if hp := n.hostSveltePath(rel); hp != "" {
-							return api.OnResolveResult{Path: hp}, nil
+					if filepath.IsAbs(args.Importer) {
+						cand := filepath.Clean(filepath.Join(filepath.Dir(args.Importer), filepath.FromSlash(p)))
+						if _, err := os.Stat(cand); err == nil {
+							return api.OnResolveResult{Path: cand}, nil
 						}
 					}
+					rel := path.Clean(path.Join(path.Dir(n.toGuest(args.Importer)), p))
+					if hp := n.hostFile(rel); hp != "" {
+						return api.OnResolveResult{Path: hp}, nil
+					}
+					if n.guestFile(rel) != "" {
+						return api.OnResolveResult{Path: rel, Namespace: "orvalho"}, nil
+					}
+				}
+				rel := path.Clean(n.toGuest(p))
+				if hp := n.hostFile(rel); hp != "" {
+					return api.OnResolveResult{Path: hp}, nil
+				}
+				if n.guestFile(rel) != "" {
 					return api.OnResolveResult{Path: rel, Namespace: "orvalho"}, nil
 				}
 				if !strings.HasPrefix(p, ".") && !path.IsAbs(p) {
 					if resolved := n.resolveBare(p); resolved != "" {
+						if hp := n.hostFile(resolved); hp != "" {
+							return api.OnResolveResult{Path: hp}, nil
+						}
 						return api.OnResolveResult{Path: resolved, Namespace: "orvalho"}, nil
 					}
 				}
-				if args.Kind == api.ResolveEntryPoint {
-					// Flattened Vite ids are not files; stub them instead of marking external.
-					return api.OnResolveResult{Path: p, Namespace: "orvalho"}, nil
-				}
-				return api.OnResolveResult{Path: p, External: true}, nil
+				return api.OnResolveResult{}, nil
 			})
 			b.OnLoad(api.OnLoadOptions{Filter: ".*", Namespace: "orvalho"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				file := n.guestFile(args.Path)
 				if file == "" {
-					empty := "export default function () {}\n"
-					return api.OnLoadResult{Contents: &empty, Loader: api.LoaderJS}, nil
+					return api.OnLoadResult{}, os.ErrNotExist
 				}
 				data, err := fs.ReadFile(n.iso.opts.FS, file)
 				if err != nil {
 					return api.OnLoadResult{}, err
-				}
-				if js, ok := htmlLikeScanJS(string(data), file); ok {
-					return api.OnLoadResult{Contents: &js, Loader: api.LoaderJS}, nil
 				}
 				s := string(data)
 				return api.OnLoadResult{Contents: &s, Loader: loaderForPath(file)}, nil
@@ -313,25 +320,15 @@ func (n *nodeEsbuild) guestFSPlugin() api.Plugin {
 	}
 }
 
-func svelteLike(p string) bool {
-	p = strings.ToLower(p)
-	if i := strings.IndexAny(p, "?#"); i >= 0 {
-		p = p[:i]
-	}
-	return strings.HasSuffix(p, ".svelte") || strings.HasSuffix(p, ".svelte.js") || strings.HasSuffix(p, ".svelte.ts")
-}
-
-// hostSveltePath is the host file for a guest .svelte id so Vite's
-// vite-plugin-svelte:optimize OnLoad (readFileSync + svelte.compile) can run.
-func (n *nodeEsbuild) hostSveltePath(guest string) string {
-	if n == nil || n.iso == nil || !svelteLike(guest) {
+func (n *nodeEsbuild) hostFile(guest string) string {
+	if n == nil || n.iso == nil || guest == "" || guest == "." {
 		return ""
 	}
 	root := n.iso.opts.Cwd
 	if root == "" {
 		root = n.iso.cwd
 	}
-	if root == "" {
+	if root == "" || !filepath.IsAbs(root) {
 		return ""
 	}
 	full := filepath.Join(root, filepath.FromSlash(guest))
@@ -533,6 +530,12 @@ func (n *nodeEsbuild) buildOpts(v goja.Value) (api.BuildOptions, []api.Plugin) {
 	return opts, n.jsPlugins(o.Get("plugins"))
 }
 
+type jsEsbuildHook struct {
+	filter string
+	ns     string
+	fn     goja.Callable
+}
+
 func (n *nodeEsbuild) jsPlugins(v goja.Value) []api.Plugin {
 	arr, ok := v.(*goja.Object)
 	if !ok || arr == nil {
@@ -542,53 +545,202 @@ func (n *nodeEsbuild) jsPlugins(v goja.Value) []api.Plugin {
 	if nlen <= 0 {
 		return nil
 	}
-	var out []api.Plugin
+	var names []string
+	var objs []*goja.Object
 	for i := 0; i < nlen; i++ {
 		item := arr.Get(strconv.Itoa(i))
 		po, ok := item.(*goja.Object)
 		if !ok {
 			continue
 		}
+		objs = append(objs, po)
+		names = append(names, jsToString(po.Get("name")))
+	}
+	nameArr := n.iso.vm.NewArray()
+	for i, name := range names {
+		o := n.iso.vm.NewObject()
+		mustSet(o, "name", name)
+		_ = nameArr.Set(strconv.Itoa(i), o)
+	}
+	_ = nameArr.Set("length", n.iso.vm.ToValue(len(names)))
+	init := n.iso.vm.NewObject()
+	mustSet(init, "plugins", nameArr)
+
+	var out []api.Plugin
+	for i, po := range objs {
 		setup, ok := goja.AssertFunction(po.Get("setup"))
 		if !ok {
 			continue
 		}
-		name := jsToString(po.Get("name"))
+		var loads, resolves []jsEsbuildHook
 		stub := n.iso.vm.NewObject()
-		mustSet(stub, "onResolve", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
-		mustSet(stub, "onLoad", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
+		mustSet(stub, "onLoad", func(call goja.FunctionCall) goja.Value {
+			if h, ok := n.jsHook(call); ok {
+				loads = append(loads, h)
+			}
+			return goja.Undefined()
+		})
+		mustSet(stub, "onResolve", func(call goja.FunctionCall) goja.Value {
+			if h, ok := n.jsHook(call); ok {
+				resolves = append(resolves, h)
+			}
+			return goja.Undefined()
+		})
 		mustSet(stub, "onStart", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
 		mustSet(stub, "onEnd", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
-		mustSet(stub, "initialOptions", n.iso.vm.NewObject())
+		mustSet(stub, "initialOptions", init)
 		if _, err := setup(po, stub); err != nil {
 			continue
 		}
-		// setup() runs on the isolate thread. Do not register JS onResolve/onLoad:
-		// esbuild invokes those on worker goroutines and goja is not safe there.
-		out = append(out, api.Plugin{Name: name, Setup: func(api.PluginBuild) {}})
+		ld, rs := loads, resolves
+		name := names[i]
+		out = append(out, api.Plugin{
+			Name: name,
+			Setup: func(b api.PluginBuild) {
+				for _, h := range ld {
+					h := h
+					b.OnLoad(api.OnLoadOptions{Filter: h.filter, Namespace: h.ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+						return n.callOnLoad(h.fn, args)
+					})
+				}
+				for _, h := range rs {
+					h := h
+					b.OnResolve(api.OnResolveOptions{Filter: h.filter, Namespace: h.ns}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+						return n.callOnResolve(h.fn, args)
+					})
+				}
+			},
+		})
 	}
 	return out
 }
 
-var htmlImportRE = regexp.MustCompile(`(?m)(?:^|[;\s])import\s+(?:type\s+)?(?:[\w*{}\s,]+from\s+)?["']([^"']+)["']`)
-
-func htmlLikeScanJS(src, file string) (string, bool) {
-	switch strings.ToLower(path.Ext(file)) {
-	case ".svelte", ".vue", ".astro", ".html", ".imba":
-	default:
-		return "", false
+func (n *nodeEsbuild) jsHook(call goja.FunctionCall) (jsEsbuildHook, bool) {
+	fn, ok := goja.AssertFunction(call.Argument(1))
+	if !ok {
+		return jsEsbuildHook{}, false
 	}
-	var b strings.Builder
-	for _, m := range htmlImportRE.FindAllStringSubmatch(src, -1) {
-		if len(m) > 1 && m[1] != "" {
-			b.WriteString("import ")
-			b.WriteByte('"')
-			b.WriteString(m[1])
-			b.WriteString("\"\n")
+	h := jsEsbuildHook{filter: ".*", fn: fn}
+	if o, ok := call.Argument(0).(*goja.Object); ok {
+		h.filter = jsRegexpSource(o.Get("filter"))
+		if ns := jsToString(o.Get("namespace")); ns != "" {
+			h.ns = ns
 		}
 	}
-	b.WriteString("export default function () {}\n")
-	return b.String(), true
+	if h.filter == "" {
+		h.filter = ".*"
+	}
+	return h, true
+}
+
+func jsRegexpSource(v goja.Value) string {
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return ".*"
+	}
+	if o, ok := v.(*goja.Object); ok {
+		if s := o.Get("source"); s != nil && !goja.IsUndefined(s) && !goja.IsNull(s) {
+			if src := s.String(); src != "" {
+				return src
+			}
+		}
+	}
+	s := v.String()
+	if len(s) >= 2 && s[0] == '/' {
+		if i := strings.LastIndex(s, "/"); i > 0 {
+			return s[1:i]
+		}
+	}
+	if s != "" {
+		return s
+	}
+	return ".*"
+}
+
+func (n *nodeEsbuild) callOnLoad(fn goja.Callable, args api.OnLoadArgs) (api.OnLoadResult, error) {
+	var out api.OnLoadResult
+	var err error
+	n.iso.runOnIsolate(func() {
+		o := n.iso.vm.NewObject()
+		mustSet(o, "path", args.Path)
+		mustSet(o, "namespace", args.Namespace)
+		v, e := fn(goja.Undefined(), o)
+		if e != nil {
+			err = e
+			return
+		}
+		if p, ok := exportPromise(v); ok {
+			ctx := n.iso.activeCtx
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			v, e = n.iso.awaitPromiseLocked(ctx, v, defaultFetchWait)
+			if e != nil {
+				err = e
+				return
+			}
+			_ = p
+		}
+		if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+			return
+		}
+		ro, ok := v.(*goja.Object)
+		if !ok {
+			return
+		}
+		if c := ro.Get("contents"); c != nil && !goja.IsUndefined(c) && !goja.IsNull(c) {
+			s := c.String()
+			out.Contents = &s
+		}
+		if l := jsToString(ro.Get("loader")); l != "" {
+			out.Loader = parseLoader(l)
+		}
+	})
+	return out, err
+}
+
+func (n *nodeEsbuild) callOnResolve(fn goja.Callable, args api.OnResolveArgs) (api.OnResolveResult, error) {
+	var out api.OnResolveResult
+	var err error
+	n.iso.runOnIsolate(func() {
+		o := n.iso.vm.NewObject()
+		mustSet(o, "path", args.Path)
+		mustSet(o, "importer", args.Importer)
+		mustSet(o, "namespace", args.Namespace)
+		mustSet(o, "resolveDir", args.ResolveDir)
+		v, e := fn(goja.Undefined(), o)
+		if e != nil {
+			err = e
+			return
+		}
+		if _, ok := exportPromise(v); ok {
+			ctx := n.iso.activeCtx
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			v, e = n.iso.awaitPromiseLocked(ctx, v, defaultFetchWait)
+			if e != nil {
+				err = e
+				return
+			}
+		}
+		if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+			return
+		}
+		ro, ok := v.(*goja.Object)
+		if !ok {
+			return
+		}
+		if p := jsToString(ro.Get("path")); p != "" {
+			out.Path = p
+		}
+		if ns := jsToString(ro.Get("namespace")); ns != "" {
+			out.Namespace = ns
+		}
+		if b, ok := jsBool(ro.Get("external")); ok {
+			out.External = b
+		}
+	})
+	return out, err
 }
 
 func (n *nodeEsbuild) resolveBare(spec string) string {
@@ -641,15 +793,6 @@ func jsMessages(v goja.Value) []api.Message {
 		msgs = append(msgs, m)
 	}
 	return msgs
-}
-
-func jsRegexpSource(v goja.Value) string {
-	if o, ok := v.(*goja.Object); ok && o != nil {
-		if s := jsToString(o.Get("source")); s != "" {
-			return s
-		}
-	}
-	return jsToString(v)
 }
 
 func jsStringMap(v goja.Value) map[string]string {
