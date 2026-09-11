@@ -363,7 +363,19 @@ func (iso *Isolate) instantiateCompiled(c *wasmCompiled, importObj goja.Value) (
 	if iso.wasmGo != nil && mod.ExportedFunction("resume") != nil {
 		iso.wasmGo.inst = st
 	}
+	if isESMLexerWasm(mod) {
+		iso.esmLexer = st
+	}
 	return inst, nil
+}
+
+func isESMLexerWasm(mod api.Module) bool {
+	return mod != nil &&
+		mod.ExportedFunction("parse") != nil &&
+		mod.ExportedFunction("sa") != nil &&
+		mod.ExportedFunction("ri") != nil &&
+		mod.ExportedFunction("is") != nil &&
+		mod.ExportedFunction("ie") != nil
 }
 
 func exportedGlobalNames(mod api.Module) []string {

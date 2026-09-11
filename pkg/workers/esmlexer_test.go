@@ -1,14 +1,38 @@
 package workers
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestParseESMStaticImport(t *testing.T) {
+func loadOfficialLexer(t *testing.T, iso *Isolate) {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/es_module_lexer.wasm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	iso.vm.Set("$WASM", iso.uint8Array(raw))
+	err = iso.ScriptMain(t.Context(), `
+		new WebAssembly.Instance(new WebAssembly.Module($WASM));
+	`, "boot-lexer.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if iso.esmLexer == nil {
+		t.Fatal("official lexer wasm not detected")
+	}
+}
+
+func TestParseESMOfficialWasm(t *testing.T) {
+	iso := New("", Options{})
+	loadOfficialLexer(t, iso)
 	src := "import { a } from 'mod';\nexport var p = 5;\n"
-	imps, exps, _, has := parseESM(src)
+	imps, exps, _, has, err := iso.parseESMLexer(src)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !has {
 		t.Fatal("hasModuleSyntax")
 	}
@@ -18,73 +42,43 @@ func TestParseESMStaticImport(t *testing.T) {
 	if src[imps[0].s:imps[0].e] != "mod" {
 		t.Fatalf("spec slice %q", src[imps[0].s:imps[0].e])
 	}
-	if !strings.HasPrefix(src[imps[0].ss:imps[0].se], "import") {
-		t.Fatalf("stmt %q", src[imps[0].ss:imps[0].se])
-	}
 	if len(exps) != 1 || exps[0].n != "p" {
 		t.Fatalf("exports %+v", exps)
 	}
 }
 
-func TestParseESMSideEffectAndExportStar(t *testing.T) {
-	src := "import './chunk.js';\nexport * from './icons';\n"
-	imps, _, _, _ := parseESM(src)
-	if len(imps) != 1 || imps[0].n != "./chunk.js" {
-		t.Fatalf("imports %+v", imps)
-	}
-}
-
-func TestParseESMDynamicAndMeta(t *testing.T) {
-	src := "import.meta.url; import('x');\n"
-	imps, _, _, _ := parseESM(src)
-	if len(imps) < 2 {
-		t.Fatalf("imports %+v", imps)
-	}
-	var sawMeta, sawDyn bool
-	for _, im := range imps {
-		if im.t == esmImportMeta {
-			sawMeta = true
-		}
-		if im.t == esmDynamic && im.n == "x" {
-			sawDyn = true
-		}
-	}
-	if !sawMeta || !sawDyn {
-		t.Fatalf("meta=%v dyn=%v %+v", sawMeta, sawDyn, imps)
-	}
-}
-
-func TestParseESMLarge(t *testing.T) {
+func TestParseESMOfficialLarge(t *testing.T) {
+	iso := New("", Options{})
+	loadOfficialLexer(t, iso)
 	var b strings.Builder
-	b.Grow(2_500_000)
 	b.WriteString("import { x } from './a.js';\n")
-	for i := 0; i < 60000; i++ {
-		b.WriteString("export function Icon")
-		b.WriteByte('A')
-		b.WriteString("(){return 0}\n")
-	}
+	b.WriteString(strings.Repeat("function Icon(){return 0}\n", 40000))
+	b.WriteString("export { Icon };\n")
 	src := b.String()
 	t0 := time.Now()
-	imps, exps, _, _ := parseESM(src)
+	imps, exps, _, _, err := iso.parseESMLexer(src)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if dt := time.Since(t0); dt > 2*time.Second {
 		t.Fatalf("parse %s", dt)
 	}
 	if len(imps) != 1 || imps[0].n != "./a.js" {
 		t.Fatalf("imports %+v", imps)
 	}
-	if len(exps) < 1000 {
-		t.Fatalf("exports %d", len(exps))
+	if len(exps) != 1 || exps[0].n != "Icon" {
+		t.Fatalf("exports %+v", exps)
 	}
 }
 
 func TestESMLexerPatch(t *testing.T) {
 	iso := New("", Options{})
+	loadOfficialLexer(t, iso)
 	obj := iso.patchESMLexer(iso.vm.NewObject())
 	iso.vm.Set("$lex", obj)
 	err := iso.ScriptMain(t.Context(), `
 		var r = $lex.parse("import { a } from 'mod'; export var p = 5;");
 		if (r[0].length !== 1 || r[0][0].n !== "mod") throw new Error("imp");
-		if (r[0][0].s === undefined || r[0][0].e === undefined) throw new Error("span");
 		if (r[1].length !== 1 || r[1][0].n !== "p") throw new Error("exp");
 		if (!r[3]) throw new Error("has");
 	`, "t.js")

@@ -74,6 +74,8 @@ type Isolate struct {
 	wasmSeq      uint64
 	wasmActive   *wasmInstance
 	wasmGo       *wasmGoJS
+	// esmLexer is the guest es-module-lexer wasm instance (parse/sa/ri).
+	esmLexer *wasmInstance
 }
 
 // Ensure Isolate implements actor.Actor.
