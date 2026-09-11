@@ -60,6 +60,26 @@ func TestEsbuildFormatMessages(t *testing.T) {
 	}
 }
 
+func TestEsbuildMetafileObject(t *testing.T) {
+	fsys := fstest.MapFS{"in.js": {Data: []byte("export const n = 4;\n")}}
+	iso := New("", Options{FS: fsys, Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var esbuild = require("esbuild");
+		var r = null;
+		esbuild.build({ entryPoints: ["in.js"], write: false, format: "esm", metafile: true, bundle: true }).then(function (out) {
+			r = out;
+		});
+		setTimeout(function () {
+			if (!r) throw new Error("no result");
+			if (!r.metafile || typeof r.metafile !== "object") throw new Error("metafile " + typeof r.metafile);
+			if (!r.metafile.outputs) throw new Error("outputs");
+		}, 0);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEsbuildBuildWrite(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "in.js"), []byte("export const n = 3;\n"), 0o644); err != nil {

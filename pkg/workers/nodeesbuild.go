@@ -185,10 +185,14 @@ func (n *nodeEsbuild) wrapContext(ctx api.BuildContext) goja.Value {
 		t0 := time.Now()
 		res := ctx.Rebuild()
 		if len(res.Errors) > 0 {
-			n.iso.trace("esbuild context rebuild fail %s", time.Since(t0).Round(time.Millisecond))
+			msg := ""
+			if len(res.Errors) > 0 {
+				msg = res.Errors[0].Text
+			}
+			n.iso.trace("esbuild context rebuild fail %s %s", time.Since(t0).Round(time.Millisecond), msg)
 			reject(n.fail(res.Errors, res.Warnings))
 		} else {
-			n.iso.trace("esbuild context rebuild ok %s", time.Since(t0).Round(time.Millisecond))
+			n.iso.trace("esbuild context rebuild ok %s files=%d", time.Since(t0).Round(time.Millisecond), len(res.OutputFiles))
 			resolve(n.buildOK(res))
 		}
 		return n.iso.vm.ToValue(p)
@@ -213,6 +217,7 @@ func (n *nodeEsbuild) prepareBuild(v goja.Value) api.BuildOptions {
 	// Guest JS plugins first so Vite can claim .svelte / flattened ids.
 	opts.Plugins = append(opts.Plugins, plugins...)
 	opts.Plugins = append(opts.Plugins, n.guestFSPlugin())
+	n.iso.trace("esbuild prepare write=%v outdir=%s abs=%s entries=%d", opts.Write, opts.Outdir, opts.AbsWorkingDir, len(opts.EntryPoints))
 	return opts
 }
 
@@ -230,7 +235,12 @@ func (n *nodeEsbuild) buildOK(res api.BuildResult) goja.Value {
 	mustSet(o, "warnings", n.msgsValue(res.Warnings))
 	mustSet(o, "errors", n.msgsValue(res.Errors))
 	if res.Metafile != "" {
-		mustSet(o, "metafile", res.Metafile)
+		var parsed any
+		if err := json.Unmarshal([]byte(res.Metafile), &parsed); err == nil {
+			mustSet(o, "metafile", parsed)
+		} else {
+			mustSet(o, "metafile", res.Metafile)
+		}
 	}
 	return o
 }
