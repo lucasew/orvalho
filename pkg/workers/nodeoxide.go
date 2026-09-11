@@ -212,6 +212,9 @@ func (s *oxideScan) scanAll() []string {
 			}
 		}
 	}
+	if s.iso != nil {
+		s.iso.trace("oxide scan %d files %d candidates", len(s.scanned), len(cands))
+	}
 	return cands
 }
 
@@ -236,6 +239,9 @@ func (s *oxideScan) listFiles(src oxideSource) []string {
 			}
 			return nil
 		}
+		if !scanSourceFile(name) {
+			return nil
+		}
 		rel := p
 		if root != "." && strings.HasPrefix(p, root+"/") {
 			rel = p[len(root)+1:]
@@ -257,7 +263,18 @@ func (s *oxideScan) readGuest(name string) ([]byte, error) {
 
 func skipScanDir(name string) bool {
 	switch name {
-	case "node_modules", ".git", ".orvalho", ".astro", ".vite", "dist", ".output":
+	case "node_modules", ".git", ".orvalho", ".astro", ".vite", "dist", ".output",
+		"build", "coverage", ".cache", ".grok":
+		return true
+	default:
+		return false
+	}
+}
+
+func scanSourceFile(name string) bool {
+	switch strings.ToLower(path.Ext(name)) {
+	case ".astro", ".svelte", ".vue", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts",
+		".jsx", ".tsx", ".html", ".htm", ".md", ".mdx", ".css", ".svg":
 		return true
 	default:
 		return false
