@@ -185,6 +185,40 @@ func TestEsbuildContextRebuild(t *testing.T) {
 	}
 }
 
+func TestEsbuildResolvesDirImportToIndex(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "aliases"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "aliases", "index.js"), []byte("export const n = 4;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.js"), []byte("export * from './aliases';\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	iso := New("", Options{FS: os.DirFS(dir), Cwd: dir, Imports: NodeScriptImports()})
+	src := `
+		var esbuild = require("esbuild");
+		var r = null;
+		esbuild.build({
+			entryPoints: ["main.js"],
+			bundle: true,
+			write: false,
+			format: "esm",
+			absWorkingDir: ` + "`" + dir + "`" + `
+		}).then(function (out) { r = out; });
+		setTimeout(function () {
+			if (!r) throw new Error("no result");
+			if (r.errors && r.errors.length) throw new Error(JSON.stringify(r.errors));
+			var text = r.outputFiles && r.outputFiles[0] && r.outputFiles[0].text || "";
+			if (text.indexOf("4") < 0) throw new Error(text);
+		}, 200);
+	`
+	if err := iso.ScriptMain(t.Context(), src, "t.js"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEsbuildResolveKind(t *testing.T) {
 	iso := New("", Options{Imports: NodeScriptImports()})
 	err := iso.ScriptMain(t.Context(), `

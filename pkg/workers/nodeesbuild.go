@@ -275,8 +275,8 @@ func (n *nodeEsbuild) guestFSPlugin() api.Plugin {
 				if args.Importer != "" && (p == "." || p == ".." || strings.HasPrefix(p, "./") || strings.HasPrefix(p, "../")) {
 					if filepath.IsAbs(args.Importer) {
 						cand := filepath.Clean(filepath.Join(filepath.Dir(args.Importer), filepath.FromSlash(p)))
-						if _, err := os.Stat(cand); err == nil {
-							return api.OnResolveResult{Path: cand}, nil
+						if hp := fileOrIndex(cand); hp != "" {
+							return api.OnResolveResult{Path: hp}, nil
 						}
 					}
 					rel := path.Clean(path.Join(path.Dir(n.toGuest(args.Importer)), p))
@@ -331,7 +331,10 @@ func (n *nodeEsbuild) hostFile(guest string) string {
 	if root == "" || !filepath.IsAbs(root) {
 		return ""
 	}
-	full := filepath.Join(root, filepath.FromSlash(guest))
+	return fileOrIndex(filepath.Join(root, filepath.FromSlash(guest)))
+}
+
+func fileOrIndex(full string) string {
 	st, err := os.Stat(full)
 	if err != nil {
 		return ""
