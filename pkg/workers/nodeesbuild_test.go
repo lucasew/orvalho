@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -56,6 +57,32 @@ func TestEsbuildFormatMessages(t *testing.T) {
 		}, 0);
 	`, "t.js")
 	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEsbuildLeavesSvelteToHost(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.svelte"), []byte("<script>export let n = 1</script>\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	iso := New("", Options{FS: os.DirFS(dir), Cwd: dir, Imports: NodeScriptImports()})
+	out := filepath.Join(dir, "out")
+	src := `
+		var esbuild = require("esbuild");
+		esbuild.build({
+			entryPoints: ["x.svelte"],
+			write: true,
+			bundle: true,
+			outdir: ` + "`" + out + "`" + `,
+			absWorkingDir: ` + "`" + dir + "`" + `
+		});
+	`
+	err := iso.ScriptMain(t.Context(), src, "t.js")
+	if err == nil {
+		t.Fatal("expected esbuild to reject raw .svelte (host path, no loader)")
+	}
+	if strings.Contains(err.Error(), "svelte stubbed") {
 		t.Fatal(err)
 	}
 }

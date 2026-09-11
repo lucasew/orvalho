@@ -3,7 +3,9 @@ package workers
 import (
 	"encoding/json"
 	"io/fs"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -249,6 +251,16 @@ func (n *nodeEsbuild) guestFSPlugin() api.Plugin {
 	return api.Plugin{
 		Name: "orvalho-fs",
 		Setup: func(b api.PluginBuild) {
+			// Vite dep-scan must keep htmlLike stubs. The optimizeDeps
+			// bundle (write+outdir) must leave .svelte on the host path
+			// so vite-plugin-svelte:optimize can compile them.
+			scanLike := !b.InitialOptions.Write || b.InitialOptions.Outdir == ""
+			for _, p := range b.InitialOptions.Plugins {
+				if p.Name == "vite:dep-scan" {
+					scanLike = true
+					break
+				}
+			}
 			b.OnResolve(api.OnResolveOptions{Filter: ".*"}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				p := args.Path
 				if isNodeBuiltinSpec(p) || strings.HasPrefix(p, "node:") {
@@ -263,6 +275,11 @@ func (n *nodeEsbuild) guestFSPlugin() api.Plugin {
 				}
 				rel = path.Clean(rel)
 				if n.guestFile(rel) != "" {
+					if !scanLike {
+						if hp := n.hostSveltePath(rel); hp != "" {
+							return api.OnResolveResult{Path: hp}, nil
+						}
+					}
 					return api.OnResolveResult{Path: rel, Namespace: "orvalho"}, nil
 				}
 				if !strings.HasPrefix(p, ".") && !path.IsAbs(p) {
@@ -294,6 +311,34 @@ func (n *nodeEsbuild) guestFSPlugin() api.Plugin {
 			})
 		},
 	}
+}
+
+func svelteLike(p string) bool {
+	p = strings.ToLower(p)
+	if i := strings.IndexAny(p, "?#"); i >= 0 {
+		p = p[:i]
+	}
+	return strings.HasSuffix(p, ".svelte") || strings.HasSuffix(p, ".svelte.js") || strings.HasSuffix(p, ".svelte.ts")
+}
+
+// hostSveltePath is the host file for a guest .svelte id so Vite's
+// vite-plugin-svelte:optimize OnLoad (readFileSync + svelte.compile) can run.
+func (n *nodeEsbuild) hostSveltePath(guest string) string {
+	if n == nil || n.iso == nil || !svelteLike(guest) {
+		return ""
+	}
+	root := n.iso.opts.Cwd
+	if root == "" {
+		root = n.iso.cwd
+	}
+	if root == "" {
+		return ""
+	}
+	full := filepath.Join(root, filepath.FromSlash(guest))
+	if _, err := os.Stat(full); err != nil {
+		return ""
+	}
+	return full
 }
 
 func (n *nodeEsbuild) toGuest(raw string) string {
