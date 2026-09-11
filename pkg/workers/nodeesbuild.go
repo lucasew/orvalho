@@ -397,7 +397,7 @@ func transformOpts(v goja.Value) api.TransformOptions {
 }
 
 func (n *nodeEsbuild) buildOpts(v goja.Value) (api.BuildOptions, []api.Plugin) {
-	opts := api.BuildOptions{LogLevel: api.LogLevelSilent, Write: false}
+	opts := api.BuildOptions{LogLevel: api.LogLevelSilent, Write: true}
 	o, ok := v.(*goja.Object)
 	if !ok || o == nil {
 		return opts, nil
