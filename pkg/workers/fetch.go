@@ -41,8 +41,7 @@ func (iso *Isolate) fetchLocked(ctx context.Context, req HTTPRequest) (HTTPRespo
 	if err := ctx.Err(); err != nil {
 		return HTTPResponse{}, err
 	}
-	iso.activeCtx = ctx
-	defer func() { iso.activeCtx = nil }()
+	defer iso.pushCtx(ctx)()
 
 	if err := iso.ensureInitializedLocked(ctx); err != nil {
 		return HTTPResponse{}, err

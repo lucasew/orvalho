@@ -132,8 +132,7 @@ func (iso *Isolate) Tick(ctx context.Context) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	iso.activeCtx = ctx
-	defer func() { iso.activeCtx = nil }()
+	defer iso.pushCtx(ctx)()
 
 	stopWatch := iso.watchInterrupt(ctx)
 	defer stopWatch()
@@ -249,6 +248,12 @@ func (iso *Isolate) scheduleFromJS(call goja.FunctionCall, repeating bool) goja.
 // watchInterrupt clears any prior VM interrupt and starts a goroutine that
 // interrupts the VM when ctx is done. Call the returned stop func (typically
 // via defer) to end the watcher.
+func (iso *Isolate) pushCtx(ctx context.Context) func() {
+	prev := iso.activeCtx
+	iso.activeCtx = ctx
+	return func() { iso.activeCtx = prev }
+}
+
 func (iso *Isolate) watchInterrupt(ctx context.Context) (stop func()) {
 	iso.vm.ClearInterrupt()
 	done := make(chan struct{})

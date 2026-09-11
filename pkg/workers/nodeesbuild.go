@@ -686,7 +686,7 @@ func (n *nodeEsbuild) callOnLoad(fn goja.Callable, args api.OnLoadArgs) (api.OnL
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			v, e = n.iso.awaitPromiseLocked(ctx, v, defaultFetchWait)
+			v, e = n.iso.awaitPromiseLocked(ctx, v, 0)
 			if e != nil {
 				err = e
 				return
@@ -731,7 +731,7 @@ func (n *nodeEsbuild) callOnResolve(fn goja.Callable, args api.OnResolveArgs) (a
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			v, e = n.iso.awaitPromiseLocked(ctx, v, defaultFetchWait)
+			v, e = n.iso.awaitPromiseLocked(ctx, v, 0)
 			if e != nil {
 				err = e
 				return

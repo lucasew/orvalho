@@ -21,8 +21,7 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 		return iso.wrapScriptError(ctx, err)
 	}
 
-	iso.activeCtx = ctx
-	defer func() { iso.activeCtx = nil }()
+	defer iso.pushCtx(ctx)()
 
 	stopWatch := iso.watchInterrupt(ctx)
 	defer stopWatch()
