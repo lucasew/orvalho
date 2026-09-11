@@ -60,38 +60,43 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 		return iso.wrapScriptError(ctx, err)
 	}
 
-	idle := 0
+	if err := iso.runLoop(ctx); err != nil {
+		return iso.wrapScriptError(ctx, err)
+	}
+	return iso.finishScript(rejected)
+}
+
+// runLoop is the isolate event loop. One thread runs JS. Completions
+// arrive on httpCh, pluginCh, or wake; the other source is due timers.
+// There is no idle poll: if nothing is due the loop blocks until the
+// next timer or an event. HTTP handlers run only here so a guest await
+// (awaitPromiseLocked) cannot re-enter dispatch.
+func (iso *Isolate) runLoop(ctx context.Context) error {
 	for {
 		iso.pollHTTP()
 		iso.pollPlugins()
 		if err := iso.drainOneTickLocked(ctx); err != nil {
-			return iso.wrapScriptError(ctx, err)
+			return err
 		}
 		deadline, hasTimer := iso.timers.nextDeadline()
-		listening := iso.listeners > 0
-		busy := iso.inFlight > 0 || iso.esbuildBusy > 0
-		if !hasTimer && !listening && !busy {
-			idle++
-			if idle >= 64 {
-				return iso.finishScript(rejected)
-			}
-			continue
+		if !hasTimer && !iso.loopHeld() {
+			return nil
 		}
-		idle = 0
 		var wait time.Duration
-		switch {
-		case hasTimer:
+		if hasTimer {
 			wait = deadline.Sub(iso.now())
 			if wait <= 0 {
 				continue
 			}
-		case busy:
-			wait = scriptIdlePoll
 		}
 		if err := iso.waitForWorkLocked(ctx, wait); err != nil {
 			return err
 		}
 	}
+}
+
+func (iso *Isolate) loopHeld() bool {
+	return iso.listeners > 0 || iso.inFlight > 0 || iso.esbuildBusy > 0 || len(iso.httpQ) > 0
 }
 
 func (iso *Isolate) waitForWorkLocked(ctx context.Context, wait time.Duration) error {
@@ -101,23 +106,6 @@ func (iso *Isolate) waitForWorkLocked(ctx context.Context, wait time.Duration) e
 		timer := time.NewTimer(wait)
 		defer timer.Stop()
 		timerC = timer.C
-	}
-	if iso.dispatching > 0 {
-		select {
-		case <-ctx.Done():
-			iso.mu.Lock()
-			return ctx.Err()
-		case <-timerC:
-			iso.mu.Lock()
-			return nil
-		case <-iso.wake:
-			iso.mu.Lock()
-			return nil
-		case fn := <-iso.pluginCh:
-			iso.mu.Lock()
-			fn()
-			return nil
-		}
 	}
 	select {
 	case <-ctx.Done():
@@ -135,7 +123,7 @@ func (iso *Isolate) waitForWorkLocked(ctx context.Context, wait time.Duration) e
 		return nil
 	case job := <-iso.httpCh:
 		iso.mu.Lock()
-		iso.dispatchHTTP(job)
+		iso.httpQ = append(iso.httpQ, job)
 		return nil
 	}
 }
@@ -148,6 +136,16 @@ func (iso *Isolate) kick() {
 	case iso.wake <- struct{}{}:
 	default:
 	}
+}
+
+// postJob queues fn on the isolate thread and wakes the loop. It does
+// not wait. I/O completions use this; runOnIsolate waits for a result.
+func (iso *Isolate) postJob(fn func()) {
+	if iso == nil || fn == nil || iso.pluginCh == nil {
+		return
+	}
+	iso.pluginCh <- fn
+	iso.kick()
 }
 
 func (iso *Isolate) pollPlugins() {
@@ -182,14 +180,16 @@ func (iso *Isolate) runOnIsolate(fn func()) {
 }
 
 func (iso *Isolate) pollHTTP() {
-	if iso.dispatching > 0 {
-		return
-	}
 	for {
 		select {
 		case job := <-iso.httpCh:
-			iso.dispatchHTTP(job)
+			iso.httpQ = append(iso.httpQ, job)
 		default:
+			for len(iso.httpQ) > 0 {
+				job := iso.httpQ[0]
+				iso.httpQ = iso.httpQ[1:]
+				iso.dispatchHTTP(job)
+			}
 			return
 		}
 	}

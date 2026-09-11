@@ -22,6 +22,10 @@ Stream.prototype.pipe = function (dest, opts) {
   src.on('data', ondata);
   dest.on && dest.on('drain', ondrain);
   src.on('end', onend);
+  src.on('error', function (err) {
+    if (dest.destroy) dest.destroy(err);
+    else if (dest.end) dest.end();
+  });
   return dest;
 };
 

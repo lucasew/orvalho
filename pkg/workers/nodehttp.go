@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/dop251/goja"
 )
@@ -383,8 +382,6 @@ func (iso *Isolate) dispatchHTTP(job *httpJob) {
 		return
 	}
 	iso.inFlight++
-	iso.dispatching++
-	defer func() { iso.dispatching-- }()
 	n := &nodeHTTP{iso: iso}
 	if job.upgrade {
 		n.dispatchUpgrade(job)
@@ -645,44 +642,27 @@ func (n *nodeHTTP) bindConn(conn net.Conn) *goja.Object {
 		}
 		return sock
 	})
-	ch := make(chan []byte, 8)
 	go func() {
-		defer close(ch)
 		buf := make([]byte, 32*1024)
 		for {
 			nr, err := conn.Read(buf)
 			if nr > 0 {
 				cp := make([]byte, nr)
 				copy(cp, buf[:nr])
-				ch <- cp
-				n.iso.kick()
+				n.iso.postJob(func() {
+					_ = n.emit(sock, "data", jsBytes(n.iso, cp))
+				})
 			}
 			if err != nil {
+				n.iso.postJob(func() {
+					shutdown()
+					_ = n.emit(sock, "end")
+					_ = n.emit(sock, "close")
+				})
 				return
 			}
 		}
 	}()
-	var poll goja.Callable
-	poll = func(this goja.Value, args ...goja.Value) (goja.Value, error) {
-		for {
-			select {
-			case b, ok := <-ch:
-				if !ok {
-					shutdown()
-					_ = n.emit(sock, "end")
-					_ = n.emit(sock, "close")
-					return goja.Undefined(), nil
-				}
-				if err := n.emit(sock, "data", jsBytes(n.iso, b)); err != nil {
-					return goja.Undefined(), err
-				}
-			default:
-				n.iso.timers.schedule(poll, nil, 16*time.Millisecond, 0, n.iso.now())
-				return goja.Undefined(), nil
-			}
-		}
-	}
-	n.iso.timers.schedule(poll, nil, 0, 0, n.iso.now())
 	return sock
 }
 

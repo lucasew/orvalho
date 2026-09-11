@@ -1177,6 +1177,9 @@ func (n *nodeFS) parsePath(v goja.Value) (string, error) {
 		return "", errBadPathType
 	}
 	raw := arg.raw
+	if i := strings.IndexAny(raw, "?#"); i >= 0 && !arg.fileURL {
+		raw = raw[:i]
+	}
 	if arg.fileURL {
 		if fileURLHasNUL(raw) {
 			return "", errPathNUL

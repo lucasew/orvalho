@@ -52,19 +52,18 @@ type Isolate struct {
 	// cwd is the injected process.cwd(); chdir updates only this.
 	cwd string
 
-	// httpCh delivers accepted HTTP requests to ScriptMain (Listen DI).
+	// httpCh delivers accepted HTTP requests to the event loop.
 	httpCh chan *httpJob
-	// wake unblocks waitForWorkLocked for socket I/O (HMR frames).
+	// wake unblocks waitForWorkLocked when a completion is not its own channel.
 	wake chan struct{}
 	// listeners is how many guest servers are currently listening.
 	listeners int
 	// inFlight is HTTP/upgrade jobs that have not finished (res.end / upgrade return).
 	inFlight int
-	// dispatching is the nest depth of dispatchHTTP. waitForWork must not
-	// take another job while this is > 0 or HMR reconnect overflows the stack.
-	dispatching int
-	// pluginCh runs esbuild JS onLoad/onResolve on this isolate (esbuild
-	// calls those from worker goroutines; goja is not safe there).
+	// httpQ is accepted requests waiting to be dispatched from runLoop.
+	httpQ []*httpJob
+	// pluginCh is the isolate-thread job queue (esbuild onLoad/onResolve,
+	// socket data). goja is not safe on the worker/read goroutines.
 	pluginCh chan func()
 	// esbuildBusy is isolate-thread builds waiting off-thread (so the
 	// loop does not go idle before onLoad callbacks arrive).

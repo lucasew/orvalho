@@ -349,3 +349,116 @@ func TestNodeHTTPUpgrade(t *testing.T) {
 	cancel()
 	<-errc
 }
+
+func TestNodeHTTPSocketData(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	iso := New("", Options{
+		Imports: NodeScriptImports(),
+		Listen: func(ctx context.Context, req ListenReq) (net.Listener, error) {
+			return ln, nil
+		},
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- iso.ScriptMain(ctx, `
+			require("http").createServer(function (req, res) {
+				res.end("no");
+			}).on("upgrade", function (req, socket) {
+				socket.on("data", function (chunk) {
+					socket.write(chunk);
+				});
+				socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
+			}).listen(0, "127.0.0.1");
+		`, "t.js")
+	}()
+	var conn net.Conn
+	for i := 0; i < 50; i++ {
+		conn, err = net.Dial("tcp", addr)
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	raw := "GET / HTTP/1.1\r\nHost: " + addr + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+	if _, err := conn.Write([]byte(raw)); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 256)
+	n, err := conn.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(buf[:n]), "101") {
+		t.Fatalf("upgrade resp %q", buf[:n])
+	}
+	if _, err := conn.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	n, err = conn.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if echo := string(buf[:n]); echo != "ping" {
+		t.Fatalf("echo %q", echo)
+	}
+	cancel()
+	<-errc
+}
+
+func TestNodeHTTPStreamPipe(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	iso := New("", Options{
+		Imports: NodeScriptImports(),
+		FS:      nodeFSMap(),
+		Listen: func(ctx context.Context, req ListenReq) (net.Listener, error) {
+			return ln, nil
+		},
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- iso.ScriptMain(ctx, `
+			var fs = require("fs");
+			require("http").createServer(function (req, res) {
+				fs.createReadStream("hello.txt?v=hash").pipe(res);
+			}).listen(0, "127.0.0.1");
+		`, "t.js")
+	}()
+	var resp *http.Response
+	for i := 0; i < 50; i++ {
+		resp, err = http.Get("http://" + addr + "/")
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "hi" {
+		t.Fatalf("body %q", body)
+	}
+	cancel()
+	<-errc
+}

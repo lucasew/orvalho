@@ -112,6 +112,19 @@ func TestNodeFSCreateReadStream(t *testing.T) {
 	`)
 }
 
+func TestNodeFSCreateReadStreamQuery(t *testing.T) {
+	runNodeFS(t, nodeFSMap(), `
+		var fs = require("fs");
+		var got = "";
+		var rs = fs.createReadStream("hello.txt?v=hash");
+		rs.on("data", function (c) { got += String(c); });
+		rs.on("end", function () {
+			if (got !== "hi") throw new Error("data " + got);
+		});
+		rs.on("error", function (e) { throw e; });
+	`)
+}
+
 func TestNodeFSStatSync(t *testing.T) {
 	runNodeFS(t, nodeFSMap(), `
 		var fs = require("fs");
