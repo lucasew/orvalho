@@ -456,48 +456,75 @@ func (iso *Isolate) wrapWasmFn(st *wasmInstance, fn api.Function) func(goja.Func
 	}
 }
 
-// wasmJSMemMin is the JS ArrayBuffer we hand to wasm_exec. Go caches
-// this.mem = new DataView(exports.mem.buffer) and never refreshes it
-// unless resetMemoryDataView runs. Growing the wasm memory past this
-// view makes valueGet/setUint32 miss and return undefined.
+// wasmJSMemMin is the starting wasm memory we give Go wasm_exec.
+// jsBuf always matches mem.Size(); a larger JS view than wasm (or the
+// reverse) makes es-module-lexer grow forever and OOM.
 const wasmJSMemMin = 64 << 20
 
+// wasmJSMemMax caps Memory.grow. A wrong heap_base used to request
+// gigabytes and take the host down.
+const wasmJSMemMax = 256 << 20
+
 func (st *wasmInstance) attachMemory(iso *Isolate, exports *goja.Object, name string, mem api.Memory) {
-	size := mem.Size()
-	if size < wasmJSMemMin {
-		size = wasmJSMemMin
+	if mem.Size() < wasmJSMemMin {
+		need := wasmJSMemMin - mem.Size()
+		pages := (need + 65535) / 65536
+		if _, ok := mem.Grow(uint32(pages)); !ok {
+			iso.trace("wasm memory pregrow %d pages failed, size=%d", pages, mem.Size())
+		}
 	}
-	st.jsBuf = make([]byte, size)
-	if data, ok := mem.Read(0, mem.Size()); ok {
-		copy(st.jsBuf, data)
-	}
+	st.mem = mem
 	st.memObj = iso.vm.NewObject()
-	st.jsAB = iso.vm.NewArrayBuffer(st.jsBuf)
-	mustSet(st.memObj, "buffer", st.jsAB)
+	st.bindJSMem(iso)
 	mustSet(st.memObj, "grow", func(call goja.FunctionCall) goja.Value {
 		delta := uint32(0)
 		if len(call.Arguments) > 0 {
-			delta = uint32(call.Arguments[0].ToInteger())
+			n := call.Argument(0).ToInteger()
+			if n < 0 {
+				n = 0
+			}
+			delta = uint32(n)
+		}
+		next := uint64(mem.Size()) + uint64(delta)*65536
+		if next > wasmJSMemMax {
+			panic(iso.vm.NewTypeError("WebAssembly.Memory.grow: exceeds maximum"))
 		}
 		prev, ok := mem.Grow(delta)
 		if !ok {
 			panic(iso.vm.NewGoError(fmt.Errorf("WebAssembly.Memory.grow failed")))
 		}
 		st.syncToWasm()
-		st.rebindMemory(iso)
+		st.bindJSMem(iso)
 		return iso.vm.ToValue(prev)
 	})
-	st.mem = mem
 	mustSet(exports, name, st.memObj)
 	if name != "memory" && exports.Get("memory") == nil {
 		mustSet(exports, "memory", st.memObj)
 	}
 }
 
+// bindJSMem makes memory.buffer a fresh ArrayBuffer whose length is
+// mem.Size(). The WebAssembly JS API replaces the buffer on grow;
+// es-module-lexer sizes its copy from byteLength.
+func (st *wasmInstance) bindJSMem(iso *Isolate) {
+	size := st.mem.Size()
+	buf := make([]byte, size)
+	if st.jsBuf != nil {
+		copy(buf, st.jsBuf)
+	}
+	if data, ok := st.mem.Read(0, size); ok {
+		copy(buf, data)
+	}
+	st.jsBuf = buf
+	st.jsAB = iso.vm.NewArrayBuffer(st.jsBuf)
+	mustSet(st.memObj, "buffer", st.jsAB)
+}
+
 func (st *wasmInstance) rebindMemory(iso *Isolate) {
-	// Keep the original ArrayBuffer. wasm_exec caches
-	// this.mem = new DataView(exports.mem.buffer); Detach/replace makes
-	// syscall/js.valueGet read zeros and return undefined.
+	if st.mem != nil && uint32(len(st.jsBuf)) != st.mem.Size() {
+		st.bindJSMem(iso)
+		return
+	}
 	st.syncFromWasm()
 }
 

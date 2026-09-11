@@ -109,11 +109,36 @@ func TestWebAssemblyMemoryViewSurvivesGrow(t *testing.T) {
 	err = iso.ScriptMain(t.Context(), `
 		var bytes = new Uint8Array([`+bytesToJS(raw)+`]);
 		var inst = new WebAssembly.Instance(new WebAssembly.Module(bytes));
-		var buf = inst.exports.mem.buffer;
-		var dv = new DataView(buf);
+		var before = inst.exports.mem.buffer.byteLength;
+		var dv = new DataView(inst.exports.mem.buffer);
 		dv.setUint8(0, 42);
-		inst.exports.mem.grow(1);
-		if (dv.getUint8(0) !== 42) throw new Error("view lost after grow");
+		var prev = inst.exports.mem.grow(1);
+		if (typeof prev !== "number") throw new Error("grow return " + prev);
+		var after = inst.exports.mem.buffer.byteLength;
+		if (after <= before) throw new Error("buffer did not grow " + before + " -> " + after);
+		var fresh = new DataView(inst.exports.mem.buffer);
+		if (fresh.getUint8(0) !== 42) throw new Error("content lost after grow");
+		fresh.setUint8(before, 7);
+		if (fresh.getUint8(before) !== 7) throw new Error("write into grown pages");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWebAssemblyMemoryGrowCap(t *testing.T) {
+	raw, err := hex.DecodeString("0061736d010000000503010001070701036d656d0200")
+	if err != nil {
+		t.Fatal(err)
+	}
+	iso := New("", Options{})
+	err = iso.ScriptMain(t.Context(), `
+		var bytes = new Uint8Array([`+bytesToJS(raw)+`]);
+		var inst = new WebAssembly.Instance(new WebAssembly.Module(bytes));
+		var threw = false;
+		try { inst.exports.mem.grow(100000); } catch (e) { threw = true; }
+		if (!threw) throw new Error("huge grow should fail");
+		if (inst.exports.mem.buffer.byteLength > 256 * 1024 * 1024) throw new Error("buffer exploded");
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)
