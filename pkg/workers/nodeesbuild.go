@@ -213,7 +213,6 @@ func (n *nodeEsbuild) prepareBuild(v goja.Value) api.BuildOptions {
 	// Guest JS plugins first so Vite can claim .svelte / flattened ids.
 	opts.Plugins = append(opts.Plugins, plugins...)
 	opts.Plugins = append(opts.Plugins, n.guestFSPlugin())
-	opts.Write = false
 	return opts
 }
 
@@ -433,6 +432,9 @@ func (n *nodeEsbuild) buildOpts(v goja.Value) (api.BuildOptions, []api.Plugin) {
 	}
 	if s := jsToString(o.Get("outfile")); s != "" {
 		opts.Outfile = s
+	}
+	if b, ok := jsBool(o.Get("write")); ok {
+		opts.Write = b
 	}
 	if b, ok := jsBool(o.Get("splitting")); ok {
 		opts.Splitting = b

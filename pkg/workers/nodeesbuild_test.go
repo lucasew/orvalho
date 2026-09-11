@@ -1,6 +1,9 @@
 package workers
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 	"testing/fstest"
 )
@@ -54,6 +57,35 @@ func TestEsbuildFormatMessages(t *testing.T) {
 	`, "t.js")
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEsbuildBuildWrite(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "in.js"), []byte("export const n = 3;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	iso := New("", Options{FS: os.DirFS(dir), Cwd: dir, Imports: NodeScriptImports()})
+	src := `
+		var esbuild = require("esbuild");
+		var dir = ` + "`" + dir + "`" + `;
+		esbuild.build({
+			entryPoints: ["in.js"],
+			outfile: "out.js",
+			write: true,
+			format: "cjs",
+			absWorkingDir: dir
+		});
+	`
+	if err := iso.ScriptMain(t.Context(), src, "t.js"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "out.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(got, []byte("3")) {
+		t.Fatalf("out %s", got)
 	}
 }
 
