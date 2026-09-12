@@ -10,6 +10,27 @@ import (
 // add.wasm: (module (func (export "add") (param i32 i32) (result i32) local.get 0 local.get 1 i32.add))
 const addWasmHex = "0061736d0100000001070160027f7f017f030201000707010361646400000a09010700200020016a0b"
 
+func TestWebAssemblyCallFromTimer(t *testing.T) {
+	// wrapWasmFn used to pass a nil context after scriptStart restored
+	// activeCtx; wazero then panics in callWithStack. Call the export
+	// from a timer so the isolate loop is the one invoking wasm.
+	raw, err := hex.DecodeString(addWasmHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iso := New("", Options{})
+	err = iso.ScriptMain(t.Context(), `
+		var bytes = new Uint8Array([`+bytesToJS(raw)+`]);
+		var inst = new WebAssembly.Instance(new WebAssembly.Module(bytes));
+		setTimeout(function () {
+			if (inst.exports.add(2, 3) !== 5) throw new Error("add after tick");
+		}, 0);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWebAssemblyAdd(t *testing.T) {
 	raw, err := hex.DecodeString(addWasmHex)
 	if err != nil {

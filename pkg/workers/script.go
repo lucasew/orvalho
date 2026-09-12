@@ -84,6 +84,9 @@ func (iso *Isolate) scriptStartLocked(ctx context.Context, source, file string) 
 // until idle and owns an unexported VM — it is not a tick budget. We
 // pump ready work, then wait on I/O the same way (job channel + wakeup).
 func (iso *Isolate) runLoop(ctx context.Context) error {
+	// scriptStartLocked restores activeCtx; wasm/I/O Bindings in timer
+	// and plugin callbacks still need the host context (wazero panics on nil).
+	defer iso.pushCtx(ctx)()
 	for {
 		more, _, err := iso.pumpLocked(ctx)
 		if err != nil {
@@ -156,6 +159,7 @@ func (iso *Isolate) PumpUntil(ctx context.Context, budget time.Duration) (more b
 }
 
 func (iso *Isolate) pumpLocked(ctx context.Context) (bool, time.Duration, error) {
+	defer iso.pushCtx(ctx)()
 	t0 := iso.now()
 	if err := ctx.Err(); err != nil {
 		_, hasTimer := iso.timers.nextDeadline()
