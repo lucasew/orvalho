@@ -71,6 +71,8 @@ type Isolate struct {
 	// esbuildBusy is isolate-thread builds waiting off-thread (so the
 	// loop does not go idle before onLoad callbacks arrive).
 	esbuildBusy int
+	// ioBusy is async fs work off the isolate thread.
+	ioBusy int
 
 	wasm       *wasm.Hub
 	wasmMods   map[*goja.Object]*wasm.Bin

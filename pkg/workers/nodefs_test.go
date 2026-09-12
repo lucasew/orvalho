@@ -397,15 +397,10 @@ func TestNodeFSReaddirWithFileTypes(t *testing.T) {
 		if (a.isDirectory()) throw new Error("a dir");
 		if (a.isSymbolicLink()) throw new Error("a link");
 		if (!sub || !sub.isDirectory()) throw new Error("sub");
-		var n = 0;
 		fs.readdir("dir", { withFileTypes: true }, function (err, got) {
 			if (err) throw err;
 			if (!got.some(function (e) { return e.name === "a.txt" && e.isFile(); })) throw new Error("async");
-			n = 1;
 		});
-		setTimeout(function () {
-			if (n !== 1) throw new Error("cb");
-		}, 0);
 	`)
 }
 
@@ -507,14 +502,14 @@ func TestNodeFSPromisesIdentity(t *testing.T) {
 func TestNodeFSPromisesReadFile(t *testing.T) {
 	runNodeFS(t, nodeFSMap(), `
 		var p = require("fs/promises");
-		var got = "";
-		var code = "";
-		p.readFile("hello.txt", "utf8").then(function (s) { got = s; });
-		p.readFile("missing.txt").then(function () {}, function (e) { code = e.code; });
-		setTimeout(function () {
-			if (got !== "hi") throw new Error("utf8 " + got);
-			if (code !== "ENOENT") throw new Error("code " + code);
-		}, 0);
+		p.readFile("hello.txt", "utf8").then(function (s) {
+			if (s !== "hi") throw new Error("utf8 " + s);
+		});
+		p.readFile("missing.txt").then(function () {
+			throw new Error("missing should reject");
+		}, function (e) {
+			if (e.code !== "ENOENT") throw new Error("code " + e.code);
+		});
 	`)
 }
 

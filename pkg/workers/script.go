@@ -198,7 +198,7 @@ func (iso *Isolate) hasReadyWork() bool {
 }
 
 func (iso *Isolate) loopHeld() bool {
-	return iso.listeners > 0 || iso.inFlight > 0 || iso.esbuildBusy > 0 || len(iso.httpQ) > 0
+	return iso.listeners > 0 || iso.inFlight > 0 || iso.esbuildBusy > 0 || iso.ioBusy > 0 || len(iso.httpQ) > 0
 }
 
 func (iso *Isolate) loopHoldLabel() string {
@@ -211,6 +211,9 @@ func (iso *Isolate) loopHoldLabel() string {
 	}
 	if iso.esbuildBusy > 0 {
 		p = append(p, fmt.Sprintf("esbuild=%d", iso.esbuildBusy))
+	}
+	if iso.ioBusy > 0 {
+		p = append(p, fmt.Sprintf("io=%d", iso.ioBusy))
 	}
 	if len(iso.httpQ) > 0 {
 		p = append(p, fmt.Sprintf("httpQ=%d", len(iso.httpQ)))

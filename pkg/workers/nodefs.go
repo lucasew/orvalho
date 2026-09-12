@@ -187,20 +187,19 @@ function (fs) {
     var rs = new Readable();
     var start = opts && opts.start;
     var end = opts && opts.end;
-    setTimeout(function () {
-      try {
-        var data = fs.readFileSync(path);
-        if (typeof start === "number" || typeof end === "number") {
-          var s = typeof start === "number" ? start : 0;
-          var e = typeof end === "number" ? end + 1 : (data.length != null ? data.length : data.byteLength);
-          data = data.subarray ? data.subarray(s, e) : data.slice(s, e);
-        }
-        rs.push(data);
-        rs.push(null);
-      } catch (e) {
-        rs.destroy(e);
+    fs.readFile(path, function (err, data) {
+      if (err) {
+        rs.destroy(err);
+        return;
       }
-    }, 0);
+      if (typeof start === "number" || typeof end === "number") {
+        var s = typeof start === "number" ? start : 0;
+        var e = typeof end === "number" ? end + 1 : (data.length != null ? data.length : data.byteLength);
+        data = data.subarray ? data.subarray(s, e) : data.slice(s, e);
+      }
+      rs.push(data);
+      rs.push(null);
+    });
     return rs;
   };
 }
@@ -279,12 +278,18 @@ func (n *nodeFS) jsReadFile(call goja.FunctionCall) goja.Value {
 	p := n.mustPath(call.Argument(0), "path")
 	enc, cb := n.optsAndCB(call, 1)
 	n.requireCB(cb)
-	data, err := n.readFile(p)
-	if err != nil {
-		n.nextTick(cb, n.sysMapped("open", p, err), goja.Undefined())
-		return goja.Undefined()
-	}
-	n.nextTick(cb, goja.Null(), n.encode(data, enc))
+	n.iso.ioBusy++
+	go func() {
+		data, err := n.readFile(p)
+		n.iso.postJob(func() {
+			n.iso.ioBusy--
+			if err != nil {
+				_, _ = cb(goja.Undefined(), n.sysMapped("open", p, err), goja.Undefined())
+				return
+			}
+			_, _ = cb(goja.Undefined(), goja.Null(), n.encode(data, enc))
+		})
+	}()
 	return goja.Undefined()
 }
 
@@ -445,14 +450,21 @@ func (n *nodeFS) jsReaddirSync(call goja.FunctionCall) goja.Value {
 
 func (n *nodeFS) jsReaddir(call goja.FunctionCall) goja.Value {
 	p := n.mustPath(call.Argument(0), "path")
+	opts := call.Argument(1)
 	_, cb := n.optsAndCB(call, 1)
 	n.requireCB(cb)
-	ents, err := n.readDir(p)
-	if err != nil {
-		n.nextTick(cb, n.sysMapped("scandir", p, err), goja.Undefined())
-		return goja.Undefined()
-	}
-	n.nextTick(cb, goja.Null(), n.readdirResult(ents, call.Argument(1)))
+	n.iso.ioBusy++
+	go func() {
+		ents, err := n.readDir(p)
+		n.iso.postJob(func() {
+			n.iso.ioBusy--
+			if err != nil {
+				_, _ = cb(goja.Undefined(), n.sysMapped("scandir", p, err), goja.Undefined())
+				return
+			}
+			_, _ = cb(goja.Undefined(), goja.Null(), n.readdirResult(ents, opts))
+		})
+	}()
 	return goja.Undefined()
 }
 
