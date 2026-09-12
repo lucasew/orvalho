@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 )
 
@@ -517,6 +518,57 @@ func TestNodeHTTPStreamPipe(t *testing.T) {
 	}
 	if string(body) != "hi" {
 		t.Fatalf("body %q", body)
+	}
+	cancel()
+	<-errc
+}
+
+func TestNodeHTTPOptimizedDepStatic(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	iso := New("", Options{
+		Imports: NodeScriptImports(),
+		FS: fstest.MapFS{
+			"node_modules/.vite/deps/foo.js": {Data: []byte("export const n=1")},
+		},
+		Listen: func(ctx context.Context, req ListenReq) (net.Listener, error) {
+			return ln, nil
+		},
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- iso.ScriptMain(ctx, `
+			require("http").createServer(function (req, res) {
+				res.end("handler");
+			}).listen(0, "127.0.0.1");
+		`, "t.js")
+	}()
+	var resp *http.Response
+	for i := 0; i < 50; i++ {
+		resp, err = http.Get("http://" + addr + "/node_modules/.vite/deps/foo.js?v=abc")
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "export const n=1" {
+		t.Fatalf("body %q", body)
+	}
+	if resp.Header.Get("Content-Type") != "application/javascript" {
+		t.Fatalf("ct %q", resp.Header.Get("Content-Type"))
 	}
 	cancel()
 	<-errc

@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -377,6 +379,47 @@ func (iso *Isolate) finishHTTP(job *httpJob) {
 	iso.kick()
 }
 
+// serveOptimizedDep sends a prebundled Vite dep from the guest FS
+// without running the request handler. Those files are already ESM;
+// transforming them in goja never returns.
+func (iso *Isolate) serveOptimizedDep(job *httpJob) bool {
+	if job == nil || job.r == nil || iso.opts.FS == nil {
+		return false
+	}
+	p := job.r.URL.Path
+	const prefix = "/node_modules/.vite/deps/"
+	if !strings.HasPrefix(p, prefix) {
+		return false
+	}
+	rel := strings.TrimPrefix(p, "/")
+	if rel != path.Clean(rel) || strings.Contains(rel, "..") {
+		return false
+	}
+	switch path.Ext(rel) {
+	case ".js", ".css", ".map", ".json":
+	default:
+		return false
+	}
+	data, err := fs.ReadFile(iso.opts.FS, rel)
+	if err != nil {
+		return false
+	}
+	ct := "application/javascript"
+	switch path.Ext(rel) {
+	case ".css":
+		ct = "text/css"
+	case ".json", ".map":
+		ct = "application/json"
+	}
+	job.w.Header().Set("Content-Type", ct)
+	job.w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	job.w.WriteHeader(http.StatusOK)
+	_, _ = job.w.Write(data)
+	iso.trace("http end 200 %dB static %s", len(data), p)
+	iso.finishHTTP(job)
+	return true
+}
+
 func (iso *Isolate) dispatchHTTP(job *httpJob) {
 	if job == nil {
 		return
@@ -386,6 +429,9 @@ func (iso *Isolate) dispatchHTTP(job *httpJob) {
 	if job.upgrade {
 		n.dispatchUpgrade(job)
 		iso.finishHTTP(job)
+		return
+	}
+	if iso.serveOptimizedDep(job) {
 		return
 	}
 	req := n.makeReq(job.r, job.body)
