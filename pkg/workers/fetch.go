@@ -183,7 +183,7 @@ func (iso *Isolate) awaitPromiseLocked(ctx context.Context, v goja.Value, maxWai
 			// Same wait sources as runLoop (timers, pluginCh, wake, httpCh)
 			// but do not dispatch HTTP: that belongs at the top of runLoop.
 			iso.pollPlugins()
-			if err := iso.drainOneTickLocked(ctx); err != nil {
+			if _, err := iso.drainOneTickLocked(ctx); err != nil {
 				return nil, err
 			}
 			if p2, ok := exportPromise(v); ok && p2.State() == goja.PromiseStatePending {
@@ -213,9 +213,9 @@ func exportPromise(v goja.Value) (*goja.Promise, bool) {
 
 // drainOneTickLocked runs due timers for one step without re-taking mu.
 // Mirrors Tick's timer phase (script already initialized).
-func (iso *Isolate) drainOneTickLocked(ctx context.Context) error {
+func (iso *Isolate) drainOneTickLocked(ctx context.Context) (int, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return 0, err
 	}
 	stopWatch := iso.watchInterrupt(ctx)
 	defer stopWatch()
@@ -224,7 +224,7 @@ func (iso *Isolate) drainOneTickLocked(ctx context.Context) error {
 	executed := 0
 	for executed < iso.opts.MaxTimersPerTick {
 		if err := ctx.Err(); err != nil {
-			return err
+			return executed, err
 		}
 		t := iso.timers.popDue(now)
 		if t == nil {
@@ -233,7 +233,7 @@ func (iso *Isolate) drainOneTickLocked(ctx context.Context) error {
 		executed++
 		_, err := t.callback(goja.Undefined(), t.args...)
 		if err != nil {
-			return mapJSError(ctx, err)
+			return executed, mapJSError(ctx, err)
 		}
 		if t.interval > 0 {
 			iso.timers.rescheduleInterval(t, now)
@@ -243,8 +243,8 @@ func (iso *Isolate) drainOneTickLocked(ctx context.Context) error {
 	if executed == 0 {
 		_, err := iso.vm.RunString("")
 		if err != nil {
-			return mapJSError(ctx, err)
+			return 0, mapJSError(ctx, err)
 		}
 	}
-	return nil
+	return executed, nil
 }

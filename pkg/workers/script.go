@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/dop251/goja"
@@ -87,12 +88,15 @@ func (iso *Isolate) runLoop(ctx context.Context) error {
 	// scriptStartLocked restores activeCtx; wasm/I/O Bindings in timer
 	// and plugin callbacks still need the host context (wazero panics on nil).
 	defer iso.pushCtx(ctx)()
+	iso.trace("loop start")
 	for {
 		more, _, err := iso.pumpLocked(ctx)
 		if err != nil {
+			iso.trace("loop stop err=%v", err)
 			return err
 		}
 		if !more {
+			iso.trace("loop idle")
 			return nil
 		}
 		deadline, hasTimer := iso.timers.nextDeadline()
@@ -104,6 +108,7 @@ func (iso *Isolate) runLoop(ctx context.Context) error {
 			}
 		}
 		if err := iso.waitForWorkLocked(ctx, wait); err != nil {
+			iso.trace("loop stop err=%v", err)
 			return err
 		}
 	}
@@ -161,17 +166,25 @@ func (iso *Isolate) PumpUntil(ctx context.Context, budget time.Duration) (more b
 func (iso *Isolate) pumpLocked(ctx context.Context) (bool, time.Duration, error) {
 	defer iso.pushCtx(ctx)()
 	t0 := iso.now()
+	iso.loopN++
+	n := iso.loopN
 	if err := ctx.Err(); err != nil {
 		_, hasTimer := iso.timers.nextDeadline()
 		return hasTimer || iso.loopHeld(), 0, err
 	}
-	iso.pollHTTP()
-	iso.pollPlugins()
-	if err := iso.drainOneTickLocked(ctx); err != nil {
-		return false, iso.now().Sub(t0), err
+	httpN := iso.pollHTTP()
+	jobN := iso.pollPlugins()
+	timerN, err := iso.drainOneTickLocked(ctx)
+	used := iso.now().Sub(t0)
+	if httpN > 0 || jobN > 0 || timerN > 0 || err != nil {
+		iso.trace("loop #%d pump http=%d jobs=%d timers=%d hold=%s used=%s",
+			n, httpN, jobN, timerN, iso.loopHoldLabel(), used.Round(time.Millisecond))
+	}
+	if err != nil {
+		return false, used, err
 	}
 	_, hasTimer := iso.timers.nextDeadline()
-	return hasTimer || iso.loopHeld(), iso.now().Sub(t0), nil
+	return hasTimer || iso.loopHeld(), used, nil
 }
 
 func (iso *Isolate) hasReadyWork() bool {
@@ -188,7 +201,35 @@ func (iso *Isolate) loopHeld() bool {
 	return iso.listeners > 0 || iso.inFlight > 0 || iso.esbuildBusy > 0 || len(iso.httpQ) > 0
 }
 
+func (iso *Isolate) loopHoldLabel() string {
+	var p []string
+	if iso.listeners > 0 {
+		p = append(p, fmt.Sprintf("listen=%d", iso.listeners))
+	}
+	if iso.inFlight > 0 {
+		p = append(p, fmt.Sprintf("inFlight=%d", iso.inFlight))
+	}
+	if iso.esbuildBusy > 0 {
+		p = append(p, fmt.Sprintf("esbuild=%d", iso.esbuildBusy))
+	}
+	if len(iso.httpQ) > 0 {
+		p = append(p, fmt.Sprintf("httpQ=%d", len(iso.httpQ)))
+	}
+	if _, ok := iso.timers.nextDeadline(); ok {
+		p = append(p, "timer")
+	}
+	if len(p) == 0 {
+		return "-"
+	}
+	return strings.Join(p, ",")
+}
+
 func (iso *Isolate) waitForWorkLocked(ctx context.Context, wait time.Duration) error {
+	if wait > 0 {
+		iso.trace("loop #%d wait timer=%s hold=%s", iso.loopN, wait.Round(time.Millisecond), iso.loopHoldLabel())
+	} else {
+		iso.trace("loop #%d wait io hold=%s", iso.loopN, iso.loopHoldLabel())
+	}
 	iso.mu.Unlock()
 	var timerC <-chan time.Time
 	if wait > 0 {
@@ -196,25 +237,30 @@ func (iso *Isolate) waitForWorkLocked(ctx context.Context, wait time.Duration) e
 		defer timer.Stop()
 		timerC = timer.C
 	}
+	var why string
+	var err error
 	select {
 	case <-ctx.Done():
-		iso.mu.Lock()
-		return ctx.Err()
+		why = "ctx"
+		err = ctx.Err()
 	case <-timerC:
-		iso.mu.Lock()
-		return nil
+		why = "timer"
 	case <-iso.wake:
-		iso.mu.Lock()
-		return nil
+		why = "kick"
 	case fn := <-iso.pluginCh:
 		iso.mu.Lock()
+		iso.trace("loop #%d wake job hold=%s", iso.loopN, iso.loopHoldLabel())
 		fn()
 		return nil
 	case job := <-iso.httpCh:
 		iso.mu.Lock()
 		iso.httpQ = append(iso.httpQ, job)
+		iso.trace("loop #%d wake http hold=%s", iso.loopN, iso.loopHoldLabel())
 		return nil
 	}
+	iso.mu.Lock()
+	iso.trace("loop #%d wake %s hold=%s", iso.loopN, why, iso.loopHoldLabel())
+	return err
 }
 
 func (iso *Isolate) kick() {
@@ -237,16 +283,18 @@ func (iso *Isolate) postJob(fn func()) {
 	iso.kick()
 }
 
-func (iso *Isolate) pollPlugins() {
+func (iso *Isolate) pollPlugins() int {
 	if iso == nil || iso.pluginCh == nil {
-		return
+		return 0
 	}
+	n := 0
 	for {
 		select {
 		case fn := <-iso.pluginCh:
+			n++
 			fn()
 		default:
-			return
+			return n
 		}
 	}
 }
@@ -268,7 +316,8 @@ func (iso *Isolate) runOnIsolate(fn func()) {
 	<-done
 }
 
-func (iso *Isolate) pollHTTP() {
+func (iso *Isolate) pollHTTP() int {
+	n := 0
 	for {
 		select {
 		case job := <-iso.httpCh:
@@ -278,8 +327,9 @@ func (iso *Isolate) pollHTTP() {
 				job := iso.httpQ[0]
 				iso.httpQ = iso.httpQ[1:]
 				iso.dispatchHTTP(job)
+				n++
 			}
-			return
+			return n
 		}
 	}
 }

@@ -50,6 +50,7 @@ type Isolate struct {
 	scriptCause error
 	// scriptRejected is the last unhandled rejection during ScriptMain.
 	scriptRejected error
+	loopN          uint64
 
 	// cwd is the injected process.cwd(); chdir updates only this.
 	cwd string
