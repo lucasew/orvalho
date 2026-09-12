@@ -1,7 +1,6 @@
 package workers
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"math"
@@ -134,7 +133,7 @@ func (g *wasmGoJS) resume() {
 	}
 	g.iso.wasmActive = st
 	st.syncToWasm()
-	_, err := fn.Call(context.Background())
+	_, err := fn.Call(g.iso.activeCtx)
 	st.syncFromWasm()
 	if err != nil {
 		g.iso.trace("gojs resume: %v", err)
@@ -151,7 +150,7 @@ func (g *wasmGoJS) getsp() uint32 {
 		return 0
 	}
 	st.syncToWasm()
-	res, err := fn.Call(context.Background())
+	res, err := fn.Call(g.iso.activeCtx)
 	st.syncFromWasm()
 	if err != nil || len(res) == 0 {
 		return 0

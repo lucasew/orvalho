@@ -10,13 +10,31 @@ import (
 	"github.com/dop251/goja"
 )
 
-// ScriptMain evaluates source as CommonJS main (TEC-09). default.fetch is
-// not required. file is the path inside the import tree, used as require
-// parent. Pending timers are drained until none remain or ctx is cancelled.
+// ScriptMain evaluates source as CommonJS main (TEC-09) then runs the
+// event loop until idle or ctx is cancelled. Hosts that want to tick
+// themselves should call ScriptStart and then Pump / PumpUntil.
 func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 	iso.mu.Lock()
 	defer iso.mu.Unlock()
 
+	if err := iso.scriptStartLocked(ctx, source, file); err != nil {
+		return err
+	}
+	if err := iso.runLoop(ctx); err != nil {
+		return iso.wrapScriptError(ctx, err)
+	}
+	return iso.finishScript(iso.scriptRejected)
+}
+
+// ScriptStart loads CommonJS main and returns. JS does not run again
+// until the host calls Pump or ScriptMain's loop.
+func (iso *Isolate) ScriptStart(ctx context.Context, source, file string) error {
+	iso.mu.Lock()
+	defer iso.mu.Unlock()
+	return iso.scriptStartLocked(ctx, source, file)
+}
+
+func (iso *Isolate) scriptStartLocked(ctx context.Context, source, file string) error {
 	if err := iso.ensureInitializedLocked(ctx); err != nil {
 		return iso.wrapScriptError(ctx, err)
 	}
@@ -27,10 +45,10 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 	defer stopWatch()
 
 	iso.scriptCause = nil
+	iso.scriptRejected = nil
 	iso.installProcess()
 	iso.installBuffer()
 
-	var rejected error
 	iso.vm.SetPromiseRejectionTracker(func(p *goja.Promise, op goja.PromiseRejectionOperation) {
 		if op != goja.PromiseRejectionReject || p == nil {
 			return
@@ -40,14 +58,14 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 			return
 		}
 		if scriptExitOf(err) != nil {
-			if rejected == nil {
-				rejected = err
+			if iso.scriptRejected == nil {
+				iso.scriptRejected = err
 			}
 			return
 		}
 		iso.noteScriptCause(err)
-		if rejected == nil || scriptExitOf(rejected) != nil {
-			rejected = err
+		if iso.scriptRejected == nil || scriptExitOf(iso.scriptRejected) != nil {
+			iso.scriptRejected = err
 		}
 	})
 
@@ -59,29 +77,22 @@ func (iso *Isolate) ScriptMain(ctx context.Context, source, file string) error {
 	if _, err := iso.loadScript(key, source, file); err != nil {
 		return iso.wrapScriptError(ctx, err)
 	}
-
-	if err := iso.runLoop(ctx); err != nil {
-		return iso.wrapScriptError(ctx, err)
-	}
-	return iso.finishScript(rejected)
+	return nil
 }
 
-// runLoop is the isolate event loop. One thread runs JS. Completions
-// arrive on httpCh, pluginCh, or wake; the other source is due timers.
-// There is no idle poll: if nothing is due the loop blocks until the
-// next timer or an event. HTTP handlers run only here so a guest await
-// (awaitPromiseLocked) cannot re-enter dispatch.
+// runLoop is the isolate event loop. goja_nodejs/eventloop is Start/Run
+// until idle and owns an unexported VM — it is not a tick budget. We
+// pump ready work, then wait on I/O the same way (job channel + wakeup).
 func (iso *Isolate) runLoop(ctx context.Context) error {
 	for {
-		iso.pollHTTP()
-		iso.pollPlugins()
-		if err := iso.drainOneTickLocked(ctx); err != nil {
+		more, _, err := iso.pumpLocked(ctx)
+		if err != nil {
 			return err
 		}
-		deadline, hasTimer := iso.timers.nextDeadline()
-		if !hasTimer && !iso.loopHeld() {
+		if !more {
 			return nil
 		}
+		deadline, hasTimer := iso.timers.nextDeadline()
 		var wait time.Duration
 		if hasTimer {
 			wait = deadline.Sub(iso.now())
@@ -93,6 +104,80 @@ func (iso *Isolate) runLoop(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+// Pump runs ready work (queued HTTP, isolate jobs, due timers) and
+// returns. It never waits on I/O. used is wall time spent in this call.
+// more is true if timers, listeners, or in-flight work remain.
+func (iso *Isolate) Pump(ctx context.Context) (more bool, used time.Duration, err error) {
+	iso.mu.Lock()
+	defer iso.mu.Unlock()
+	return iso.pumpLocked(ctx)
+}
+
+// PumpUntil runs Pump until budget elapses, ctx is done, or the isolate
+// has no ready work. A tight guest loop cannot hold other isolates:
+// each Isolate has its own lock and VM.
+func (iso *Isolate) PumpUntil(ctx context.Context, budget time.Duration) (more bool, used time.Duration, err error) {
+	iso.mu.Lock()
+	defer iso.mu.Unlock()
+	if budget <= 0 {
+		return iso.pumpLocked(ctx)
+	}
+	deadline := iso.now().Add(budget)
+	tickCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	defer iso.pushCtx(tickCtx)()
+	stop := iso.watchInterrupt(tickCtx)
+	defer stop()
+	var total time.Duration
+	for !iso.now().After(deadline) {
+		var step time.Duration
+		more, step, err = iso.pumpLocked(tickCtx)
+		total += step
+		if err != nil {
+			if tickCtx.Err() != nil && ctx.Err() == nil {
+				_, hasTimer := iso.timers.nextDeadline()
+				return hasTimer || iso.loopHeld(), total, nil
+			}
+			return more, total, err
+		}
+		if !more {
+			return false, total, nil
+		}
+		if d, ok := iso.timers.nextDeadline(); !ok || d.After(iso.now()) {
+			if !iso.hasReadyWork() {
+				return more, total, nil
+			}
+		}
+	}
+	_, hasTimer := iso.timers.nextDeadline()
+	return hasTimer || iso.loopHeld(), total, nil
+}
+
+func (iso *Isolate) pumpLocked(ctx context.Context) (bool, time.Duration, error) {
+	t0 := iso.now()
+	if err := ctx.Err(); err != nil {
+		_, hasTimer := iso.timers.nextDeadline()
+		return hasTimer || iso.loopHeld(), 0, err
+	}
+	iso.pollHTTP()
+	iso.pollPlugins()
+	if err := iso.drainOneTickLocked(ctx); err != nil {
+		return false, iso.now().Sub(t0), err
+	}
+	_, hasTimer := iso.timers.nextDeadline()
+	return hasTimer || iso.loopHeld(), iso.now().Sub(t0), nil
+}
+
+func (iso *Isolate) hasReadyWork() bool {
+	if len(iso.httpQ) > 0 || len(iso.httpCh) > 0 || len(iso.pluginCh) > 0 {
+		return true
+	}
+	if d, ok := iso.timers.nextDeadline(); ok && !d.After(iso.now()) {
+		return true
+	}
+	return false
 }
 
 func (iso *Isolate) loopHeld() bool {

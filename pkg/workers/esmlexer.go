@@ -105,7 +105,8 @@ func (iso *Isolate) parseESMLexer(src string) (imps []esmImport, exps []esmExpor
 	}
 	u16 := utf16.Encode([]rune(src))
 	n := len(u16)
-	addr, err := wasmCallI32(st, "sa", uint64(n))
+	ctx := iso.activeCtx
+	addr, err := wasmCallI32(ctx, st, "sa", uint64(n))
 	if err != nil {
 		return nil, nil, false, false, err
 	}
@@ -116,28 +117,28 @@ func (iso *Isolate) parseESMLexer(src string) (imps []esmImport, exps []esmExpor
 	if !st.mem.Write(uint32(addr), buf) {
 		return nil, nil, false, false, fmt.Errorf("es-module-lexer: write source")
 	}
-	ok, err := wasmCallI32(st, "parse")
+	ok, err := wasmCallI32(ctx, st, "parse")
 	if err != nil {
 		return nil, nil, false, false, err
 	}
 	if ok == 0 {
-		idx, _ := wasmCallI32(st, "e")
+		idx, _ := wasmCallI32(ctx, st, "e")
 		return nil, nil, false, false, fmt.Errorf("es-module-lexer: parse error at %d", idx)
 	}
 	for {
-		more, err := wasmCallI32(st, "ri")
+		more, err := wasmCallI32(ctx, st, "ri")
 		if err != nil || more == 0 {
 			break
 		}
-		s, _ := wasmCallI32(st, "is")
-		e, _ := wasmCallI32(st, "ie")
-		t, _ := wasmCallI32(st, "it")
-		a, _ := wasmCallI32(st, "ai")
-		d, _ := wasmCallI32(st, "id")
-		ss, _ := wasmCallI32(st, "ss")
-		se, _ := wasmCallI32(st, "se")
+		s, _ := wasmCallI32(ctx, st, "is")
+		e, _ := wasmCallI32(ctx, st, "ie")
+		t, _ := wasmCallI32(ctx, st, "it")
+		a, _ := wasmCallI32(ctx, st, "ai")
+		d, _ := wasmCallI32(ctx, st, "id")
+		ss, _ := wasmCallI32(ctx, st, "ss")
+		se, _ := wasmCallI32(ctx, st, "se")
 		im := esmImport{t: int(t), s: int(s), e: int(e), ss: int(ss), se: int(se), d: int(d), a: int(a)}
-		if ip, _ := wasmCallI32(st, "ip"); ip != 0 {
+		if ip, _ := wasmCallI32(ctx, st, "ip"); ip != 0 {
 			lo, hi := int(s), int(e)
 			if d == -1 {
 				lo, hi = int(s)-1, int(e)+1
@@ -147,14 +148,14 @@ func (iso *Isolate) parseESMLexer(src string) (imps []esmImport, exps []esmExpor
 		imps = append(imps, im)
 	}
 	for {
-		more, err := wasmCallI32(st, "re")
+		more, err := wasmCallI32(ctx, st, "re")
 		if err != nil || more == 0 {
 			break
 		}
-		s, _ := wasmCallI32(st, "es")
-		e, _ := wasmCallI32(st, "ee")
-		ls, _ := wasmCallI32(st, "els")
-		le, _ := wasmCallI32(st, "ele")
+		s, _ := wasmCallI32(ctx, st, "es")
+		e, _ := wasmCallI32(ctx, st, "ee")
+		ls, _ := wasmCallI32(ctx, st, "els")
+		le, _ := wasmCallI32(ctx, st, "ele")
 		ex := esmExport{s: int(s), e: int(e), ls: int(ls), le: int(le)}
 		ex.n = decodeJSString(sliceUTF16(src, int(s), int(e)))
 		if ls >= 0 {
@@ -162,21 +163,21 @@ func (iso *Isolate) parseESMLexer(src string) (imps []esmImport, exps []esmExpor
 		}
 		exps = append(exps, ex)
 	}
-	if f, _ := wasmCallI32(st, "f"); f != 0 {
+	if f, _ := wasmCallI32(ctx, st, "f"); f != 0 {
 		facade = true
 	}
-	if ms, _ := wasmCallI32(st, "ms"); ms != 0 {
+	if ms, _ := wasmCallI32(ctx, st, "ms"); ms != 0 {
 		hasMod = true
 	}
 	return imps, exps, facade, hasMod, nil
 }
 
-func wasmCallI32(st *wasmInstance, name string, args ...uint64) (int32, error) {
+func wasmCallI32(ctx context.Context, st *wasmInstance, name string, args ...uint64) (int32, error) {
 	fn := st.mod.ExportedFunction(name)
 	if fn == nil {
 		return 0, fmt.Errorf("es-module-lexer: missing export %s", name)
 	}
-	out, err := fn.Call(context.Background(), args...)
+	out, err := fn.Call(ctx, args...)
 	if err != nil {
 		return 0, err
 	}

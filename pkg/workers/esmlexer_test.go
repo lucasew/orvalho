@@ -28,6 +28,7 @@ func loadOfficialLexer(t *testing.T, iso *Isolate) {
 func TestParseESMOfficialWasm(t *testing.T) {
 	iso := New("", Options{})
 	loadOfficialLexer(t, iso)
+	defer iso.pushCtx(t.Context())()
 	src := "import { a } from 'mod';\nexport var p = 5;\n"
 	imps, exps, _, has, err := iso.parseESMLexer(src)
 	if err != nil {
@@ -50,6 +51,7 @@ func TestParseESMOfficialWasm(t *testing.T) {
 func TestParseESMOfficialLarge(t *testing.T) {
 	iso := New("", Options{})
 	loadOfficialLexer(t, iso)
+	defer iso.pushCtx(t.Context())()
 	var b strings.Builder
 	b.WriteString("import { x } from './a.js';\n")
 	b.WriteString(strings.Repeat("function Icon(){return 0}\n", 40000))

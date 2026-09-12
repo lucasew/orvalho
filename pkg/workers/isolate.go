@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/lucasew/orvalho/pkg/actor"
+	"github.com/lucasew/orvalho/pkg/wasm"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja/parser"
-	"github.com/tetratelabs/wazero"
 )
 
 // Isolate is one pure-goja VM with host-driven timers and minimal WinterTC
@@ -48,6 +48,8 @@ type Isolate struct {
 	// scriptCause is the first require/load error during ScriptMain.
 	// Guest code may catch it and process.exit(1); we still report this.
 	scriptCause error
+	// scriptRejected is the last unhandled rejection during ScriptMain.
+	scriptRejected error
 
 	// cwd is the injected process.cwd(); chdir updates only this.
 	cwd string
@@ -69,11 +71,11 @@ type Isolate struct {
 	// loop does not go idle before onLoad callbacks arrive).
 	esbuildBusy int
 
-	wasmRt       wazero.Runtime
-	wasmCompiled map[*goja.Object]*wasmCompiled
-	wasmSeq      uint64
-	wasmActive   *wasmInstance
-	wasmGo       *wasmGoJS
+	wasm       *wasm.Hub
+	wasmMods   map[*goja.Object]*wasm.Bin
+	wasmSeq    uint64
+	wasmActive *wasmInstance
+	wasmGo     *wasmGoJS
 	// esmLexer is the guest es-module-lexer wasm instance (parse/sa/ri).
 	esmLexer *wasmInstance
 }

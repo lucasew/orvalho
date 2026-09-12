@@ -36,6 +36,24 @@ func TestWebAssemblyAdd(t *testing.T) {
 	}
 }
 
+func TestWebAssemblyModuleReuse(t *testing.T) {
+	raw, err := hex.DecodeString(addWasmHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iso := New("", Options{})
+	err = iso.ScriptMain(t.Context(), `
+		var bytes = new Uint8Array([`+bytesToJS(raw)+`]);
+		var m1 = new WebAssembly.Module(bytes);
+		var m2 = new WebAssembly.Module(bytes);
+		if (new WebAssembly.Instance(m1).exports.add(1, 1) !== 2) throw new Error("i1");
+		if (new WebAssembly.Instance(m2).exports.add(2, 2) !== 4) throw new Error("i2");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWebAssemblyModuleConstructor(t *testing.T) {
 	raw, err := hex.DecodeString(addWasmHex)
 	if err != nil {
