@@ -35,6 +35,29 @@ func TestPumpUntilDoesNotRunOtherIsolate(t *testing.T) {
 	}
 }
 
+func TestWaitDoesNotRunJobs(t *testing.T) {
+	iso := New("", Options{})
+	if err := iso.ScriptStart(t.Context(), `setInterval(function () {}, 60000);`, "t.js"); err != nil {
+		t.Fatal(err)
+	}
+	ran := false
+	iso.postJob(func() { ran = true })
+	iso.mu.Lock()
+	if err := iso.waitForWorkLocked(t.Context(), time.Second); err != nil {
+		iso.mu.Unlock()
+		t.Fatal(err)
+	}
+	if ran {
+		iso.mu.Unlock()
+		t.Fatal("waitForWorkLocked ran a job; pump should")
+	}
+	n := iso.pollPlugins()
+	iso.mu.Unlock()
+	if n != 1 || !ran {
+		t.Fatalf("pollPlugins n=%d ran=%v", n, ran)
+	}
+}
+
 func TestPumpDoesNotWait(t *testing.T) {
 	iso := New("", Options{})
 	if err := iso.ScriptStart(t.Context(), `globalThis.n = 0; setTimeout(function () { globalThis.n = 1; }, 60 * 1000);`, "t.js"); err != nil {

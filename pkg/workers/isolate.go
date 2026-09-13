@@ -68,6 +68,8 @@ type Isolate struct {
 	// pluginCh is the isolate-thread job queue (esbuild onLoad/onResolve,
 	// socket data). goja is not safe on the worker/read goroutines.
 	pluginCh chan func()
+	// jobQ is pluginCh work stashed by wait; pump runs it after HTTP.
+	jobQ []func()
 	// esbuildBusy is isolate-thread builds waiting off-thread (so the
 	// loop does not go idle before onLoad callbacks arrive).
 	esbuildBusy int

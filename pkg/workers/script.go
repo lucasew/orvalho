@@ -188,7 +188,7 @@ func (iso *Isolate) pumpLocked(ctx context.Context) (bool, time.Duration, error)
 }
 
 func (iso *Isolate) hasReadyWork() bool {
-	if len(iso.httpQ) > 0 || len(iso.httpCh) > 0 || len(iso.pluginCh) > 0 {
+	if len(iso.httpQ) > 0 || len(iso.httpCh) > 0 || len(iso.pluginCh) > 0 || len(iso.jobQ) > 0 {
 		return true
 	}
 	if d, ok := iso.timers.nextDeadline(); ok && !d.After(iso.now()) {
@@ -198,7 +198,7 @@ func (iso *Isolate) hasReadyWork() bool {
 }
 
 func (iso *Isolate) loopHeld() bool {
-	return iso.listeners > 0 || iso.inFlight > 0 || iso.esbuildBusy > 0 || iso.ioBusy > 0 || len(iso.httpQ) > 0
+	return iso.listeners > 0 || iso.inFlight > 0 || iso.esbuildBusy > 0 || iso.ioBusy > 0 || len(iso.httpQ) > 0 || len(iso.jobQ) > 0
 }
 
 func (iso *Isolate) loopHoldLabel() string {
@@ -217,6 +217,9 @@ func (iso *Isolate) loopHoldLabel() string {
 	}
 	if len(iso.httpQ) > 0 {
 		p = append(p, fmt.Sprintf("httpQ=%d", len(iso.httpQ)))
+	}
+	if len(iso.jobQ) > 0 {
+		p = append(p, fmt.Sprintf("jobs=%d", len(iso.jobQ)))
 	}
 	if _, ok := iso.timers.nextDeadline(); ok {
 		p = append(p, "timer")
@@ -252,9 +255,16 @@ func (iso *Isolate) waitForWorkLocked(ctx context.Context, wait time.Duration) e
 		why = "kick"
 	case fn := <-iso.pluginCh:
 		iso.mu.Lock()
-		iso.trace("loop #%d wake job hold=%s", iso.loopN, iso.loopHoldLabel())
-		fn()
-		return nil
+		iso.jobQ = append(iso.jobQ, fn)
+		for {
+			select {
+			case fn := <-iso.pluginCh:
+				iso.jobQ = append(iso.jobQ, fn)
+			default:
+				iso.trace("loop #%d wake job hold=%s", iso.loopN, iso.loopHoldLabel())
+				return nil
+			}
+		}
 	case job := <-iso.httpCh:
 		iso.mu.Lock()
 		iso.httpQ = append(iso.httpQ, job)
@@ -287,19 +297,29 @@ func (iso *Isolate) postJob(fn func()) {
 }
 
 func (iso *Isolate) pollPlugins() int {
-	if iso == nil || iso.pluginCh == nil {
+	if iso == nil {
 		return 0
 	}
-	n := 0
-	for {
-		select {
-		case fn := <-iso.pluginCh:
-			n++
-			fn()
-		default:
-			return n
+	if iso.pluginCh != nil {
+		for {
+			select {
+			case fn := <-iso.pluginCh:
+				iso.jobQ = append(iso.jobQ, fn)
+			default:
+				goto run
+			}
 		}
 	}
+run:
+	n := len(iso.jobQ)
+	jobs := iso.jobQ
+	iso.jobQ = nil
+	for _, fn := range jobs {
+		if fn != nil {
+			fn()
+		}
+	}
+	return n
 }
 
 func (iso *Isolate) runOnIsolate(fn func()) {
