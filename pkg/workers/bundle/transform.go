@@ -298,7 +298,7 @@ func rewriteAwaitImport(src string) string {
 		src = tlaAwaitImport.ReplaceAllString(src, "${1}require(")
 	}
 	if awaitImportToRequire.MatchString(src) {
-		src = awaitImportToRequire.ReplaceAllString(src, "await __import(")
+		src = awaitImportToRequire.ReplaceAllString(src, "await __import(require, ")
 	}
 	return src
 }

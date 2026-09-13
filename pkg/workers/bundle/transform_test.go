@@ -279,7 +279,7 @@ func TestTransformCJSAwaitImportThen(t *testing.T) {
 	if strings.Contains(out, "require(p).then") {
 		t.Fatalf("await import().then became require().then:\n%s", out)
 	}
-	if !strings.Contains(out, "__import(") {
+	if !strings.Contains(out, "__import(require, ") {
 		t.Fatalf("expected __import:\n%s", out)
 	}
 }

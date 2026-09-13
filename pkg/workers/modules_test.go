@@ -165,6 +165,32 @@ func TestWrapCJSNoPerFileHelpers(t *testing.T) {
 	}
 }
 
+func TestDynamicImportResolvesFromCaller(t *testing.T) {
+	fsys := fstest.MapFS{
+		"app/pkg/lib.js": {Data: []byte(`exports.n = 42;`)},
+		"app/pkg/mid.js": {Data: []byte(`
+			export async function load() {
+				const m = await import("./lib.js");
+				return (m.default && m.default.n) || m.n;
+			}
+		`)},
+	}
+	src := `
+		import { load } from "./pkg/mid.js";
+		load().then(function (n) { globalThis.got = n; });
+	`
+	iso := New("", Options{
+		Imports:       append(NodeScriptImports(), imports.NodeModules{FS: fsys, From: "app/main.mjs"}),
+		PrepareSource: bundle.CompileCJS,
+	})
+	if err := iso.ScriptMain(t.Context(), src, "app/main.mjs"); err != nil {
+		t.Fatal(err)
+	}
+	if n := iso.vm.Get("got").ToInteger(); n != 42 {
+		t.Fatalf("got=%d want 42 (import resolved from entry, not caller)", n)
+	}
+}
+
 func TestRewriteImportUnchangedWithoutImport(t *testing.T) {
 	src := "var x = require('y');\nmodule.exports = x;\n"
 	if got := rewriteImportToRequire(src); got != src {
@@ -177,7 +203,7 @@ func TestRewriteImportSkipsMethodCall(t *testing.T) {
 	if strings.Contains(got, `runner.__import`) || strings.Contains(got, `obj?.__import`) {
 		t.Fatalf("method rewritten: %s", got)
 	}
-	if !strings.Contains(got, `__import("y")`) {
+	if !strings.Contains(got, `__import(require, "y")`) {
 		t.Fatalf("dynamic import missed: %s", got)
 	}
 }
@@ -191,7 +217,7 @@ func TestRewriteImportSkipsMethodDefinition(t *testing.T) {
 	if strings.Contains(got, "__import(src)") {
 		t.Fatalf("method name became __import: %s", got)
 	}
-	if !strings.Contains(got, `__import("./x.js")`) {
+	if !strings.Contains(got, `__import(require, "./x.js")`) {
 		t.Fatalf("dynamic import missed: %s", got)
 	}
 }

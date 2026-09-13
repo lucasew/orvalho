@@ -406,7 +406,22 @@ func wrapCJSFn(source string, async bool) string {
 }
 
 func (iso *Isolate) jsImport(call goja.FunctionCall) goja.Value {
-	m := iso.jsRequire(call)
+	// Prefer the calling module's require (first arg) so a later
+	// microtask still resolves relative specs against that file.
+	var m goja.Value
+	if len(call.Arguments) >= 2 {
+		if req, ok := goja.AssertFunction(call.Argument(0)); ok {
+			v, err := req(goja.Undefined(), call.Argument(1))
+			if err != nil {
+				iso.noteScriptCause(err)
+				panic(err)
+			}
+			m = v
+		}
+	}
+	if m == nil {
+		m = iso.jsRequire(call)
+	}
 	p, resolve, _ := iso.vm.NewPromise()
 	if o, ok := m.(*goja.Object); ok {
 		if d := o.Get("default"); d != nil && !goja.IsUndefined(d) {
@@ -522,7 +537,7 @@ func rewriteImportToRequire(src string) string {
 			continue
 		}
 		if n := importCallLen(src, i); n > 0 {
-			b.WriteString("__import(")
+			b.WriteString("__import(require, ")
 			i += n
 			continue
 		}
