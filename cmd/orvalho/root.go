@@ -21,7 +21,6 @@ var (
 	configPath  string
 	verbose     bool
 	pprofDir    string
-	profileStop context.CancelFunc
 	profileDone chan struct{}
 )
 
@@ -42,7 +41,14 @@ flag when host state is required — there is no implicit discovery path.`,
 func Execute() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
+	err := rootCmd.ExecuteContext(ctx)
+	stop()
+	// cobra skips PersistentPostRun when RunE returns (SIGINT is
+	// context.Canceled). Wait here like lewkit: profile.Run ends with ctx.
+	if profileDone != nil {
+		<-profileDone
+	}
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "orvalho: %v\n", err)
 		return err
 	}
@@ -58,23 +64,16 @@ func init() {
 		if pprofDir == "" {
 			return nil
 		}
-		pctx, cancel := context.WithCancel(cmd.Context())
-		profileStop = cancel
+		// Same as lewkit/x/cmd.App.Setup: profile.Run(cmd.Context()).
 		profileDone = make(chan struct{})
 		p := profile.NewProfile(pprofDir)
 		go func() {
 			defer close(profileDone)
-			_ = p.Run(pctx)
+			if err := p.Run(cmd.Context()); err != nil {
+				fmt.Fprintf(os.Stderr, "orvalho: profile: %v\n", err)
+			}
 		}()
 		return nil
-	}
-	rootCmd.PersistentPostRun = func(cmd *cobra.Command, args []string) {
-		if profileStop != nil {
-			profileStop()
-		}
-		if profileDone != nil {
-			<-profileDone
-		}
 	}
 
 	rootCmd.AddCommand(versionCmd)

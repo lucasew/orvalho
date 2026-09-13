@@ -8,11 +8,9 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -60,9 +58,7 @@ func runScriptRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
+	ctx := cmd.Context()
 	if file != "" {
 		return runScriptFile(ctx, dir, file, args[1:])
 	}
