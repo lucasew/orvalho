@@ -330,7 +330,7 @@ const evalHookScript = `
       for (var i = 0; i < arguments.length; i++) args[i] = arguments[i];
       if (!args.length) return Orig.apply(this, args);
       var body = String(args[args.length - 1]);
-      if (needHost(body, isAsync)) {
+      if (mayNeedXform(body) && needHost(body, isAsync)) {
         var names = [];
         for (var j = 0; j < args.length - 1; j++) names.push(String(args[j]));
         var src = "async function __orvalhoEval(" + names.join(",") + ") {\n" + body + "\n}";
@@ -343,7 +343,15 @@ const evalHookScript = `
     Wrapped.prototype = Orig.prototype;
     return Wrapped;
   }
-  function wrapEval(code) { return origEval(prepHost(String(code), false)); }
+  function mayNeedXform(s) {
+    return s.indexOf("import") >= 0 || s.indexOf("export") >= 0 ||
+      s.indexOf("await") >= 0 || s.indexOf("using") >= 0 || s.indexOf(" with") >= 0;
+  }
+  function wrapEval(code) {
+    code = String(code);
+    if (!mayNeedXform(code)) return origEval(code);
+    return origEval(prepHost(code, false));
+  }
   var WrappedFunction = wrapCtor(origFunction, false);
   var WrappedAsync = wrapCtor(AsyncFunction, true);
   globalThis.eval = wrapEval;

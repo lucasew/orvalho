@@ -378,6 +378,7 @@ func wrapCJS(source string) string {
 
 func wrapCJSFn(source string, async bool) string {
 	var b strings.Builder
+	b.Grow(len(source) + 1024)
 	if async {
 		b.WriteString("(async function (require, module, exports, __orvalhoFilename, __orvalhoDirname) {\n")
 	} else {
@@ -394,9 +395,11 @@ func wrapCJSFn(source string, async bool) string {
 	b.WriteString("  return 'file://'+f;\n")
 	b.WriteString("}\n")
 	found := map[string]bool{}
-	for _, m := range cjsIdentDecl.FindAllStringSubmatch(source, -1) {
-		if len(m) > 1 {
-			found[m[1]] = true
+	if strings.Contains(source, "__filename") || strings.Contains(source, "__dirname") {
+		for _, m := range cjsIdentDecl.FindAllStringSubmatch(source, -1) {
+			if len(m) > 1 {
+				found[m[1]] = true
+			}
 		}
 	}
 	if !found["__filename"] {
@@ -440,6 +443,9 @@ func stripShebang(src string) string {
 
 // rewriteImportToRequire turns dynamic import( into __import( (Promise.resolve(require)).
 func rewriteImportToRequire(src string) string {
+	if !strings.Contains(src, "import") {
+		return src
+	}
 	var b strings.Builder
 	b.Grow(len(src) + 32)
 	i := 0

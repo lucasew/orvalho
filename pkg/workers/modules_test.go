@@ -155,6 +155,13 @@ func TestRequireRejectsHostPathSpecifiers(t *testing.T) {
 	}
 }
 
+func TestRewriteImportUnchangedWithoutImport(t *testing.T) {
+	src := "var x = require('y');\nmodule.exports = x;\n"
+	if got := rewriteImportToRequire(src); got != src {
+		t.Fatalf("plain CJS rewritten:\ngot  %q\nwant %q", got, src)
+	}
+}
+
 func TestRewriteImportSkipsMethodCall(t *testing.T) {
 	got := rewriteImportToRequire(`runner.import("x"); import("y"); obj?.import("z");`)
 	if strings.Contains(got, `runner.__import`) || strings.Contains(got, `obj?.__import`) {

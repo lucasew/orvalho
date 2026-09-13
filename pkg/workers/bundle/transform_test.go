@@ -65,6 +65,16 @@ func TestTransformCJSASIAfterDefaultMember(t *testing.T) {
 	}
 }
 
+func TestTransformCJSSkipsArgumentsCaptureWithoutApply(t *testing.T) {
+	out, err := bundle.TransformCJS("export const n = 1;\n", "mod.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "__orvalhoArguments") {
+		t.Fatalf("arguments capture on file without apply:\n%s", out)
+	}
+}
+
 func TestTransformCJSStillTransformsExport(t *testing.T) {
 	src := "export const n = 1;\n"
 	out, err := bundle.TransformCJS(src, "mod.js")

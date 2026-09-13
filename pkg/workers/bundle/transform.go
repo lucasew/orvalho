@@ -85,8 +85,10 @@ func transformCJS(source, file string, allowTLA bool) (string, error) {
 	}
 	source = stripImportCallOptions(source)
 	source = rewriteAwaitImport(source)
-	source = awaitBareCall.ReplaceAllString(source, "$1")
-	if allowTLA {
+	if strings.Contains(source, "await") && awaitBareCall.MatchString(source) {
+		source = awaitBareCall.ReplaceAllString(source, "$1")
+	}
+	if allowTLA && strings.Contains(source, "await") {
 		// esbuild CJS cannot emit TLA. Hide await as a call so import/export
 		// still rewrite; wrapEvalCJS restores it inside an async IIFE.
 		source = hideAwaitExprs(source)
@@ -289,13 +291,24 @@ func finishCJS(src string) string {
 // is await (import(x).then(...)) — `.` binds tighter than await —
 // so a sync require().then throws.
 func rewriteAwaitImport(src string) string {
-	src = tlaAwaitImport.ReplaceAllString(src, "${1}require(")
-	return awaitImportToRequire.ReplaceAllString(src, "await __import(")
+	if !strings.Contains(src, "await") || !strings.Contains(src, "import") {
+		return src
+	}
+	if tlaAwaitImport.MatchString(src) {
+		src = tlaAwaitImport.ReplaceAllString(src, "${1}require(")
+	}
+	if awaitImportToRequire.MatchString(src) {
+		src = awaitImportToRequire.ReplaceAllString(src, "await __import(")
+	}
+	return src
 }
 
 // stripImportCallOptions drops import(x, { with: ... }) options so
 // esbuild ES2015 can rewrite the call (dynamic-import is disabled).
 func stripImportCallOptions(src string) string {
+	if !hasImportCall(src) {
+		return src
+	}
 	var b strings.Builder
 	b.Grow(len(src))
 	i := 0
@@ -312,6 +325,21 @@ func stripImportCallOptions(src string) string {
 		i++
 	}
 	return b.String()
+}
+
+func hasImportCall(src string) bool {
+	for i := 0; i < len(src); {
+		j := strings.Index(src[i:], "import")
+		if j < 0 {
+			return false
+		}
+		j += i
+		if importCallLen(src, j) > 0 {
+			return true
+		}
+		i = j + 6
+	}
+	return false
 }
 
 func firstImportArg(src string, i int) (string, int) {
@@ -363,6 +391,9 @@ func firstImportArg(src string, i int) (string, int) {
 // wasm-bindgen caches Uint8Array(memory.buffer) until byteLength === 0
 // (browser detach-on-grow). goja copies; always re-read the live buffer.
 func rewriteWasmMemoryCache(src string) string {
+	if !strings.Contains(src, "cachedUint8ArrayMemory0") && !strings.Contains(src, "cachedDataViewMemory0") {
+		return src
+	}
 	old := `if (cachedUint8ArrayMemory0 === null || cachedUint8ArrayMemory0.byteLength === 0) {
         cachedUint8ArrayMemory0 = new Uint8Array(wasm.memory.buffer);
     }`
@@ -397,6 +428,14 @@ var funcOpen = regexp.MustCompile(`\bfunction(?:\s+[A-Za-z_$][\w$]*)?\s*\([^)]*\
 // goja does not implement lexical arguments, so CJS→ESM proxies such as
 // `() => fn.apply(this, arguments)` would call fn with no args.
 func rewriteArgumentsCapture(src string) string {
+	if !strings.Contains(src, "arguments") || !strings.Contains(src, ".apply(") {
+		return src
+	}
+	if !strings.Contains(src, ".apply(this, arguments)") &&
+		!strings.Contains(src, ".apply(null, arguments)") &&
+		!strings.Contains(src, ".apply(void 0, arguments)") {
+		return src
+	}
 	src = funcOpen.ReplaceAllString(src, "${0}var __orvalhoArguments = arguments;")
 	src = strings.ReplaceAll(src, ".apply(this, arguments)", ".apply(this, __orvalhoArguments)")
 	src = strings.ReplaceAll(src, ".apply(null, arguments)", ".apply(null, __orvalhoArguments)")
@@ -408,6 +447,9 @@ func rewriteArgumentsCapture(src string) string {
 // loop. goja can fail to iterate getOwnPropertyNames; each getter must
 // bind its key so every name does not resolve to the last property.
 func rewriteCopyProps(src string) string {
+	if !strings.Contains(src, "__copyProps") {
+		return src
+	}
 	old := `var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
     for (let key of __getOwnPropNames(from))
@@ -435,6 +477,9 @@ var regexpFlagLiteral = regexp.MustCompile(`, ("|')([gimsuyadv]*)("|')\)`)
 
 // rewriteRegexpFlags drops flags goja rejects (hasIndices `d`, unicodeSets `v`).
 func rewriteRegexpFlags(src string) string {
+	if !strings.Contains(src, "RegExp") || !regexpFlagLiteral.MatchString(src) {
+		return src
+	}
 	return regexpFlagLiteral.ReplaceAllStringFunc(src, func(m string) string {
 		sub := regexpFlagLiteral.FindStringSubmatch(m)
 		if len(sub) < 4 || sub[1] != sub[3] {
@@ -454,11 +499,17 @@ func rewriteRegexpFlags(src string) string {
 // rewriteImportMeta fills esbuild's empty import_meta stub from the wrap
 // parameter __orvalhoFilename (guest files may declare their own __filename).
 func rewriteImportMeta(src string) string {
+	if !strings.Contains(src, "import_meta") || !emptyImportMeta.MatchString(src) {
+		return src
+	}
 	return emptyImportMeta.ReplaceAllString(src, `$1 = { url: __orvalhoFileURL(__orvalhoFilename) }`)
 }
 
 // rewriteUnicodeProperties rewrites \p{…} names regexp2 rejects when /u is set.
 func rewriteUnicodeProperties(src string) string {
+	if !strings.Contains(src, `\p{`) && !strings.Contains(src, `\P{`) {
+		return src
+	}
 	return unicodePropEscape.ReplaceAllStringFunc(src, func(m string) string {
 		sub := unicodePropEscape.FindStringSubmatch(m)
 		if len(sub) < 3 {
@@ -502,6 +553,9 @@ func rewriteUnicodeProperties(src string) string {
 
 // rewriteES6UnicodeEscapes turns \u{...} into UTF-16 \uXXXX so goja can parse.
 func rewriteES6UnicodeEscapes(src string) string {
+	if !strings.Contains(src, `\u{`) {
+		return src
+	}
 	return es6UnicodeEscape.ReplaceAllStringFunc(src, func(m string) string {
 		sub := es6UnicodeEscape.FindStringSubmatch(m)
 		if len(sub) < 2 {
