@@ -19,6 +19,8 @@ func (iso *Isolate) installModules() {
 	iso.loading = make(map[string]*goja.Object)
 	mustRuntimeSet(iso.vm, "require", iso.newRequire(""))
 	mustRuntimeSet(iso.vm, "getBuiltinModule", iso.jsRequire)
+	mustRuntimeSet(iso.vm, "__import", iso.jsImport)
+	mustRuntimeSet(iso.vm, "__orvalhoFileURL", iso.jsFileURL)
 }
 
 // newRequire is require bound to from, with resolve (Node createRequire).
@@ -378,22 +380,12 @@ func wrapCJS(source string) string {
 
 func wrapCJSFn(source string, async bool) string {
 	var b strings.Builder
-	b.Grow(len(source) + 1024)
+	b.Grow(len(source) + 160)
 	if async {
 		b.WriteString("(async function (require, module, exports, __orvalhoFilename, __orvalhoDirname) {\n")
 	} else {
 		b.WriteString("(function (require, module, exports, __orvalhoFilename, __orvalhoDirname) {\n")
 	}
-	b.WriteString("function __import(s){var m=require(s);if(m&&(typeof m==='object'||typeof m==='function')&&'default' in m)return Promise.resolve(m);var ns={default:m};if(m&&typeof m==='object'){for(var k in m)ns[k]=m[k];}return Promise.resolve(ns);}\n")
-	b.WriteString("function __orvalhoFileURL(f){\n")
-	b.WriteString("  if(!f) f = __orvalhoFilename;\n")
-	b.WriteString("  if(!f) return 'file:///script.js';\n")
-	b.WriteString("  f = String(f);\n")
-	b.WriteString("  if(f.indexOf('file:')===0) return f;\n")
-	b.WriteString("  f = f.replace(/\\\\/g,'/');\n")
-	b.WriteString("  if(f.charAt(0)!=='/') f = '/'+f;\n")
-	b.WriteString("  return 'file://'+f;\n")
-	b.WriteString("}\n")
 	found := map[string]bool{}
 	if strings.Contains(source, "__filename") || strings.Contains(source, "__dirname") {
 		for _, m := range cjsIdentDecl.FindAllStringSubmatch(source, -1) {
@@ -411,6 +403,46 @@ func wrapCJSFn(source string, async bool) string {
 	b.WriteString(source)
 	b.WriteString("\n})")
 	return b.String()
+}
+
+func (iso *Isolate) jsImport(call goja.FunctionCall) goja.Value {
+	m := iso.jsRequire(call)
+	p, resolve, _ := iso.vm.NewPromise()
+	if o, ok := m.(*goja.Object); ok {
+		if d := o.Get("default"); d != nil && !goja.IsUndefined(d) {
+			resolve(m)
+			return iso.vm.ToValue(p)
+		}
+		ns := iso.vm.NewObject()
+		mustSet(ns, "default", m)
+		for _, k := range o.Keys() {
+			mustSet(ns, k, o.Get(k))
+		}
+		resolve(ns)
+		return iso.vm.ToValue(p)
+	}
+	ns := iso.vm.NewObject()
+	mustSet(ns, "default", m)
+	resolve(ns)
+	return iso.vm.ToValue(p)
+}
+
+func (iso *Isolate) jsFileURL(call goja.FunctionCall) goja.Value {
+	f := ""
+	if len(call.Arguments) > 0 && !goja.IsUndefined(call.Argument(0)) && !goja.IsNull(call.Argument(0)) {
+		f = call.Argument(0).String()
+	}
+	if f == "" {
+		return iso.vm.ToValue("file:///script.js")
+	}
+	if strings.HasPrefix(f, "file:") {
+		return iso.vm.ToValue(f)
+	}
+	f = strings.ReplaceAll(f, "\\", "/")
+	if !strings.HasPrefix(f, "/") {
+		f = "/" + f
+	}
+	return iso.vm.ToValue("file://" + f)
 }
 
 func runNamedScript(vm *goja.Runtime, name, src string) (v goja.Value, err error) {

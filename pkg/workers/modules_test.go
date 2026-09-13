@@ -155,6 +155,16 @@ func TestRequireRejectsHostPathSpecifiers(t *testing.T) {
 	}
 }
 
+func TestWrapCJSNoPerFileHelpers(t *testing.T) {
+	got := wrapCJS("module.exports = 1;\n")
+	if strings.Contains(got, "function __import") || strings.Contains(got, "function __orvalhoFileURL") {
+		t.Fatalf("per-file helpers still in wrap:\n%s", got)
+	}
+	if !strings.Contains(got, "var __filename = __orvalhoFilename") {
+		t.Fatalf("missing filename alias:\n%s", got)
+	}
+}
+
 func TestRewriteImportUnchangedWithoutImport(t *testing.T) {
 	src := "var x = require('y');\nmodule.exports = x;\n"
 	if got := rewriteImportToRequire(src); got != src {
