@@ -38,6 +38,10 @@ orvalho serve ./pkg/ovpkg/testdata/minimal
 orvalho serve ./examples/cat-ssr
 orvalho serve ./my-actor.ovpkg --addr 127.0.0.1:8787
 orvalho serve ./pkg --var SITE_TITLE=Cats --env-file .dev.vars
+
+# Node-mode: evaluate a file or package.json script as main (not default.fetch)
+orvalho script run ./server.js
+orvalho script run dev
 ```
 
 Packages declare **`agents`** (exactly one for `serve`), optional **`runtime.env`** projections, and typed **`bindings`** (e.g. `ASSETS` with `type: "assets"`). See [`SPEC.md`](./SPEC.md).

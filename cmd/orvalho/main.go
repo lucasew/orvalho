@@ -6,6 +6,7 @@ package main
 import "os"
 
 func main() {
+	os.Args = rewriteNodeInvocation(os.Args)
 	if err := Execute(); err != nil {
 		os.Exit(1)
 	}

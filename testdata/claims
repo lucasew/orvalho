@@ -1,0 +1,2 @@
+# Listed Node.js tests (paths under testdata/node/). Prefer testdata/claims.d/<name>.
+# Refresh the tree with: workspaced codebase apply

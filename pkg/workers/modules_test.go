@@ -8,6 +8,7 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/lucasew/orvalho/pkg/imports"
+	"github.com/lucasew/orvalho/pkg/workers/bundle"
 )
 
 func importMap(m map[string]any) []imports.Handler[any] {
@@ -154,6 +155,30 @@ func TestRequireRejectsHostPathSpecifiers(t *testing.T) {
 	}
 }
 
+func TestRewriteImportSkipsMethodCall(t *testing.T) {
+	got := rewriteImportToRequire(`runner.import("x"); import("y"); obj?.import("z");`)
+	if strings.Contains(got, `runner.__import`) || strings.Contains(got, `obj?.__import`) {
+		t.Fatalf("method rewritten: %s", got)
+	}
+	if !strings.Contains(got, `__import("y")`) {
+		t.Fatalf("dynamic import missed: %s", got)
+	}
+}
+
+func TestRewriteImportSkipsMethodDefinition(t *testing.T) {
+	src := "return { import(src) { return env.runner.import(src); } }; import(\"./x.js\");"
+	got := rewriteImportToRequire(src)
+	if !strings.Contains(got, "import(src)") {
+		t.Fatalf("method definition rewritten: %s", got)
+	}
+	if strings.Contains(got, "__import(src)") {
+		t.Fatalf("method name became __import: %s", got)
+	}
+	if !strings.Contains(got, `__import("./x.js")`) {
+		t.Fatalf("dynamic import missed: %s", got)
+	}
+}
+
 func TestRequireCircularScripts(t *testing.T) {
 	iso := New(`
 		var a = require("orvalho:a");
@@ -173,6 +198,88 @@ func TestRequireCircularScripts(t *testing.T) {
 	tickOK(t, iso)
 	if !iso.vm.Get("ok").ToBoolean() {
 		t.Fatal("circular require did not see partial exports")
+	}
+}
+
+func TestRequireCircularESMReassign(t *testing.T) {
+	iso := New("", Options{
+		Imports: importMap(map[string]any{
+			"orvalho:a": imports.Script{File: "a.mjs", Source: `
+				import { n } from "orvalho:b";
+				export function use() { return n(); }
+			`},
+			"orvalho:b": imports.Script{File: "b.mjs", Source: `
+				import { use } from "orvalho:a";
+				export function n() { return 9; }
+				export function unused() { return use; }
+			`},
+		}),
+		PrepareSource: bundle.TransformCJS,
+	})
+	err := iso.ScriptMain(t.Context(), `
+		import { use } from "orvalho:a";
+		if (use() !== 9) throw new Error("use " + use());
+	`, "t.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDynamicImportCJSDefault(t *testing.T) {
+	iso := New("", Options{
+		Imports: importMap(map[string]any{
+			"plug": imports.Script{
+				File:   "plug.js",
+				Source: "function plug() { return 7; }\nplug.postcss = true;\nmodule.exports = plug;\n",
+			},
+		}),
+	})
+	err := iso.ScriptMain(t.Context(), `
+		import("plug").then(function (m) {
+			if (typeof m.default !== "function") throw new Error("default " + typeof m.default);
+			if (m.default() !== 7) throw new Error("call");
+			if (m.default.postcss !== true) throw new Error("postcss");
+		});
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMissingSourceMapDoesNotFailParse(t *testing.T) {
+	iso := New("", Options{
+		Imports: importMap(map[string]any{
+			"mod": imports.Script{
+				File:   "mod.js",
+				Source: "'use strict';\nmodule.exports = { n: 1 };\n//# sourceMappingURL=mod.js.map\n",
+			},
+		}),
+		PrepareSource: bundle.TransformCJS,
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var m = require("mod");
+		if (!m || m.n !== 1) throw new Error("n " + (m && m.n));
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestArrowLexicalArguments(t *testing.T) {
+	iso := New("", Options{PrepareSource: bundle.TransformCJS})
+	err := iso.ScriptMain(t.Context(), `
+		function proxy(fn) {
+			return function () {
+				return Promise.resolve({f: fn}).then((mod) => mod.f.apply(this, arguments));
+			};
+		}
+		var got = 0;
+		proxy(function (n) { got = n; })(7).then(function () {
+			if (got !== 7) throw new Error("got " + got);
+		});
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -280,6 +387,24 @@ func TestRequireNodeModules(t *testing.T) {
 	}
 }
 
+func TestRequireAbsHostConfig(t *testing.T) {
+	fsys := fstest.MapFS{
+		"postcss.config.js": {Data: []byte("module.exports = { plugins: { x: true } };\n")},
+	}
+	iso := New("", Options{
+		FS:      fsys,
+		Cwd:     "/proj",
+		Imports: []imports.Handler[any]{imports.NodeModules{FS: fsys}},
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var m = require("/proj/postcss.config.js");
+		if (!m || !m.plugins || !m.plugins.x) throw new Error("cfg");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRequireNodeModulesRelativeInsidePackage(t *testing.T) {
 	fsys := fstest.MapFS{
 		"pkg/package.json": {Data: []byte(`{"main":"index.js"}`)},
@@ -292,6 +417,46 @@ func TestRequireNodeModulesRelativeInsidePackage(t *testing.T) {
 	tickOK(t, iso)
 	if n := iso.vm.Get("got").ToInteger(); n != 4 {
 		t.Fatalf("got=%d want 4", n)
+	}
+}
+
+func TestDynamicImportThen(t *testing.T) {
+	fsys := fstest.MapFS{
+		"cfg.js": {Data: []byte(`exports.default = { ok: 1 };`)},
+	}
+	iso := New("", Options{
+		Imports:       []imports.Handler[any]{imports.NodeModules{FS: fsys}},
+		PrepareSource: bundle.TransformCJS,
+	})
+	err := iso.ScriptMain(t.Context(), `
+		async function load(p) {
+			return await import(p).then(function (m) { return m.default; });
+		}
+		load("cfg.js").then(function (d) {
+			if (!d || d.ok !== 1) throw new Error("default " + d);
+		});
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRequireSpecifierQuery(t *testing.T) {
+	fsys := fstest.MapFS{
+		"svelte.config.js": {Data: []byte(`exports.ok = 1;`)},
+	}
+	iso := New("", Options{
+		Imports: []imports.Handler[any]{imports.NodeModules{FS: fsys}},
+	})
+	err := iso.ScriptMain(t.Context(), `
+		var c = require("svelte.config.js?t=1782090695526");
+		if (c.ok !== 1) throw new Error("query " + c.ok);
+		if (require("svelte.config.js?t=1") !== c) throw new Error("cache");
+		var r = require.resolve("svelte.config.js?t=2");
+		if (r !== "svelte.config.js") throw new Error("resolve " + r);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -62,6 +62,49 @@ func (iso *Isolate) installWebTypes() {
 	headersProto.Set("has", iso.headersHas)
 	headersProto.Set("delete", iso.headersDelete)
 	headersProto.Set("append", iso.headersAppend)
+	headersProto.Set("_orvalhoPairs", iso.headersPairs)
+	headersProto.Set("forEach", iso.headersForEach)
+	headersProto.Set("getSetCookie", iso.headersGetSetCookie)
+	_, _ = iso.vm.RunString(`(function () {
+  function iter(pairs) {
+    var i = 0;
+    var it = {
+      next: function () {
+        if (i >= pairs.length) return { done: true, value: undefined };
+        return { done: false, value: pairs[i++] };
+      }
+    };
+    it[Symbol.iterator] = function () { return it; };
+    return it;
+  }
+  Headers.prototype.entries = function () { return iter(this._orvalhoPairs()); };
+  Headers.prototype.keys = function () {
+    return iter(this._orvalhoPairs().map(function (p) { return p[0]; }));
+  };
+  Headers.prototype.values = function () {
+    return iter(this._orvalhoPairs().map(function (p) { return p[1]; }));
+  };
+  Headers.prototype[Symbol.iterator] = Headers.prototype.entries;
+  var origFromEntries = Object.fromEntries;
+  Object.fromEntries = function (it) {
+    if (it && typeof it.next === "function") {
+      var acc = [];
+      for (;;) {
+        var step = it.next();
+        if (!step || step.done) break;
+        acc.push(step.value);
+      }
+      return origFromEntries(acc);
+    }
+    if (it && typeof it[Symbol.iterator] === "function" && !Array.isArray(it)) {
+      return origFromEntries(Array.from(it));
+    }
+    if (it && typeof it === "object" && typeof it.length !== "number") {
+      return origFromEntries(Object.entries(it));
+    }
+    return origFromEntries(it);
+  };
+})();`)
 
 	reqProto := iso.vm.Get("Request").ToObject(iso.vm).Get("prototype").ToObject(iso.vm)
 	mustAccessor(reqProto, "method", iso.vm.ToValue(iso.requestGetMethod))
@@ -74,6 +117,7 @@ func (iso *Isolate) installWebTypes() {
 	mustAccessor(resProto, "statusText", iso.vm.ToValue(iso.responseGetStatusText))
 	mustAccessor(resProto, "ok", iso.vm.ToValue(iso.responseGetOK))
 	mustAccessor(resProto, "headers", iso.vm.ToValue(iso.responseGetHeaders))
+	mustAccessor(resProto, "body", iso.vm.ToValue(iso.responseGetBody))
 	mustSet(resProto, "text", iso.responseText)
 	mustSet(resProto, "arrayBuffer", iso.responseArrayBuffer)
 	mustSet(resProto, "json", iso.responseJSON)
@@ -150,6 +194,16 @@ func (iso *Isolate) fillHeaders(h *headerBag, init goja.Value) error {
 			return nil
 		}
 	}
+	if pairs, ok := init.Export().([]any); ok {
+		for _, item := range pairs {
+			pair, ok := item.([]any)
+			if !ok || len(pair) < 2 {
+				continue
+			}
+			h.set(fmt.Sprint(pair[0]), fmt.Sprint(pair[1]))
+		}
+		return nil
+	}
 	o := init.ToObject(iso.vm)
 	for _, key := range o.Keys() {
 		v := o.Get(key)
@@ -159,6 +213,43 @@ func (iso *Isolate) fillHeaders(h *headerBag, init goja.Value) error {
 		h.set(key, v.String())
 	}
 	return nil
+}
+
+func (iso *Isolate) headersPairs(call goja.FunctionCall) goja.Value {
+	h := iso.headerBagOf(call)
+	pairs := make([]any, 0, len(h.m))
+	for k, v := range h.m {
+		pairs = append(pairs, iso.vm.NewArray(k, v))
+	}
+	return iso.vm.NewArray(pairs...)
+}
+
+func (iso *Isolate) headersForEach(call goja.FunctionCall) goja.Value {
+	h := iso.headerBagOf(call)
+	fn, ok := goja.AssertFunction(call.Argument(0))
+	if !ok {
+		panic(iso.vm.NewTypeError("Headers.forEach requires a function"))
+	}
+	this := call.This
+	if len(call.Arguments) > 1 {
+		this = call.Argument(1)
+	}
+	for k, v := range h.m {
+		_, err := fn(this, iso.vm.ToValue(v), iso.vm.ToValue(k), call.This)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return goja.Undefined()
+}
+
+func (iso *Isolate) headersGetSetCookie(call goja.FunctionCall) goja.Value {
+	h := iso.headerBagOf(call)
+	v, ok := h.get("set-cookie")
+	if !ok || v == "" {
+		return iso.vm.ToValue([]any{})
+	}
+	return iso.vm.ToValue([]any{v})
 }
 
 func (iso *Isolate) headerBagOf(call goja.FunctionCall) *headerBag {
@@ -370,6 +461,40 @@ func (iso *Isolate) responseGetOK(call goja.FunctionCall) goja.Value {
 func (iso *Isolate) responseGetHeaders(call goja.FunctionCall) goja.Value {
 	r := iso.responseBagOf(call)
 	return iso.newHeadersObject(r.headers)
+}
+
+func (iso *Isolate) responseGetBody(call goja.FunctionCall) goja.Value {
+	r := iso.responseBagOf(call)
+	if r.bodyStream != nil {
+		return r.bodyStream
+	}
+	return iso.stringReadableStream(r.body)
+}
+
+func (iso *Isolate) stringReadableStream(s string) goja.Value {
+	ctor, ok := goja.AssertConstructor(iso.vm.Get("ReadableStream"))
+	if !ok {
+		return goja.Null()
+	}
+	src := iso.vm.NewObject()
+	mustSet(src, "start", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			return goja.Undefined()
+		}
+		ctrl := call.Argument(0).ToObject(iso.vm)
+		if enqueue, ok := goja.AssertFunction(ctrl.Get("enqueue")); ok {
+			_, _ = enqueue(ctrl, jsBytes(iso, []byte(s)))
+		}
+		if close, ok := goja.AssertFunction(ctrl.Get("close")); ok {
+			_, _ = close(ctrl)
+		}
+		return goja.Undefined()
+	})
+	v, err := ctor(nil, src)
+	if err != nil {
+		return goja.Null()
+	}
+	return v
 }
 
 func (iso *Isolate) responseText(call goja.FunctionCall) goja.Value {

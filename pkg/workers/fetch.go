@@ -36,8 +36,7 @@ func (iso *Isolate) fetchLocked(ctx context.Context, req HTTPRequest) (HTTPRespo
 	if err := ctx.Err(); err != nil {
 		return HTTPResponse{}, err
 	}
-	iso.activeCtx = ctx
-	defer func() { iso.activeCtx = nil }()
+	defer iso.pushCtx(ctx)()
 
 	if err := iso.ensureInitializedLocked(ctx); err != nil {
 		return HTTPResponse{}, err
@@ -150,7 +149,10 @@ func (iso *Isolate) lookupDefaultFetchLocked() (goja.Callable, error) {
 }
 
 func (iso *Isolate) awaitPromiseLocked(ctx context.Context, v goja.Value, maxWait time.Duration) (goja.Value, error) {
-	deadline := iso.now().Add(maxWait)
+	var deadline time.Time
+	if maxWait > 0 {
+		deadline = iso.now().Add(maxWait)
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -175,12 +177,26 @@ func (iso *Isolate) awaitPromiseLocked(ctx context.Context, v goja.Value, maxWai
 			}
 			return nil, ErrFetchRejected
 		case goja.PromiseStatePending:
-			if !iso.now().Before(deadline) {
+			if !deadline.IsZero() && !iso.now().Before(deadline) {
 				return nil, fmt.Errorf("%w after %s", ErrFetchTimeout, maxWait)
 			}
-			// Advance host-driven timers; also re-enter the VM so microtasks can run.
-			if err := iso.drainOneTickLocked(ctx); err != nil {
+			// Same wait sources as runLoop (timers, pluginCh, wake, httpCh)
+			// but do not dispatch HTTP: that belongs at the top of runLoop.
+			iso.pollPlugins()
+			if _, err := iso.drainOneTickLocked(ctx); err != nil {
 				return nil, err
+			}
+			if p2, ok := exportPromise(v); ok && p2.State() == goja.PromiseStatePending {
+				wait := time.Duration(0)
+				if d, ok := iso.timers.nextDeadline(); ok {
+					wait = d.Sub(iso.now())
+					if wait < 0 {
+						continue
+					}
+				}
+				if err := iso.waitForWorkLocked(ctx, wait); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -197,9 +213,9 @@ func exportPromise(v goja.Value) (*goja.Promise, bool) {
 
 // drainOneTickLocked runs due timers for one step without re-taking mu.
 // Mirrors Tick's timer phase (script already initialized).
-func (iso *Isolate) drainOneTickLocked(ctx context.Context) error {
+func (iso *Isolate) drainOneTickLocked(ctx context.Context) (int, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return 0, err
 	}
 	stopWatch := iso.watchInterrupt(ctx)
 	defer stopWatch()
@@ -208,7 +224,7 @@ func (iso *Isolate) drainOneTickLocked(ctx context.Context) error {
 	executed := 0
 	for executed < iso.opts.MaxTimersPerTick {
 		if err := ctx.Err(); err != nil {
-			return err
+			return executed, err
 		}
 		t := iso.timers.popDue(now)
 		if t == nil {
@@ -217,7 +233,7 @@ func (iso *Isolate) drainOneTickLocked(ctx context.Context) error {
 		executed++
 		_, err := t.callback(goja.Undefined(), t.args...)
 		if err != nil {
-			return mapJSError(ctx, err)
+			return executed, mapJSError(ctx, err)
 		}
 		if t.interval > 0 {
 			iso.timers.rescheduleInterval(t, now)
@@ -227,8 +243,8 @@ func (iso *Isolate) drainOneTickLocked(ctx context.Context) error {
 	if executed == 0 {
 		_, err := iso.vm.RunString("")
 		if err != nil {
-			return mapJSError(ctx, err)
+			return 0, mapJSError(ctx, err)
 		}
 	}
-	return nil
+	return executed, nil
 }

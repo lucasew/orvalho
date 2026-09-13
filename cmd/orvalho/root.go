@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
+	"github.com/lewtec/lewkit/x/profile"
 	"github.com/spf13/cobra"
 
 	"github.com/lucasew/orvalho/pkg/cuex"
@@ -13,8 +17,12 @@ import (
 )
 
 var (
-	dataDir    string
-	configPath string
+	dataDir     string
+	configPath  string
+	verbose     bool
+	pprofDir    string
+	profileStop context.CancelFunc
+	profileDone chan struct{}
 )
 
 // rootCmd is the base command for the orvalho CLI.
@@ -32,7 +40,9 @@ flag when host state is required — there is no implicit discovery path.`,
 
 // Execute runs the root command.
 func Execute() error {
-	if err := rootCmd.Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "orvalho: %v\n", err)
 		return err
 	}
@@ -42,6 +52,30 @@ func Execute() error {
 func init() {
 	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", "", "host data directory (required for host commands; always explicit)")
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "host orvalho.cue path (default: <data-dir>/orvalho.cue)")
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "print host progress to stderr")
+	rootCmd.PersistentFlags().StringVar(&pprofDir, "pprof-dir", "", "when set, write runtime/pprof snapshots into this directory")
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if pprofDir == "" {
+			return nil
+		}
+		pctx, cancel := context.WithCancel(cmd.Context())
+		profileStop = cancel
+		profileDone = make(chan struct{})
+		p := profile.NewProfile(pprofDir)
+		go func() {
+			defer close(profileDone)
+			_ = p.Run(pctx)
+		}()
+		return nil
+	}
+	rootCmd.PersistentPostRun = func(cmd *cobra.Command, args []string) {
+		if profileStop != nil {
+			profileStop()
+		}
+		if profileDone != nil {
+			<-profileDone
+		}
+	}
 
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(identityCmd)
@@ -71,6 +105,7 @@ var (
 	ErrInvalidVarFlag    = errors.New("invalid --var (want NAME=value)")
 	ErrEnvFileFormat     = errors.New("env-file: want KEY=value")
 	ErrEnvFileEmptyKey   = errors.New("env-file: empty key")
+	ErrScriptMissing     = errors.New("script: missing file")
 )
 
 // requireDataDir returns an error if --data-dir was not set.

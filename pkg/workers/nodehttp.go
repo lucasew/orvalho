@@ -1,0 +1,774 @@
+package workers
+
+import (
+	"bufio"
+	"context"
+	"io"
+	"io/fs"
+	"net"
+	"net/http"
+	"path"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/dop251/goja"
+)
+
+type httpJob struct {
+	w       http.ResponseWriter
+	r       *http.Request
+	body    []byte
+	srv     *goja.Object
+	done    chan struct{}
+	upgrade bool
+	conn    net.Conn
+	head    []byte
+	ended   bool
+}
+
+// nodeHTTPBinding materializes require("http") / require("node:http").
+// listen uses Options.Listen; nil Listen is denied.
+type nodeHTTPBinding struct{}
+
+var _ Binding = nodeHTTPBinding{}
+
+func (nodeHTTPBinding) Materialize(iso *Isolate) (*goja.Object, error) {
+	if iso == nil || iso.vm == nil {
+		return nil, ErrBindNilIsolate
+	}
+	for _, key := range []string{"http", "node:http"} {
+		if v, ok := iso.moduleCache[key]; ok {
+			if o, ok := v.(*goja.Object); ok {
+				return o, nil
+			}
+		}
+	}
+	return newNodeHTTP(iso, false), nil
+}
+
+// nodeHTTPSBinding materializes require("https"). Same server; TLS is host Listen.
+type nodeHTTPSBinding struct{}
+
+var _ Binding = nodeHTTPSBinding{}
+
+func (nodeHTTPSBinding) Materialize(iso *Isolate) (*goja.Object, error) {
+	if iso == nil || iso.vm == nil {
+		return nil, ErrBindNilIsolate
+	}
+	for _, key := range []string{"https", "node:https"} {
+		if v, ok := iso.moduleCache[key]; ok {
+			if o, ok := v.(*goja.Object); ok {
+				return o, nil
+			}
+		}
+	}
+	return newNodeHTTP(iso, true), nil
+}
+
+type nodeHTTP struct {
+	iso   *Isolate
+	https bool
+}
+
+func withPrototype(iso *Isolate, fn func(goja.FunctionCall) goja.Value) *goja.Object {
+	obj := iso.vm.ToValue(fn).ToObject(iso.vm)
+	if p := obj.Get("prototype"); p == nil || goja.IsUndefined(p) || goja.IsNull(p) {
+		proto := iso.vm.NewObject()
+		mustSet(obj, "prototype", proto)
+		mustSet(proto, "constructor", obj)
+	}
+	return obj
+}
+
+func newNodeHTTP(iso *Isolate, https bool) *goja.Object {
+	n := &nodeHTTP{iso: iso, https: https}
+	obj := iso.vm.NewObject()
+	server := withPrototype(iso, n.jsCreateServer)
+	mustSet(obj, "createServer", server)
+	mustSet(obj, "Server", server)
+	mustSet(obj, "IncomingMessage", n.jsIncoming)
+	mustSet(obj, "ServerResponse", n.jsOutgoing)
+	agent := iso.vm.ToValue(n.jsAgent).ToObject(iso.vm)
+	if p := agent.Get("prototype"); p != nil {
+		if proto, ok := p.(*goja.Object); ok {
+			n.installAgentProto(proto)
+		}
+	}
+	mustSet(obj, "Agent", agent)
+	ga := iso.vm.NewObject()
+	n.initAgent(ga, goja.Undefined())
+	mustSet(obj, "globalAgent", ga)
+	mustSet(obj, "METHODS", httpMethods)
+	mustSet(obj, "STATUS_CODES", statusCodesObj(iso.vm))
+	mustSet(obj, "get", n.jsDeniedOut)
+	mustSet(obj, "request", n.jsDeniedOut)
+	mustSet(obj, "default", obj)
+	return obj
+}
+
+var httpMethods = []string{
+	"ACL", "BIND", "CHECKOUT", "CONNECT", "COPY", "DELETE", "GET", "HEAD",
+	"LINK", "LOCK", "M-SEARCH", "MERGE", "MKACTIVITY", "MKCALENDAR", "MKCOL",
+	"MOVE", "NOTIFY", "OPTIONS", "PATCH", "POST", "PROPFIND", "PROPPATCH",
+	"PURGE", "PUT", "QUERY", "REBIND", "REPORT", "SEARCH", "SOURCE",
+	"SUBSCRIBE", "TRACE", "UNBIND", "UNLINK", "UNLOCK", "UNSUBSCRIBE",
+}
+
+func statusCodesObj(vm *goja.Runtime) *goja.Object {
+	o := vm.NewObject()
+	for _, pair := range httpStatusPairs {
+		mustSet(o, strconv.Itoa(pair.code), pair.text)
+	}
+	return o
+}
+
+var httpStatusPairs = []struct {
+	code int
+	text string
+}{
+	{100, "Continue"}, {101, "Switching Protocols"},
+	{200, "OK"}, {201, "Created"}, {202, "Accepted"}, {204, "No Content"},
+	{206, "Partial Content"},
+	{301, "Moved Permanently"}, {302, "Found"}, {304, "Not Modified"},
+	{307, "Temporary Redirect"}, {308, "Permanent Redirect"},
+	{400, "Bad Request"}, {401, "Unauthorized"}, {403, "Forbidden"},
+	{404, "Not Found"}, {405, "Method Not Allowed"}, {409, "Conflict"},
+	{410, "Gone"}, {413, "Payload Too Large"}, {418, "I'm a teapot"},
+	{429, "Too Many Requests"},
+	{500, "Internal Server Error"}, {501, "Not Implemented"},
+	{502, "Bad Gateway"}, {503, "Service Unavailable"},
+}
+
+func (n *nodeHTTP) jsDeniedOut(call goja.FunctionCall) goja.Value {
+	n.throwDenied("request")
+	return goja.Undefined()
+}
+
+func (n *nodeHTTP) jsIncoming(call goja.ConstructorCall) *goja.Object {
+	return n.iso.vm.NewObject()
+}
+
+func (n *nodeHTTP) jsOutgoing(call goja.ConstructorCall) *goja.Object {
+	return n.iso.vm.NewObject()
+}
+
+func (n *nodeHTTP) jsAgent(call goja.ConstructorCall) *goja.Object {
+	n.initAgent(call.This, call.Argument(0))
+	return call.This
+}
+
+func (n *nodeHTTP) initAgent(this *goja.Object, optsVal goja.Value) {
+	attachEmitter(this)
+	opts := n.iso.vm.NewObject()
+	if o, ok := optsVal.(*goja.Object); ok {
+		opts = o
+	}
+	mustSet(this, "options", opts)
+	mustSet(this, "sockets", n.iso.vm.NewObject())
+	mustSet(this, "freeSockets", n.iso.vm.NewObject())
+	mustSet(this, "requests", n.iso.vm.NewObject())
+}
+
+func (n *nodeHTTP) installAgentProto(proto *goja.Object) {
+	attachEmitter(proto)
+	mustSet(proto, "keepSocketAlive", func(goja.FunctionCall) goja.Value {
+		return n.iso.vm.ToValue(true)
+	})
+	mustSet(proto, "reuseSocket", func(goja.FunctionCall) goja.Value {
+		return goja.Undefined()
+	})
+	mustSet(proto, "destroy", func(goja.FunctionCall) goja.Value {
+		return goja.Undefined()
+	})
+	mustSet(proto, "getName", func(goja.FunctionCall) goja.Value {
+		return n.iso.vm.ToValue("")
+	})
+	mustSet(proto, "createConnection", n.jsDeniedOut)
+	mustSet(proto, "addRequest", func(goja.FunctionCall) goja.Value {
+		return goja.Undefined()
+	})
+}
+
+func (n *nodeHTTP) jsCreateServer(call goja.FunctionCall) goja.Value {
+	handler := lastFunc(call)
+	srv := n.iso.vm.NewObject()
+	listeners := map[string][]goja.Callable{}
+	if handler != nil {
+		listeners["request"] = append(listeners["request"], handler)
+	}
+	var ln net.Listener
+	var closeOnce sync.Once
+	mustSet(srv, "on", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			if fn, ok := goja.AssertFunction(call.Argument(1)); ok {
+				ev := call.Argument(0).String()
+				listeners[ev] = append(listeners[ev], fn)
+			}
+		}
+		return srv
+	})
+	mustSet(srv, "prependListener", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			if fn, ok := goja.AssertFunction(call.Argument(1)); ok {
+				ev := call.Argument(0).String()
+				listeners[ev] = append([]goja.Callable{fn}, listeners[ev]...)
+			}
+		}
+		return srv
+	})
+	mustSet(srv, "once", srv.Get("on"))
+	mustSet(srv, "removeListener", func(goja.FunctionCall) goja.Value { return srv })
+	mustSet(srv, "emit", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			return goja.Undefined()
+		}
+		ev := call.Argument(0).String()
+		var args []goja.Value
+		if len(call.Arguments) > 1 {
+			args = call.Arguments[1:]
+		}
+		for _, fn := range listeners[ev] {
+			_, _ = fn(srv, args...)
+		}
+		return goja.Undefined()
+	})
+	mustSet(srv, "unref", func(goja.FunctionCall) goja.Value { return srv })
+	mustSet(srv, "ref", func(goja.FunctionCall) goja.Value { return srv })
+	mustSet(srv, "listen", func(call goja.FunctionCall) goja.Value {
+		n.startListen(srv, &ln, &closeOnce, call)
+		return srv
+	})
+	mustSet(srv, "close", func(call goja.FunctionCall) goja.Value {
+		if ln != nil {
+			closeOnce.Do(func() {
+				_ = ln.Close()
+				n.iso.listeners--
+			})
+		}
+		cb := lastFunc(call)
+		if cb != nil {
+			n.iso.timers.schedule(cb, nil, 0, 0, n.iso.now())
+		}
+		return srv
+	})
+	mustSet(srv, "address", func(goja.FunctionCall) goja.Value {
+		if ln == nil {
+			return goja.Null()
+		}
+		a := ln.Addr()
+		if a == nil {
+			return goja.Null()
+		}
+		host, port, _ := net.SplitHostPort(a.String())
+		o := n.iso.vm.NewObject()
+		mustSet(o, "address", host)
+		mustSet(o, "family", "IPv4")
+		p, _ := strconv.Atoi(port)
+		mustSet(o, "port", p)
+		return o
+	})
+	mustSet(srv, "listening", false)
+	mustSet(srv, "unref", func(goja.FunctionCall) goja.Value { return srv })
+	mustSet(srv, "ref", func(goja.FunctionCall) goja.Value { return srv })
+	return srv
+}
+
+func (n *nodeHTTP) startListen(srv *goja.Object, ln *net.Listener, once *sync.Once, call goja.FunctionCall) {
+	if n.iso.opts.Listen == nil {
+		n.throwDenied("listen")
+	}
+	port, host, cb := listenArgs(call)
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	n.iso.trace("http listen %s", addr)
+	ctx := n.iso.activeCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	l, err := n.iso.opts.Listen(ctx, ListenReq{
+		Network: "tcp",
+		Address: addr,
+	})
+	if err != nil {
+		n.iso.trace("http listen fail %s: %v", addr, err)
+		panic(n.iso.vm.NewGoError(err))
+	}
+	n.iso.trace("http listen ok %s", l.Addr())
+	*ln = l
+	n.iso.listeners++
+	mustSet(srv, "listening", true)
+	go n.serve(l, srv)
+	if cb != nil {
+		n.iso.timers.schedule(cb, nil, 0, 0, n.iso.now())
+	}
+	n.emit(srv, "listening")
+}
+
+func (n *nodeHTTP) serve(ln net.Listener, srv *goja.Object) {
+	_ = http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			n.serveUpgrade(w, r, srv)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		n.iso.trace("http %s %s", r.Method, r.URL.RequestURI())
+		job := &httpJob{w: w, r: r, body: body, srv: srv, done: make(chan struct{})}
+		select {
+		case n.iso.httpCh <- job:
+			<-job.done
+		case <-r.Context().Done():
+			n.iso.trace("http cancel %s %s", r.Method, r.URL.RequestURI())
+		}
+	}))
+}
+
+func (n *nodeHTTP) serveUpgrade(w http.ResponseWriter, r *http.Request, srv *goja.Object) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "upgrade: no hijack", http.StatusInternalServerError)
+		return
+	}
+	conn, bufrw, err := hj.Hijack()
+	if err != nil {
+		n.iso.trace("http upgrade hijack: %v", err)
+		return
+	}
+	n.iso.trace("http upgrade %s", r.URL.RequestURI())
+	job := &httpJob{
+		r: r, srv: srv, upgrade: true, conn: conn,
+		head: bufferedHead(bufrw), done: make(chan struct{}),
+	}
+	select {
+	case n.iso.httpCh <- job:
+		<-job.done
+	case <-r.Context().Done():
+		_ = conn.Close()
+	}
+}
+
+func bufferedHead(bufrw *bufio.ReadWriter) []byte {
+	if bufrw == nil || bufrw.Reader == nil {
+		return nil
+	}
+	n := bufrw.Reader.Buffered()
+	if n == 0 {
+		return nil
+	}
+	b := make([]byte, n)
+	_, _ = io.ReadFull(bufrw.Reader, b)
+	return b
+}
+
+func (iso *Isolate) finishHTTP(job *httpJob) {
+	if job == nil || job.ended {
+		return
+	}
+	job.ended = true
+	if iso.inFlight > 0 {
+		iso.inFlight--
+	}
+	select {
+	case <-job.done:
+	default:
+		close(job.done)
+	}
+	iso.kick()
+}
+
+// serveOptimizedDep sends a prebundled Vite dep from the guest FS
+// without running the request handler. Those files are already ESM;
+// transforming them in goja never returns.
+func (iso *Isolate) serveOptimizedDep(job *httpJob) bool {
+	if job == nil || job.r == nil || iso.opts.FS == nil {
+		return false
+	}
+	p := job.r.URL.Path
+	const prefix = "/node_modules/.vite/deps/"
+	if !strings.HasPrefix(p, prefix) {
+		return false
+	}
+	rel := strings.TrimPrefix(p, "/")
+	if rel != path.Clean(rel) || strings.Contains(rel, "..") {
+		return false
+	}
+	switch path.Ext(rel) {
+	case ".js", ".css", ".map", ".json":
+	default:
+		return false
+	}
+	data, err := fs.ReadFile(iso.opts.FS, rel)
+	if err != nil {
+		return false
+	}
+	ct := "application/javascript"
+	switch path.Ext(rel) {
+	case ".css":
+		ct = "text/css"
+	case ".json", ".map":
+		ct = "application/json"
+	}
+	job.w.Header().Set("Content-Type", ct)
+	job.w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	job.w.WriteHeader(http.StatusOK)
+	_, _ = job.w.Write(data)
+	iso.trace("http end 200 %dB static %s", len(data), p)
+	iso.finishHTTP(job)
+	return true
+}
+
+func (iso *Isolate) dispatchHTTP(job *httpJob) {
+	if job == nil {
+		return
+	}
+	iso.inFlight++
+	n := &nodeHTTP{iso: iso}
+	if job.upgrade {
+		n.dispatchUpgrade(job)
+		iso.finishHTTP(job)
+		return
+	}
+	if iso.serveOptimizedDep(job) {
+		return
+	}
+	req := n.makeReq(job.r, job.body)
+	res := n.makeRes(job.w, func() { iso.finishHTTP(job) })
+	if err := n.emit(job.srv, "request", req, res); err != nil {
+		iso.trace("http handler %s %s: %v", job.r.Method, job.r.URL.RequestURI(), err)
+		http.Error(job.w, err.Error(), http.StatusInternalServerError)
+		iso.finishHTTP(job)
+	}
+}
+
+func (n *nodeHTTP) dispatchUpgrade(job *httpJob) {
+	if job.conn == nil {
+		return
+	}
+	sock := n.bindConn(job.conn)
+	req := n.makeReq(job.r, nil)
+	mustSet(req, "socket", sock)
+	mustSet(req, "connection", sock)
+	mustSet(req, "destroy", func(goja.FunctionCall) goja.Value {
+		if destroy, ok := goja.AssertFunction(sock.Get("destroy")); ok {
+			_, _ = destroy(sock)
+		}
+		return req
+	})
+	if err := n.emit(job.srv, "upgrade", req, sock, jsBytes(n.iso, job.head)); err != nil {
+		n.iso.trace("http upgrade handler: %v", err)
+		_ = job.conn.Close()
+	}
+}
+
+func (n *nodeHTTP) makeReq(r *http.Request, body []byte) *goja.Object {
+	req := n.iso.vm.NewObject()
+	attachEmitter(req)
+	mustSet(req, "method", r.Method)
+	mustSet(req, "url", r.URL.RequestURI())
+	mustSet(req, "httpVersion", r.Proto)
+	hdr := n.iso.vm.NewObject()
+	for k, vs := range r.Header {
+		mustSet(hdr, strings.ToLower(k), strings.Join(vs, ", "))
+	}
+	if r.Host != "" {
+		mustSet(hdr, "host", r.Host)
+	}
+	mustSet(req, "headers", hdr)
+	sock := n.iso.vm.NewObject()
+	mustSet(sock, "remoteAddress", "127.0.0.1")
+	mustSet(sock, "remotePort", 0)
+	mustSet(sock, "localAddress", "127.0.0.1")
+	mustSet(sock, "encrypted", false)
+	mustSet(req, "socket", sock)
+	mustSet(req, "connection", sock)
+	mustSet(req, "httpVersionMajor", 1)
+	mustSet(req, "httpVersionMinor", 1)
+	var fire goja.Callable
+	fire = func(this goja.Value, args ...goja.Value) (goja.Value, error) {
+		if len(body) > 0 {
+			n.emit(req, "data", n.iso.vm.ToValue(string(body)))
+		}
+		n.emit(req, "end")
+		return goja.Undefined(), nil
+	}
+	n.iso.timers.schedule(fire, nil, 0, 0, n.iso.now())
+	return req
+}
+
+type httpResState struct {
+	w      http.ResponseWriter
+	status int
+	hdr    http.Header
+	wrote  bool
+	ended  bool
+	mu     sync.Mutex
+}
+
+func (n *nodeHTTP) makeRes(w http.ResponseWriter, onEnd func()) *goja.Object {
+	st := &httpResState{w: w, status: 200, hdr: make(http.Header)}
+	var finish sync.Once
+	res := n.iso.vm.NewObject()
+	attachEmitter(res)
+	mustSet(res, "statusCode", 200)
+	mustSet(res, "setHeader", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			st.hdr.Set(call.Argument(0).String(), call.Argument(1).String())
+		}
+		return res
+	})
+	mustSet(res, "appendHeader", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			st.hdr.Add(call.Argument(0).String(), call.Argument(1).String())
+		}
+		return res
+	})
+	mustSet(res, "removeHeader", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) > 0 {
+			st.hdr.Del(call.Argument(0).String())
+		}
+		return res
+	})
+	mustSet(res, "getHeader", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			return goja.Undefined()
+		}
+		v := st.hdr.Get(call.Argument(0).String())
+		if v == "" {
+			return goja.Undefined()
+		}
+		return n.iso.vm.ToValue(v)
+	})
+	mustSet(res, "writeHead", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) > 0 {
+			st.status = int(call.Argument(0).ToInteger())
+			mustSet(res, "statusCode", st.status)
+		}
+		if len(call.Arguments) > 1 {
+			if obj, ok := call.Argument(1).(*goja.Object); ok {
+				for _, k := range obj.Keys() {
+					st.hdr.Set(k, obj.Get(k).String())
+				}
+			}
+		}
+		return res
+	})
+	flush := func(chunk []byte) {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		if !st.wrote {
+			if v := res.Get("statusCode"); v != nil && !goja.IsUndefined(v) {
+				st.status = int(v.ToInteger())
+			}
+			for k, vs := range st.hdr {
+				for _, val := range vs {
+					st.w.Header().Add(k, val)
+				}
+			}
+			st.w.WriteHeader(st.status)
+			st.wrote = true
+			mustSet(res, "headersSent", true)
+		}
+		if len(chunk) > 0 {
+			_, _ = st.w.Write(chunk)
+		}
+	}
+	mustSet(res, "headersSent", false)
+	mustSet(res, "writableEnded", false)
+	mustSet(res, "writable", true)
+	mustSet(res, "finished", false)
+	mustSet(res, "flushHeaders", func(goja.FunctionCall) goja.Value {
+		flush(nil)
+		return res
+	})
+	mustSet(res, "write", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) > 0 {
+			flush(valueBytes(call.Argument(0)))
+		}
+		return n.iso.vm.ToValue(true)
+	})
+	mustSet(res, "end", func(call goja.FunctionCall) goja.Value {
+		var chunk []byte
+		if len(call.Arguments) > 0 && !goja.IsUndefined(call.Argument(0)) && !goja.IsNull(call.Argument(0)) {
+			chunk = valueBytes(call.Argument(0))
+		}
+		flush(chunk)
+		st.ended = true
+		mustSet(res, "writableEnded", true)
+		mustSet(res, "finished", true)
+		n.iso.trace("http end %d %dB", st.status, len(chunk))
+		if st.status >= 400 && len(chunk) > 0 {
+			snip := chunk
+			if len(snip) > 240 {
+				snip = snip[:240]
+			}
+			n.iso.trace("http error body %q", string(snip))
+		}
+		finish.Do(onEnd)
+		_ = n.emit(res, "finish")
+		return res
+	})
+	return res
+}
+
+func jsBytes(iso *Isolate, b []byte) goja.Value {
+	cp := append([]byte(nil), b...)
+	ab := iso.vm.NewArrayBuffer(cp)
+	if buf := iso.vm.Get("Buffer"); buf != nil && !goja.IsUndefined(buf) {
+		if o, ok := buf.(*goja.Object); ok {
+			if from, ok := goja.AssertFunction(o.Get("from")); ok {
+				if v, err := from(buf, iso.vm.ToValue(ab)); err == nil {
+					return v
+				}
+			}
+		}
+	}
+	return iso.vm.ToValue(ab)
+}
+
+func (n *nodeHTTP) bindConn(conn net.Conn) *goja.Object {
+	sock := n.iso.vm.NewObject()
+	attachEmitter(sock)
+	mustSet(sock, "readable", true)
+	mustSet(sock, "writable", true)
+	mustSet(sock, "destroyed", false)
+	mustSet(sock, "encrypted", false)
+	mustSet(sock, "remoteAddress", "127.0.0.1")
+	mustSet(sock, "remotePort", 0)
+	var closeOnce sync.Once
+	var finished bool
+	shutdown := func() {
+		closeOnce.Do(func() {
+			_ = conn.Close()
+			mustSet(sock, "destroyed", true)
+			mustSet(sock, "readable", false)
+			mustSet(sock, "writable", false)
+		})
+	}
+	finish := func(sendEnd bool) {
+		if finished {
+			return
+		}
+		finished = true
+		shutdown()
+		if sendEnd {
+			_ = n.emit(sock, "end")
+		}
+		_ = n.emit(sock, "close")
+	}
+	mustSet(sock, "cork", func(goja.FunctionCall) goja.Value { return sock })
+	mustSet(sock, "uncork", func(goja.FunctionCall) goja.Value { return sock })
+	mustSet(sock, "write", func(call goja.FunctionCall) goja.Value {
+		_, err := conn.Write(valueBytes(call.Argument(0)))
+		if cb, ok := goja.AssertFunction(call.Argument(1)); ok {
+			var args []goja.Value
+			if err != nil {
+				args = []goja.Value{n.iso.vm.NewGoError(err)}
+			}
+			n.iso.timers.schedule(cb, args, 0, 0, n.iso.now())
+		}
+		if err != nil {
+			return n.iso.vm.ToValue(false)
+		}
+		return n.iso.vm.ToValue(true)
+	})
+	mustSet(sock, "end", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) > 0 && !goja.IsUndefined(call.Argument(0)) && !finished {
+			_, _ = conn.Write(valueBytes(call.Argument(0)))
+		}
+		finish(true)
+		return sock
+	})
+	mustSet(sock, "destroy", func(goja.FunctionCall) goja.Value {
+		finish(false)
+		return sock
+	})
+	mustSet(sock, "setTimeout", func(goja.FunctionCall) goja.Value { return sock })
+	mustSet(sock, "setNoDelay", func(goja.FunctionCall) goja.Value { return sock })
+	mustSet(sock, "setKeepAlive", func(goja.FunctionCall) goja.Value { return sock })
+	mustSet(sock, "pause", func(goja.FunctionCall) goja.Value { return sock })
+	mustSet(sock, "resume", func(goja.FunctionCall) goja.Value { return sock })
+	mustSet(sock, "unshift", func(call goja.FunctionCall) goja.Value {
+		b := valueBytes(call.Argument(0))
+		if len(b) > 0 {
+			_ = n.emit(sock, "data", jsBytes(n.iso, b))
+		}
+		return sock
+	})
+	go func() {
+		buf := make([]byte, 32*1024)
+		for {
+			nr, err := conn.Read(buf)
+			if nr > 0 {
+				cp := make([]byte, nr)
+				copy(cp, buf[:nr])
+				n.iso.postJob(func() {
+					_ = n.emit(sock, "data", jsBytes(n.iso, cp))
+				})
+			}
+			if err != nil {
+				n.iso.postJob(func() {
+					finish(true)
+				})
+				return
+			}
+		}
+	}()
+	return sock
+}
+
+func (n *nodeHTTP) emit(obj *goja.Object, ev string, args ...goja.Value) error {
+	emit := obj.Get("emit")
+	fn, ok := goja.AssertFunction(emit)
+	if !ok {
+		return nil
+	}
+	all := append([]goja.Value{n.iso.vm.ToValue(ev)}, args...)
+	_, err := fn(obj, all...)
+	return err
+}
+
+func (n *nodeHTTP) throwDenied(op string) {
+	ctor, ok := goja.AssertConstructor(n.iso.vm.Get("Error"))
+	if !ok {
+		panic(n.iso.vm.NewGoError(ErrListenDenied))
+	}
+	o, err := ctor(nil, n.iso.vm.ToValue(op+" EPERM"))
+	if err != nil {
+		panic(err)
+	}
+	_ = o.Set("code", "EPERM")
+	_ = o.Set("syscall", op)
+	panic(o)
+}
+
+func listenArgs(call goja.FunctionCall) (port int, host string, cb goja.Callable) {
+	cb = lastFunc(call)
+	if len(call.Arguments) == 0 {
+		return 0, "", cb
+	}
+	a0 := call.Argument(0)
+	if obj, ok := a0.(*goja.Object); ok {
+		if _, isFn := goja.AssertFunction(a0); !isFn {
+			if v := obj.Get("port"); v != nil && !goja.IsUndefined(v) {
+				port = int(v.ToInteger())
+			}
+			if v := obj.Get("host"); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
+				host = v.String()
+			}
+			return port, host, cb
+		}
+	}
+	port = int(a0.ToInteger())
+	if len(call.Arguments) > 1 {
+		a1 := call.Argument(1)
+		if _, isFn := goja.AssertFunction(a1); !isFn && !goja.IsUndefined(a1) && !goja.IsNull(a1) {
+			if s, ok := a1.Export().(string); ok {
+				host = s
+			}
+		}
+	}
+	return port, host, cb
+}

@@ -79,9 +79,13 @@ func (l linker) run() error {
 		if n.Optional && !keepOptional(n.CPU) {
 			continue
 		}
+		dest := filepath.Join(l.root, slotDir(n.Name, n.Version))
+		if _, err := os.Stat(dest); err != nil {
+			return fmt.Errorf("link %s: %w", name, err)
+		}
 		if err := symlinkRel(
 			filepath.Join(nm, filepath.FromSlash(name)),
-			filepath.Join(l.root, slotDir(n.Name, n.Version)),
+			dest,
 		); err != nil {
 			return err
 		}
@@ -158,7 +162,11 @@ func (l linker) bins() error {
 		}
 		pkgDir := filepath.Join(l.root, slotDir(n.Name, n.Version))
 		for binName, rel := range n.Bin {
-			if err := symlinkRel(filepath.Join(binDir, binName), filepath.Join(pkgDir, filepath.FromSlash(rel))); err != nil {
+			target := filepath.Join(pkgDir, filepath.FromSlash(rel))
+			if _, err := os.Stat(target); err != nil {
+				return fmt.Errorf("bin %s: %w", binName, err)
+			}
+			if err := symlinkRel(filepath.Join(binDir, binName), target); err != nil {
 				return err
 			}
 		}

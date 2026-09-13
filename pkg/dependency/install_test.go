@@ -174,6 +174,93 @@ func TestInstallIsolatedTree(t *testing.T) {
 	}
 }
 
+func TestInstallLockfileFillsMissingDist(t *testing.T) {
+	t.Parallel()
+	binBody := "#!/usr/bin/env node\nconsole.log('ok');\n"
+	tg, integrity := npmTarball(t, map[string]string{
+		"package.json":  `{"name":"astro","version":"6.4.8","bin":{"astro":"bin/astro.mjs"}}`,
+		"bin/astro.mjs": binBody,
+	})
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/astro/-/astro-6.4.8.tgz":
+			if _, err := w.Write(tg); err != nil {
+				t.Errorf("write tarball: %v", err)
+			}
+		case "/astro":
+			if err := json.NewEncoder(w).Encode(map[string]any{
+				"name":      "astro",
+				"dist-tags": map[string]string{"latest": "6.4.8"},
+				"versions": map[string]any{
+					"6.4.8": map[string]any{
+						"name":    "astro",
+						"version": "6.4.8",
+						"bin":     map[string]string{"astro": "bin/astro.mjs"},
+						"dist": map[string]string{
+							"tarball":   srv.URL + "/astro/-/astro-6.4.8.tgz",
+							"integrity": integrity,
+						},
+					},
+				},
+			}); err != nil {
+				t.Errorf("encode packument: %v", err)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{
+  "name": "app",
+  "version": "1.0.0",
+  "dependencies": { "astro": "6.4.8" }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Lockfile has version + bin, no resolved/integrity (npm packages key omit).
+	if err := os.WriteFile(filepath.Join(dir, "package-lock.json"), []byte(`{
+  "name": "app",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "app",
+      "version": "1.0.0",
+      "dependencies": { "astro": "6.4.8" }
+    },
+    "node_modules/astro": {
+      "version": "6.4.8",
+      "bin": { "astro": "bin/astro.mjs" }
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := (Options{
+		Dir:      dir,
+		StoreDir: filepath.Join(dir, ".orvalho", "store"),
+		Registry: srv.URL,
+		HTTP:     srv.Client(),
+	}).Install(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, "node_modules", ".bin", "astro"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != binBody {
+		t.Fatalf("bin body %q", got)
+	}
+}
+
 func TestDetectForeignLockfile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

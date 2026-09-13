@@ -12,9 +12,15 @@ import (
 // that are outside our WinterTC subset but required for real adapter output.
 func (iso *Isolate) installHostPolyfills() {
 	iso.bindConsole()
+	if g := iso.vm.Get("globalThis"); g != nil {
+		mustRuntimeSet(iso.vm, "global", g)
+	}
 
 	// atob / btoa / URL / streams / crypto / Intl — one script for guest globals.
 	_, _ = iso.vm.RunString(hostPolyfillScript)
+	iso.installTextCodec()
+	iso.installWebAssembly()
+	iso.installEvalHook()
 }
 
 // bindConsole installs console.* that write to the host process stderr.
@@ -80,38 +86,6 @@ const hostPolyfillScript = `
         if (e4 !== 64) str += String.fromCharCode(c3);
       }
       return str;
-    };
-  }
-  if (typeof globalThis.TextEncoder !== "function") {
-    globalThis.TextEncoder = function TextEncoder() {};
-    globalThis.TextEncoder.prototype.encode = function (s) {
-      s = String(s);
-      var arr = [];
-      for (var i = 0; i < s.length; i++) {
-        var c = s.charCodeAt(i);
-        if (c < 128) arr.push(c);
-        else if (c < 2048) arr.push(192 | (c >> 6), 128 | (c & 63));
-        else arr.push(224 | (c >> 12), 128 | ((c >> 6) & 63), 128 | (c & 63));
-      }
-      return new Uint8Array(arr);
-    };
-  }
-  if (typeof globalThis.TextDecoder !== "function") {
-    globalThis.TextDecoder = function TextDecoder() {};
-    globalThis.TextDecoder.prototype.decode = function (buf) {
-      if (!buf) return "";
-      var a = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-      var out = "", i = 0;
-      while (i < a.length) {
-        var c = a[i++];
-        if (c < 128) out += String.fromCharCode(c);
-        else if (c > 191 && c < 224) {
-          out += String.fromCharCode(((c & 31) << 6) | (a[i++] & 63));
-        } else {
-          out += String.fromCharCode(((c & 15) << 12) | ((a[i++] & 63) << 6) | (a[i++] & 63));
-        }
-      }
-      return out;
     };
   }
   // Always install URLSearchParams: goja has none, and a stub get() that
@@ -240,48 +214,96 @@ const hostPolyfillScript = `
   globalThis.URLSearchParams = OrvalhoURLSearchParams;
 
   if (typeof globalThis.URL === "undefined" || typeof globalThis.URL.canParse !== "function") {
+    function orvalhoParseAbsURL(s) {
+      var m = String(s).match(/^([a-zA-Z][a-zA-Z0-9+.-]*:)\/\/([^\/\?#]*)([^?#]*)(\?[^#]*)?(#.*)?$/);
+      if (m) return { protocol: m[1], host: m[2], pathname: m[3] || "/", search: m[4] || "", hash: m[5] || "" };
+      // node:fs / data:… — scheme + opaque path, no //.
+      var o = String(s).match(/^([a-zA-Z][a-zA-Z0-9+.-]*:)([^\/\?#][^?#]*)(\?[^#]*)?(#.*)?$/);
+      if (o) return { protocol: o[1], host: "", pathname: o[2] || "", search: o[3] || "", hash: o[4] || "", opaque: true };
+      return null;
+    }
+    function orvalhoNormalizePath(p) {
+      var parts = p.split("/");
+      var out = [];
+      for (var i = 0; i < parts.length; i++) {
+        var part = parts[i];
+        if (part === ".") continue;
+        if (part === "..") {
+          if (out.length > 0 && out[out.length - 1] !== "") out.pop();
+          continue;
+        }
+        if (part === "" && i !== 0 && i !== parts.length - 1) continue;
+        out.push(part);
+      }
+      if (out.length === 0) return "/";
+      var s = out.join("/");
+      if (s.charAt(0) !== "/") s = "/" + s;
+      return s;
+    }
+    function orvalhoResolveURL(base, rel) {
+      var b = orvalhoParseAbsURL(base);
+      if (!b) return String(base).replace(/\/?$/, "/") + rel;
+      var path = rel;
+      var search = "";
+      var hash = "";
+      var hashAt = path.indexOf("#");
+      if (hashAt >= 0) {
+        hash = path.slice(hashAt);
+        path = path.slice(0, hashAt);
+      }
+      var qAt = path.indexOf("?");
+      if (qAt >= 0) {
+        search = path.slice(qAt);
+        path = path.slice(0, qAt);
+      }
+      if (path.indexOf("//") === 0) return b.protocol + path + search + hash;
+      var pathname;
+      if (path.charAt(0) === "/") {
+        pathname = orvalhoNormalizePath(path);
+      } else if (path === "") {
+        pathname = b.pathname;
+        if (!search) search = b.search;
+      } else {
+        var dir = b.pathname;
+        var slash = dir.lastIndexOf("/");
+        dir = slash >= 0 ? dir.slice(0, slash + 1) : "/";
+        pathname = orvalhoNormalizePath(dir + path);
+      }
+      return b.protocol + "//" + b.host + pathname + search + hash;
+    }
     var URLImpl = function URL(url, base) {
       url = String(url);
-      if (base && url.indexOf("://") === -1) {
-        base = String(base);
-        if (url.charAt(0) === "/") {
-          var m = base.match(/^(https?:\/\/[^\/]+)/);
-          url = (m ? m[1] : base) + url;
-        } else {
-          url = base.replace(/\/?$/, "/") + url;
-        }
+      if (base != null && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) {
+        url = orvalhoResolveURL(String(base), url);
       }
-      this.href = url;
-      var m2 = url.match(/^(https?:)\/\/([^\/\?#]+)([^?#]*)(\?[^#]*)?(#.*)?$/);
-      if (m2) {
-        this.protocol = m2[1];
-        this.host = m2[2];
-        this.hostname = m2[2].split(":")[0];
-        this.port = m2[2].indexOf(":") >= 0 ? m2[2].split(":")[1] : "";
-        this.pathname = m2[3] || "/";
-        this.search = m2[4] || "";
-        this.hash = m2[5] || "";
-        this.origin = this.protocol + "//" + this.host;
-      } else {
-        // Relative or path-only URL (still parse ?query)
+      var parsed = orvalhoParseAbsURL(url);
+      if (!parsed && url.charAt(0) === "/") {
+        // new URL("/abs") is invalid in Node; mlly still constructs it.
         var qAt = url.indexOf("?");
         var hAt = url.indexOf("#");
         var pathEnd = url.length;
         if (qAt >= 0) pathEnd = qAt;
         if (hAt >= 0 && hAt < pathEnd) pathEnd = hAt;
-        this.protocol = "";
-        this.host = "";
-        this.hostname = "";
-        this.port = "";
-        this.pathname = url.slice(0, pathEnd) || "/";
-        if (this.pathname.charAt(0) !== "/" && this.pathname.indexOf("://") === -1) {
-          this.pathname = "/" + this.pathname.replace(/^\//, "");
-        }
-        this.search = qAt >= 0 ? url.slice(qAt, hAt >= 0 ? hAt : url.length) : "";
-        this.hash = hAt >= 0 ? url.slice(hAt) : "";
-        this.origin = "";
-        this.href = url;
+        parsed = { protocol: "", host: "", pathname: url.slice(0, pathEnd) || "/", search: qAt >= 0 ? url.slice(qAt, hAt >= 0 ? hAt : url.length) : "", hash: hAt >= 0 ? url.slice(hAt) : "", opaque: false, pathish: true };
       }
+      if (!parsed) {
+        var err = new TypeError("Invalid URL");
+        err.code = "ERR_INVALID_URL";
+        throw err;
+      }
+      this.protocol = parsed.protocol;
+      this.host = parsed.host;
+      this.hostname = parsed.host.split(":")[0];
+      this.port = parsed.host.indexOf(":") >= 0 ? parsed.host.split(":").slice(1).join(":") : "";
+      this.pathname = parsed.pathname;
+      this.search = parsed.search;
+      this.hash = parsed.hash;
+      this.origin = parsed.protocol === "file:" || parsed.opaque || parsed.pathish ? "null" : parsed.protocol + "//" + parsed.host;
+      this.href = parsed.pathish
+        ? url
+        : parsed.opaque
+          ? parsed.protocol + parsed.pathname + parsed.search + parsed.hash
+          : parsed.protocol + "//" + parsed.host + parsed.pathname + parsed.search + parsed.hash;
       this.searchParams = new OrvalhoURLSearchParams(this.search);
     };
     URLImpl.canParse = function (url, base) {
@@ -292,6 +314,144 @@ const hostPolyfillScript = `
     globalThis.URL = URLImpl;
   } else if (globalThis.URL && globalThis.URL.prototype) {
     // Ensure instances get real searchParams if a broken URL already exists.
+  }
+  if (typeof globalThis.Blob !== "function") {
+    function OrvalhoBlob(parts, opts) {
+      this._parts = parts || [];
+      this.type = (opts && opts.type) || "";
+      var n = 0;
+      for (var i = 0; i < this._parts.length; i++) {
+        var p = this._parts[i];
+        n += p && typeof p.byteLength === "number" ? p.byteLength : String(p).length;
+      }
+      this.size = n;
+    }
+    OrvalhoBlob.prototype.arrayBuffer = function () { return Promise.resolve(new ArrayBuffer(this.size)); };
+    OrvalhoBlob.prototype.text = function () {
+      var out = "";
+      for (var i = 0; i < this._parts.length; i++) out += String(this._parts[i]);
+      return Promise.resolve(out);
+    };
+    OrvalhoBlob.prototype.slice = function () { return new OrvalhoBlob([], { type: this.type }); };
+    OrvalhoBlob.prototype.stream = function () {
+      return typeof ReadableStream === "function" ? new ReadableStream() : { getReader: function () { return { read: function () { return Promise.resolve({ done: true }); } }; } };
+    };
+    globalThis.Blob = OrvalhoBlob;
+  }
+  if (typeof globalThis.File !== "function") {
+    function OrvalhoFile(parts, name, opts) {
+      Blob.call(this, parts, opts);
+      this.name = name || "";
+      this.lastModified = (opts && opts.lastModified) || Date.now();
+    }
+    OrvalhoFile.prototype = Object.create(globalThis.Blob.prototype);
+    OrvalhoFile.prototype.constructor = OrvalhoFile;
+    globalThis.File = OrvalhoFile;
+  }
+  if (typeof globalThis.FormData !== "function") {
+    function OrvalhoFormData() { this._pairs = []; }
+    OrvalhoFormData.prototype.append = function (k, v) { this._pairs.push([String(k), v]); };
+    OrvalhoFormData.prototype.get = function (k) {
+      k = String(k);
+      for (var i = 0; i < this._pairs.length; i++) if (this._pairs[i][0] === k) return this._pairs[i][1];
+      return null;
+    };
+    OrvalhoFormData.prototype.has = function (k) { return this.get(k) !== null; };
+    OrvalhoFormData.prototype.set = function (k, v) { this.delete(k); this.append(k, v); };
+    OrvalhoFormData.prototype.delete = function (k) {
+      k = String(k);
+      this._pairs = this._pairs.filter(function (p) { return p[0] !== k; });
+    };
+    OrvalhoFormData.prototype.entries = function () {
+      var i = 0, pairs = this._pairs;
+      return { next: function () { return i >= pairs.length ? { done: true } : { done: false, value: pairs[i++] }; } };
+    };
+    globalThis.FormData = OrvalhoFormData;
+  }
+  if (typeof globalThis.FinalizationRegistry !== "function") {
+    function OrvalhoFinalizationRegistry() {}
+    OrvalhoFinalizationRegistry.prototype.register = function () {};
+    OrvalhoFinalizationRegistry.prototype.unregister = function () {};
+    globalThis.FinalizationRegistry = OrvalhoFinalizationRegistry;
+  }
+  if (typeof globalThis.AbortSignal !== "function") {
+    function OrvalhoAbortSignal() { this.aborted = false; this.reason = undefined; }
+    OrvalhoAbortSignal.prototype.addEventListener = function () {};
+    OrvalhoAbortSignal.prototype.removeEventListener = function () {};
+    OrvalhoAbortSignal.prototype.throwIfAborted = function () {
+      if (this.aborted) throw this.reason || new Error("aborted");
+    };
+    OrvalhoAbortSignal.abort = function (reason) {
+      var s = new OrvalhoAbortSignal();
+      s.aborted = true;
+      s.reason = reason;
+      return s;
+    };
+    OrvalhoAbortSignal.timeout = function () { return new OrvalhoAbortSignal(); };
+    OrvalhoAbortSignal.any = function () { return new OrvalhoAbortSignal(); };
+    function OrvalhoAbortController() { this.signal = new OrvalhoAbortSignal(); }
+    OrvalhoAbortController.prototype.abort = function (reason) {
+      this.signal.aborted = true;
+      this.signal.reason = reason;
+    };
+    globalThis.AbortSignal = OrvalhoAbortSignal;
+    globalThis.AbortController = OrvalhoAbortController;
+  }
+  if (typeof globalThis.MessagePort !== "function") {
+    function OrvalhoMessagePort() {}
+    OrvalhoMessagePort.prototype.postMessage = function () {};
+    OrvalhoMessagePort.prototype.start = function () {};
+    OrvalhoMessagePort.prototype.close = function () {};
+    OrvalhoMessagePort.prototype.addEventListener = function () {};
+    OrvalhoMessagePort.prototype.removeEventListener = function () {};
+    globalThis.MessagePort = OrvalhoMessagePort;
+  }
+  if (typeof globalThis.FinalizationRegistry !== "function") {
+    function OrvalhoFinalizationRegistry() {}
+    OrvalhoFinalizationRegistry.prototype.register = function () {};
+    OrvalhoFinalizationRegistry.prototype.unregister = function () { return false; };
+    globalThis.FinalizationRegistry = OrvalhoFinalizationRegistry;
+  }
+  if (typeof globalThis.WeakRef !== "function") {
+    function OrvalhoWeakRef(v) { this._v = v; }
+    OrvalhoWeakRef.prototype.deref = function () { return this._v; };
+    globalThis.WeakRef = OrvalhoWeakRef;
+  }
+  if (typeof globalThis.DOMException !== "function") {
+    function OrvalhoDOMException(message, name) {
+      this.message = message == null ? "" : String(message);
+      this.name = name == null ? "Error" : String(name);
+    }
+    OrvalhoDOMException.prototype = Object.create(Error.prototype);
+    OrvalhoDOMException.prototype.constructor = OrvalhoDOMException;
+    globalThis.DOMException = OrvalhoDOMException;
+  }
+  if (typeof globalThis.Event !== "function") {
+    function OrvalhoEvent(type, init) {
+      this.type = String(type);
+      this.bubbles = !!(init && init.bubbles);
+      this.cancelable = !!(init && init.cancelable);
+    }
+    globalThis.Event = OrvalhoEvent;
+  }
+  if (typeof globalThis.EventTarget !== "function") {
+    function OrvalhoEventTarget() { this._ls = {}; }
+    OrvalhoEventTarget.prototype.addEventListener = function (type, fn) {
+      type = String(type);
+      (this._ls[type] || (this._ls[type] = [])).push(fn);
+    };
+    OrvalhoEventTarget.prototype.removeEventListener = function (type, fn) {
+      type = String(type);
+      var a = this._ls[type];
+      if (!a) return;
+      this._ls[type] = a.filter(function (x) { return x !== fn; });
+    };
+    OrvalhoEventTarget.prototype.dispatchEvent = function (ev) {
+      var a = this._ls[ev && ev.type];
+      if (a) for (var i = 0; i < a.length; i++) try { a[i](ev); } catch (e) {}
+      return true;
+    };
+    globalThis.EventTarget = OrvalhoEventTarget;
   }
   if (typeof globalThis.queueMicrotask !== "function") {
     globalThis.queueMicrotask = function (fn) { Promise.resolve().then(fn); };
@@ -549,24 +709,6 @@ const hostPolyfillScript = `
     };
   }
 
-  if (typeof globalThis.WebAssembly === "undefined") {
-    var emptyExports = {};
-    globalThis.WebAssembly = {
-      compile: function () { return Promise.resolve({}); },
-      instantiate: function () {
-        return Promise.resolve({ instance: { exports: emptyExports }, module: {}, exports: emptyExports });
-      },
-      compileStreaming: function () { return Promise.resolve({}); },
-      instantiateStreaming: function () {
-        return Promise.resolve({ instance: { exports: emptyExports }, module: {}, exports: emptyExports });
-      },
-      Module: function () {},
-      Instance: function () { this.exports = emptyExports; },
-      Memory: function () { this.buffer = new ArrayBuffer(65536); },
-      Table: function () {},
-      validate: function () { return false; },
-    };
-  }
   if (typeof globalThis.Intl === "undefined") {
     function DTF() {}
     DTF.prototype.format = function (d) { return String(d); };
