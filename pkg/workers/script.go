@@ -173,21 +173,12 @@ func (iso *Isolate) pumpLocked(ctx context.Context) (bool, time.Duration, error)
 		return hasTimer || iso.loopHeld(), 0, err
 	}
 	httpN := iso.pollHTTP()
-	jobN, jobUsed := iso.pollPlugins()
-	timerN := 0
-	var err error
-	if jobUsed < jobPhaseBudget {
-		timerN, err = iso.drainOneTickLocked(ctx)
-	}
+	jobN := iso.pollPlugins()
+	timerN, err := iso.drainOneTickLocked(ctx)
 	used := iso.now().Sub(t0)
 	if httpN > 0 || jobN > 0 || timerN > 0 || err != nil {
-		if iso.lastJob != "" {
-			iso.trace("loop #%d pump http=%d jobs=%d job=%s timers=%d hold=%s used=%s",
-				n, httpN, jobN, iso.lastJob, timerN, iso.loopHoldLabel(), used.Round(time.Millisecond))
-		} else {
-			iso.trace("loop #%d pump http=%d jobs=%d timers=%d hold=%s used=%s",
-				n, httpN, jobN, timerN, iso.loopHoldLabel(), used.Round(time.Millisecond))
-		}
+		iso.trace("loop #%d pump http=%d jobs=%d timers=%d hold=%s used=%s",
+			n, httpN, jobN, timerN, iso.loopHoldLabel(), used.Round(time.Millisecond))
 	}
 	if err != nil {
 		return false, used, err
@@ -197,7 +188,10 @@ func (iso *Isolate) pumpLocked(ctx context.Context) (bool, time.Duration, error)
 }
 
 func (iso *Isolate) hasReadyWork() bool {
-	if len(iso.httpQ) > 0 || len(iso.httpCh) > 0 || len(iso.pluginCh) > 0 || len(iso.jobQ) > 0 {
+	iso.jobMu.Lock()
+	njob := len(iso.jobQ)
+	iso.jobMu.Unlock()
+	if len(iso.httpQ) > 0 || len(iso.httpCh) > 0 || njob > 0 {
 		return true
 	}
 	if d, ok := iso.timers.nextDeadline(); ok && !d.After(iso.now()) {
@@ -207,7 +201,10 @@ func (iso *Isolate) hasReadyWork() bool {
 }
 
 func (iso *Isolate) loopHeld() bool {
-	return iso.listeners > 0 || iso.inFlight > 0 || iso.esbuildBusy > 0 || iso.ioBusy > 0 || len(iso.httpQ) > 0 || len(iso.jobQ) > 0
+	iso.jobMu.Lock()
+	njob := len(iso.jobQ)
+	iso.jobMu.Unlock()
+	return iso.listeners > 0 || iso.inFlight > 0 || iso.esbuildBusy > 0 || iso.ioBusy > 0 || len(iso.httpQ) > 0 || njob > 0
 }
 
 func (iso *Isolate) loopHoldLabel() string {
@@ -227,8 +224,11 @@ func (iso *Isolate) loopHoldLabel() string {
 	if len(iso.httpQ) > 0 {
 		p = append(p, fmt.Sprintf("httpQ=%d", len(iso.httpQ)))
 	}
-	if len(iso.jobQ) > 0 {
-		p = append(p, fmt.Sprintf("jobs=%d", len(iso.jobQ)))
+	iso.jobMu.Lock()
+	njob := len(iso.jobQ)
+	iso.jobMu.Unlock()
+	if njob > 0 {
+		p = append(p, fmt.Sprintf("jobs=%d", njob))
 	}
 	if _, ok := iso.timers.nextDeadline(); ok {
 		p = append(p, "timer")
@@ -262,18 +262,6 @@ func (iso *Isolate) waitForWorkLocked(ctx context.Context, wait time.Duration) e
 		why = "timer"
 	case <-iso.wake:
 		why = "kick"
-	case job := <-iso.pluginCh:
-		iso.mu.Lock()
-		iso.jobQ = append(iso.jobQ, job)
-		for {
-			select {
-			case job := <-iso.pluginCh:
-				iso.jobQ = append(iso.jobQ, job)
-			default:
-				iso.trace("loop #%d wake job hold=%s", iso.loopN, iso.loopHoldLabel())
-				return nil
-			}
-		}
 	case job := <-iso.httpCh:
 		iso.mu.Lock()
 		iso.httpQ = append(iso.httpQ, job)
@@ -303,77 +291,47 @@ type loopJob struct {
 
 // postJob queues fn on the isolate thread and wakes the loop. It does
 // not wait. I/O completions use this; runOnIsolate waits for a result.
-// name is the hot-path label on the next pump line.
 func (iso *Isolate) postJob(name string, fn func()) {
-	if iso == nil || fn == nil || iso.pluginCh == nil {
+	if iso == nil || fn == nil {
 		return
 	}
-	iso.pluginCh <- loopJob{name: name, fn: fn}
+	iso.jobMu.Lock()
+	iso.jobQ = append(iso.jobQ, loopJob{name: name, fn: fn})
+	iso.jobMu.Unlock()
 	iso.kick()
 }
 
-// jobPhaseBudget is how long pump spends on I/O completions before
-// yielding to HTTP/timers. Tiny boot reads batch; an 11s SSR callback
-// is one pump with job=readFile <path>.
-const jobPhaseBudget = 50 * time.Millisecond
+func (iso *Isolate) takeJobs() []loopJob {
+	iso.jobMu.Lock()
+	jobs := iso.jobQ
+	iso.jobQ = nil
+	iso.jobMu.Unlock()
+	return jobs
+}
 
-func (iso *Isolate) pollPlugins() (int, time.Duration) {
-	if iso == nil {
-		return 0, 0
-	}
-	iso.lastJob = ""
-	if iso.pluginCh != nil {
-		for {
-			select {
-			case job := <-iso.pluginCh:
-				iso.jobQ = append(iso.jobQ, job)
-			default:
-				goto run
-			}
-		}
-	}
-run:
-	if len(iso.jobQ) == 0 {
-		return 0, 0
-	}
-	t0 := iso.now()
-	n := 0
-	var slow string
-	for len(iso.jobQ) > 0 {
-		job := iso.jobQ[0]
-		iso.jobQ = iso.jobQ[1:]
+func (iso *Isolate) pollPlugins() int {
+	jobs := iso.takeJobs()
+	for _, job := range jobs {
 		j0 := iso.now()
 		if job.fn != nil {
 			job.fn()
 		}
-		n++
-		took := iso.now().Sub(j0)
-		if took >= 10*time.Millisecond && job.name != "" {
-			slow = job.name
+		if took := iso.now().Sub(j0); took >= 10*time.Millisecond && job.name != "" {
 			iso.trace("loop #%d job %s used=%s", iso.loopN, job.name, took.Round(time.Millisecond))
 		}
-		if iso.now().Sub(t0) >= jobPhaseBudget {
-			break
-		}
 	}
-	iso.lastJob = slow
-	return n, iso.now().Sub(t0)
+	return len(jobs)
 }
 
 func (iso *Isolate) runOnIsolate(fn func()) {
 	if iso == nil || fn == nil {
 		return
 	}
-	if iso.pluginCh == nil {
-		fn()
-		return
-	}
 	done := make(chan struct{})
-	iso.pluginCh <- loopJob{name: "host", fn: func() {
+	iso.postJob("host", func() {
 		fn()
 		close(done)
-	}}
-	iso.kick()
+	})
 	<-done
 }
 

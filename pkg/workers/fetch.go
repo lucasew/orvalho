@@ -180,7 +180,7 @@ func (iso *Isolate) awaitPromiseLocked(ctx context.Context, v goja.Value, maxWai
 			if !deadline.IsZero() && !iso.now().Before(deadline) {
 				return nil, fmt.Errorf("%w after %s", ErrFetchTimeout, maxWait)
 			}
-			// Same wait sources as runLoop (timers, pluginCh, wake, httpCh)
+			// Same wait sources as runLoop (timers, wake, httpCh)
 			// but do not dispatch HTTP: that belongs at the top of runLoop.
 			iso.pollPlugins()
 			if _, err := iso.drainOneTickLocked(ctx); err != nil {

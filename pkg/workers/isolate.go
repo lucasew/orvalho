@@ -65,13 +65,10 @@ type Isolate struct {
 	inFlight int
 	// httpQ is accepted requests waiting to be dispatched from runLoop.
 	httpQ []*httpJob
-	// pluginCh is the isolate-thread job queue (esbuild onLoad/onResolve,
-	// socket data). goja is not safe on the worker/read goroutines.
-	pluginCh chan loopJob
-	// jobQ is pluginCh work stashed by wait; pump runs one job after HTTP.
-	jobQ []loopJob
-	// lastJob is the name of the job the last pollPlugins ran, if any.
-	lastJob string
+	// jobMu/jobQ is the isolate-thread inbox (readFile, socket, esbuild).
+	// Off-thread producers append and kick; wait never runs these.
+	jobMu sync.Mutex
+	jobQ  []loopJob
 	// esbuildBusy is isolate-thread builds waiting off-thread (so the
 	// loop does not go idle before onLoad callbacks arrive).
 	esbuildBusy int
@@ -111,9 +108,8 @@ func New(script string, opts Options) *Isolate {
 		opts:     opts.withDefaults(),
 		timers:   newTimerTable(),
 		now:      time.Now,
-		httpCh:   make(chan *httpJob, 16),
-		wake:     make(chan struct{}, 1),
-		pluginCh: make(chan loopJob, 32),
+		httpCh: make(chan *httpJob, 16),
+		wake:   make(chan struct{}, 1),
 	}
 	iso.installTimers()
 	iso.installWebTypes()
