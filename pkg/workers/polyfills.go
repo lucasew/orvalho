@@ -16,7 +16,9 @@ func (iso *Isolate) installHostPolyfills() {
 		mustRuntimeSet(iso.vm, "global", g)
 	}
 
-	// atob / btoa / URL / streams / crypto / Intl — one script for guest globals.
+	// URL / streams / crypto / Intl — one script for guest globals.
+	// atob / btoa are native (installTextCodec); the JS versions
+	// concatenated fromCharCode per byte.
 	_, _ = iso.vm.RunString(hostPolyfillScript)
 	iso.installTextCodec()
 	iso.installWebAssembly()
@@ -49,45 +51,6 @@ func (iso *Isolate) bindConsole() {
 // hostPolyfillScript is injected into every isolate (before guest code).
 const hostPolyfillScript = `
 (function () {
-  var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
-  if (typeof globalThis.btoa !== "function") {
-    globalThis.btoa = function (input) {
-      input = String(input);
-      var str = "", i = 0;
-      while (i < input.length) {
-        var c1 = input.charCodeAt(i++);
-        var c2 = input.charCodeAt(i++);
-        var c3 = input.charCodeAt(i++);
-        var e1 = c1 >> 2;
-        var e2 = ((c1 & 3) << 4) | (c2 >> 4);
-        var e3 = ((c2 & 15) << 2) | (c3 >> 6);
-        var e4 = c3 & 63;
-        if (isNaN(c2)) { e3 = e4 = 64; }
-        else if (isNaN(c3)) { e4 = 64; }
-        str += B64.charAt(e1) + B64.charAt(e2) + B64.charAt(e3) + B64.charAt(e4);
-      }
-      return str;
-    };
-  }
-  if (typeof globalThis.atob !== "function") {
-    globalThis.atob = function (input) {
-      input = String(input).replace(/[^A-Za-z0-9\+\/\=]/g, "");
-      var str = "", i = 0;
-      while (i < input.length) {
-        var e1 = B64.indexOf(input.charAt(i++));
-        var e2 = B64.indexOf(input.charAt(i++));
-        var e3 = B64.indexOf(input.charAt(i++));
-        var e4 = B64.indexOf(input.charAt(i++));
-        var c1 = (e1 << 2) | (e2 >> 4);
-        var c2 = ((e2 & 15) << 4) | (e3 >> 2);
-        var c3 = ((e3 & 3) << 6) | e4;
-        str += String.fromCharCode(c1);
-        if (e3 !== 64) str += String.fromCharCode(c2);
-        if (e4 !== 64) str += String.fromCharCode(c3);
-      }
-      return str;
-    };
-  }
   // Always install URLSearchParams: goja has none, and a stub get() that
   // returns null breaks Astro.url.searchParams (e.g. /search?query=…).
   function OrvalhoURLSearchParams(init) {

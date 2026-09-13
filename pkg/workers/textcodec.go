@@ -22,6 +22,9 @@ func (iso *Isolate) installTextCodec() {
 	decProto := iso.vm.Get("TextDecoder").ToObject(iso.vm).Get("prototype").ToObject(iso.vm)
 	mustSet(decProto, "decode", iso.textDecode)
 	mustSet(decProto, "encoding", "utf-8")
+	mustRuntimeSet(iso.vm, "btoa", iso.jsBtoa)
+	mustRuntimeSet(iso.vm, "atob", iso.jsAtob)
+	mustRuntimeSet(iso.vm, "__orvalhoBufferToString", iso.jsBufferToString)
 }
 
 func (iso *Isolate) textEncode(call goja.FunctionCall) goja.Value {

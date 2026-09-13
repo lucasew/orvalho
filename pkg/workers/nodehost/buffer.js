@@ -262,41 +262,7 @@ Buffer.prototype.write = function (str, offset, length, enc) {
 };
 
 Buffer.prototype.toString = function (enc, start, end) {
-  start = start >>> 0;
-  end = end == null ? this.length : end >>> 0;
-  if (end > this.length) end = this.length;
-  if (start >= end) return '';
-  var slice = Uint8Array.prototype.slice.call(this, start, end);
-  enc = normEnc(enc);
-  if (enc === 'hex') {
-    var hex = '';
-    for (var i = 0; i < slice.length; i++) {
-      var h = slice[i].toString(16);
-      hex += h.length === 1 ? '0' + h : h;
-    }
-    return hex;
-  }
-  if (enc === 'base64' || enc === 'base64url') {
-    var bin = '';
-    for (var j = 0; j < slice.length; j++) bin += String.fromCharCode(slice[j]);
-    var b64 = btoa(bin);
-    if (enc === 'base64url') return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    return b64;
-  }
-  if (enc === 'latin1' || enc === 'ascii') {
-    var s = '';
-    var mask = enc === 'ascii' ? 127 : 255;
-    for (var k = 0; k < slice.length; k++) s += String.fromCharCode(slice[k] & mask);
-    return s;
-  }
-  if (enc === 'utf16le') {
-    var u = '';
-    for (var p = 0; p + 1 < slice.length; p += 2) {
-      u += String.fromCharCode(slice[p] | (slice[p + 1] << 8));
-    }
-    return u;
-  }
-  return new TextDecoder().decode(slice);
+  return __orvalhoBufferToString(this, enc, start, end);
 };
 
 Buffer.prototype.toJSON = function () {

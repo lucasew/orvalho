@@ -50,3 +50,38 @@ func TestNodeBufferRoundtrip(t *testing.T) {
 		if (sl[0] !== 3) throw new Error("slice must overlap");
 	`)
 }
+
+func TestNodeBufferToStringEncodings(t *testing.T) {
+	runNodeBuffer(t, `
+		var b = Buffer.from([0x68, 0xc3, 0xa9]);
+		if (b.toString() !== "hé") throw new Error("utf8 " + b.toString());
+		if (b.toString("utf8") !== "hé") throw new Error("utf8 named");
+		if (Buffer.from("dead", "hex").toString("hex") !== "dead") throw new Error("hex");
+		if (Buffer.from("hi").toString("base64") !== "aGk=") throw new Error("b64 " + Buffer.from("hi").toString("base64"));
+		if (Buffer.from("hi").toString("base64url") !== "aGk") throw new Error("b64url");
+		var hi = Buffer.from([0xff, 0x00, 0x41]);
+		if (hi.toString("latin1").length !== 3 || hi.toString("latin1").charCodeAt(0) !== 255) throw new Error("latin1");
+		if (hi.toString("ascii").charCodeAt(0) !== 127) throw new Error("ascii " + hi.toString("ascii").charCodeAt(0));
+		var u = Buffer.from("é", "utf16le");
+		if (u.toString("utf16le") !== "é") throw new Error("utf16le " + u.toString("utf16le"));
+		if (Buffer.from("hello").toString("utf8", 1, 4) !== "ell") throw new Error("slice " + Buffer.from("hello").toString("utf8", 1, 4));
+		if (btoa("hi") !== "aGk=") throw new Error("btoa " + btoa("hi"));
+		if (atob("aGk=") !== "hi") throw new Error("atob " + atob("aGk="));
+		var raw = String.fromCharCode(255, 0, 65);
+		if (atob(btoa(raw)).charCodeAt(0) !== 255) throw new Error("atob latin1");
+	`)
+}
+
+func TestNodeBufferToStringLarge(t *testing.T) {
+	// 1MiB latin1. The old JS path did s += fromCharCode per byte
+	// (~500GiB of goja Concat). Native decode must stay O(n).
+	runNodeBuffer(t, `
+		var n = 1024 * 1024;
+		var b = Buffer.alloc(n);
+		for (var i = 0; i < n; i++) b[i] = 0xc0;
+		var s = b.toString("latin1");
+		if (s.length !== n) throw new Error("len " + s.length);
+		if (s.charCodeAt(0) !== 0xc0 || s.charCodeAt(n - 1) !== 0xc0) throw new Error("bytes");
+		if (btoa(Buffer.from("x").toString("latin1")) !== "eA==") throw new Error("btoa");
+	`)
+}

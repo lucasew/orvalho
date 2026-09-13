@@ -419,6 +419,12 @@ func (iso *Isolate) installBuffer() {
 	}
 	if b := o.Get("Buffer"); b != nil && !goja.IsUndefined(b) {
 		mustRuntimeSet(iso.vm, "Buffer", b)
+		if proto, ok := b.ToObject(iso.vm).Get("prototype").(*goja.Object); ok && proto != nil {
+			mustSet(proto, "toString", func(call goja.FunctionCall) goja.Value {
+				args := append([]goja.Value{call.This}, call.Arguments...)
+				return iso.jsBufferToString(goja.FunctionCall{This: call.This, Arguments: args})
+			})
+		}
 	}
 }
 
