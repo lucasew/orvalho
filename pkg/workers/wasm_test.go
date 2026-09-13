@@ -173,6 +173,35 @@ func TestWebAssemblyMemoryViewSurvivesGrow(t *testing.T) {
 	}
 }
 
+func TestWebAssemblyMemoryNotPregrown(t *testing.T) {
+	// (module (memory (export "mem") 1)) must stay one page.
+	// Pregrowing every instance to 64MiB doubled host+guest heaps.
+	raw, err := hex.DecodeString("0061736d010000000503010001070701036d656d0200")
+	if err != nil {
+		t.Fatal(err)
+	}
+	iso := New("", Options{})
+	err = iso.ScriptMain(t.Context(), `
+		var bytes = new Uint8Array([`+bytesToJS(raw)+`]);
+		var inst = new WebAssembly.Instance(new WebAssembly.Module(bytes));
+		if (inst.exports.mem.buffer.byteLength !== 65536) {
+			throw new Error("pregrown " + inst.exports.mem.buffer.byteLength);
+		}
+		var view = new Uint8Array(inst.exports.mem.buffer);
+		view[0] = 9;
+		var prev = inst.exports.mem.grow(0);
+		if (prev !== 1) throw new Error("grow(0) pages " + prev);
+		if (inst.exports.mem.buffer.byteLength !== 65536) {
+			throw new Error("grow(0) resized " + inst.exports.mem.buffer.byteLength);
+		}
+		if (view.byteLength !== 65536) throw new Error("grow(0) detached");
+		if (view[0] !== 9) throw new Error("grow(0) lost write");
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWebAssemblyMemoryGrowCap(t *testing.T) {
 	raw, err := hex.DecodeString("0061736d010000000503010001070701036d656d0200")
 	if err != nil {

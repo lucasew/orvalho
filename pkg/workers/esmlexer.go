@@ -106,6 +106,23 @@ func (iso *Isolate) parseESMLexer(src string) (imps []esmImport, exps []esmExpor
 	u16 := utf16.Encode([]rune(src))
 	n := len(u16)
 	ctx := iso.activeCtx
+	// Official lexer.js grows to __heap_base + 4*len before sa();
+	// the C guest does not memory.grow itself.
+	heapBase := uint32(0)
+	if g := st.mod.ExportedGlobal("__heap_base"); g != nil {
+		heapBase = uint32(g.Get())
+	}
+	need := heapBase + uint32(n+1)*4
+	if size := st.mem.Size(); need > size {
+		pages := (need - size + 65535) / 65536
+		if uint64(size)+uint64(pages)*65536 > wasmJSMemMax {
+			return nil, nil, false, false, fmt.Errorf("es-module-lexer: source too large")
+		}
+		if _, ok := st.mem.Grow(pages); !ok {
+			return nil, nil, false, false, fmt.Errorf("es-module-lexer: memory grow")
+		}
+		st.bindJSMem(iso)
+	}
 	addr, err := wasmCallI32(ctx, st, "sa", uint64(n))
 	if err != nil {
 		return nil, nil, false, false, err

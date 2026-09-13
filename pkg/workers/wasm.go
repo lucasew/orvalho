@@ -446,23 +446,11 @@ func (iso *Isolate) wrapWasmFn(st *wasmInstance, fn api.Function) func(goja.Func
 	}
 }
 
-// wasmJSMemMin is the starting wasm memory we give Go wasm_exec.
-// jsBuf always matches mem.Size(); a larger JS view than wasm (or the
-// reverse) makes es-module-lexer grow forever and OOM.
-const wasmJSMemMin = 64 << 20
-
 // wasmJSMemMax caps Memory.grow. A wrong heap_base used to request
 // gigabytes and take the host down.
 const wasmJSMemMax = 256 << 20
 
 func (st *wasmInstance) attachMemory(iso *Isolate, exports *goja.Object, name string, mem api.Memory) {
-	if mem.Size() < wasmJSMemMin {
-		need := wasmJSMemMin - mem.Size()
-		pages := (need + 65535) / 65536
-		if _, ok := mem.Grow(uint32(pages)); !ok {
-			iso.trace("wasm memory pregrow %d pages failed, size=%d", pages, mem.Size())
-		}
-	}
 	st.mem = mem
 	st.memObj = iso.vm.NewObject()
 	st.bindJSMem(iso)
@@ -493,20 +481,27 @@ func (st *wasmInstance) attachMemory(iso *Isolate, exports *goja.Object, name st
 	}
 }
 
-// bindJSMem makes memory.buffer a fresh ArrayBuffer whose length is
-// mem.Size() and detaches the previous one. The WebAssembly JS API
-// detaches on grow; rollup's wasm-bindgen cache only refreshes a
-// Uint8Array when its byteLength is 0, so a live stale view writes
-// into the old buffer and parse then slices a garbage length (OOM).
+// bindJSMem exposes memory.buffer at mem.Size(). Prefer wazero's own
+// backing so the host does not keep a second full copy. A new
+// ArrayBuffer is created only when size or backing changes; the
+// previous one is detached (wasm-bindgen refreshes cached views only
+// when byteLength is 0).
 func (st *wasmInstance) bindJSMem(iso *Isolate) {
 	size := st.mem.Size()
 	if size > wasmJSMemMax {
 		panic(iso.vm.NewTypeError("WebAssembly.Memory: exceeds maximum"))
 	}
-	buf := make([]byte, size)
-	copy(buf, st.jsBuf)
-	if data, ok := st.mem.Read(0, size); ok {
-		copy(buf, data)
+	buf, ok := st.mem.Read(0, size)
+	if !ok {
+		if uint32(len(st.jsBuf)) != size {
+			nb := make([]byte, size)
+			copy(nb, st.jsBuf)
+			st.jsBuf = nb
+		}
+		buf = st.jsBuf
+	}
+	if sameBacking(st.jsBuf, buf) && st.jsAB != (goja.ArrayBuffer{}) && !st.jsAB.Detached() {
+		return
 	}
 	prev := st.jsAB
 	st.jsBuf = buf
@@ -515,6 +510,16 @@ func (st *wasmInstance) bindJSMem(iso *Isolate) {
 	if prev != (goja.ArrayBuffer{}) {
 		prev.Detach()
 	}
+}
+
+func sameBacking(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	if len(a) == 0 {
+		return true
+	}
+	return &a[0] == &b[0]
 }
 
 func (st *wasmInstance) rebindMemory(iso *Isolate) {
@@ -537,6 +542,10 @@ func (st *wasmInstance) syncToWasm() {
 	if mem.Size() < n {
 		n = mem.Size()
 	}
+	data, ok := mem.Read(0, n)
+	if ok && sameBacking(st.jsBuf[:n], data) {
+		return
+	}
 	_ = mem.Write(0, st.jsBuf[:n])
 }
 
@@ -553,6 +562,9 @@ func (st *wasmInstance) syncFromWasm() {
 		n = mem.Size()
 	}
 	if data, ok := mem.Read(0, n); ok {
+		if sameBacking(st.jsBuf[:n], data) {
+			return
+		}
 		copy(st.jsBuf, data)
 	}
 }
