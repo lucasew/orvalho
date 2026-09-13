@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/lewtec/lewkit/x/profile"
 	"github.com/spf13/cobra"
@@ -15,10 +17,12 @@ import (
 )
 
 var (
-	dataDir    string
-	configPath string
-	verbose    bool
-	pprofDir   string
+	dataDir     string
+	configPath  string
+	verbose     bool
+	pprofDir    string
+	profileStop context.CancelFunc
+	profileDone chan struct{}
 )
 
 // rootCmd is the base command for the orvalho CLI.
@@ -36,8 +40,8 @@ flag when host state is required — there is no implicit discovery path.`,
 
 // Execute runs the root command.
 func Execute() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "orvalho: %v\n", err)
 		return err
@@ -54,9 +58,23 @@ func init() {
 		if pprofDir == "" {
 			return nil
 		}
+		pctx, cancel := context.WithCancel(cmd.Context())
+		profileStop = cancel
+		profileDone = make(chan struct{})
 		p := profile.NewProfile(pprofDir)
-		go p.Run(cmd.Context())
+		go func() {
+			defer close(profileDone)
+			_ = p.Run(pctx)
+		}()
 		return nil
+	}
+	rootCmd.PersistentPostRun = func(cmd *cobra.Command, args []string) {
+		if profileStop != nil {
+			profileStop()
+		}
+		if profileDone != nil {
+			<-profileDone
+		}
 	}
 
 	rootCmd.AddCommand(versionCmd)
