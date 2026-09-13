@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
+	lewcmd "github.com/lewtec/lewkit/x/cmd"
 
 	"github.com/lucasew/orvalho/pkg/dependency"
 	"github.com/lucasew/orvalho/pkg/imports"
@@ -21,49 +21,31 @@ import (
 	"github.com/lucasew/orvalho/pkg/workers/bundle"
 )
 
-var scriptCmd = &cobra.Command{
-	Use:   "script",
-	Short: "Run a Script as main (Node-compatible, not default.fetch)",
+type scriptCmd struct {
+	RunCmd *scriptRunCmd `cmd:"run" help:"evaluate a file or package.json script as main"`
 }
 
-var scriptRunCmd = &cobra.Command{
-	Use:   "run [target] [args...]",
-	Short: "Evaluate a file or package.json script as main",
-	Long: `Evaluate a Script target as CommonJS main. default.fetch is not required.
-
-Target is a file path, or a package.json script name when the path is not a file.
-package.json scripts run through sh -c with a scoped PATH whose node entry is
-this CLI (no host Node.js) and node_modules/.bin. --data-dir is not required.`,
-	Args: cobra.MinimumNArgs(1),
-	RunE: runScriptRun,
+type scriptRunCmd struct {
+	Target lewcmd.StringArg
+	Rest   []lewcmd.StringArg
 }
 
-func init() {
-	scriptCmd.AddCommand(scriptRunCmd)
-	rootCmd.AddCommand(scriptCmd)
-}
-
-func runScriptRun(cmd *cobra.Command, args []string) error {
-	if verbose {
-		if err := os.Setenv("ORVALHO_VERBOSE", "1"); err != nil {
-			return err
-		}
-	}
+func (s *scriptRunCmd) Run(ctx context.Context) error {
 	dir, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	file, shell, err := resolveScriptTarget(dir, args[0])
+	target := s.Target.Value()
+	file, shell, err := resolveScriptTarget(dir, target)
 	if err != nil {
 		return err
 	}
-
-	ctx := cmd.Context()
+	extra := lewcmd.Values(s.Rest)
 	if file != "" {
-		return runScriptFile(ctx, dir, file, args[1:])
+		return runScriptFile(ctx, dir, file, extra)
 	}
-	if len(args) > 1 {
-		shell = shell + " " + strings.Join(args[1:], " ")
+	if len(extra) > 0 {
+		shell = shell + " " + strings.Join(extra, " ")
 	}
 	return runPackageScript(ctx, dir, shell)
 }

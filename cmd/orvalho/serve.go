@@ -8,58 +8,28 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
-	"github.com/spf13/cobra"
+	lewcmd "github.com/lewtec/lewkit/x/cmd"
 
 	"github.com/lucasew/orvalho/pkg/ovpkg"
 	"github.com/lucasew/orvalho/pkg/workers"
 	"github.com/lucasew/orvalho/pkg/workers/bundle"
 )
 
-var (
-	serveAddr     string
-	serveVarFlags []string
-	serveEnvFile  string
-)
-
-var serveCmd = &cobra.Command{
-	Use:   "serve [path]",
-	Short: "Serve one package (zip or directory) over local HTTP",
-	Long: `Load an Orvalho package from a zip file or directory (orvalho.cue + agents)
-and serve it on a local HTTP address by invoking default.fetch for each request.
-
-This is a development convenience: no mesh, no manager pairing, no package
-signature checks. --data-dir is not required.
-
-Outside values fill runtime.env (then CUE projects to agents.*.env):
-  --var NAME=value (repeatable, highest precedence)
-  --env-file path (.env / .dev.vars KEY=value lines)
-  process environment for keys referenced by the package (declared fields only after projection)
-
-Exactly one agent is required. CUE or binding failures never-allocate (exit before listen).
-
-Entry convention: Workers-shaped default export with fetch(request, env, ctx).
-Multi-file ESM entries (import/export) are bundled on load via esbuild (needs esbuild on PATH).`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runServe,
+type serveCmd struct {
+	Addr    lewcmd.StringArg   `long:"addr" help:"listen address (default :8787, or :PORT from package)"`
+	EnvFile lewcmd.StringArg   `long:"env-file" help:"path to .env / .dev.vars for runtime.env"`
+	Var     []lewcmd.StringArg `long:"var" help:"runtime.env NAME=value (repeatable)"`
+	Path    lewcmd.StringArg
 }
 
-func init() {
-	serveCmd.Flags().StringVar(&serveAddr, "addr", "", "listen address (default :8787, or :PORT from package port/publish.port)")
-	serveCmd.Flags().StringArrayVar(&serveVarFlags, "var", nil, "runtime.env entry NAME=value (repeatable; overrides env file and process env)")
-	serveCmd.Flags().StringVar(&serveEnvFile, "env-file", "", "path to .env / .dev.vars (KEY=value lines) for runtime.env")
-	rootCmd.AddCommand(serveCmd)
-}
-
-func runServe(cmd *cobra.Command, args []string) error {
-	path := "."
-	if len(args) == 1 {
-		path = args[0]
+func (s *serveCmd) Run(ctx context.Context) error {
+	path := s.Path.Value()
+	if path == "" {
+		path = "."
 	}
 
 	pkg, err := ovpkg.OpenPath(path)
@@ -67,7 +37,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("open package: %w", err)
 	}
 
-	runtimeEnv, err := collectServeRuntimeEnv(serveVarFlags, serveEnvFile)
+	runtimeEnv, err := collectServeRuntimeEnv(lewcmd.Values(s.Var), s.EnvFile.Value())
 	if err != nil {
 		return err
 	}
@@ -105,7 +75,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Fetch:    workers.HTTPFetch(workers.EgressList(egress), nil, 0),
 	})
 
-	addr := serveAddr
+	addr := s.Addr.Value()
 	if addr == "" {
 		if port, err := pkg.Port(); err != nil {
 			return err
@@ -115,9 +85,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 			addr = ":8787"
 		}
 	}
-
-	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -130,7 +97,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	actual := ln.Addr().String()
-	fmt.Fprintf(cmd.OutOrStdout(), "orvalho serve: %s (agent %s entry %s) on http://%s\n", path, agent.Name, agent.Entrypoint, actual)
+	fmt.Printf("orvalho serve: %s (agent %s entry %s) on http://%s\n", path, agent.Name, agent.Entrypoint, actual)
 
 	errCh := make(chan error, 1)
 	go func() {
