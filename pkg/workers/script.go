@@ -173,15 +173,15 @@ func (iso *Isolate) pumpLocked(ctx context.Context) (bool, time.Duration, error)
 		return hasTimer || iso.loopHeld(), 0, err
 	}
 	httpN := iso.pollHTTP()
-	jobN := iso.pollPlugins()
+	jobN, jobUsed := iso.pollPlugins()
 	timerN := 0
 	var err error
-	if jobN == 0 {
-		timerN, err = iso.runOneDueTimerLocked(ctx)
+	if jobUsed < jobPhaseBudget {
+		timerN, err = iso.drainOneTickLocked(ctx)
 	}
 	used := iso.now().Sub(t0)
 	if httpN > 0 || jobN > 0 || timerN > 0 || err != nil {
-		if jobN > 0 && iso.lastJob != "" {
+		if iso.lastJob != "" {
 			iso.trace("loop #%d pump http=%d jobs=%d job=%s timers=%d hold=%s used=%s",
 				n, httpN, jobN, iso.lastJob, timerN, iso.loopHoldLabel(), used.Round(time.Millisecond))
 		} else {
@@ -312,9 +312,14 @@ func (iso *Isolate) postJob(name string, fn func()) {
 	iso.kick()
 }
 
-func (iso *Isolate) pollPlugins() int {
+// jobPhaseBudget is how long pump spends on I/O completions before
+// yielding to HTTP/timers. Tiny boot reads batch; an 11s SSR callback
+// is one pump with job=readFile <path>.
+const jobPhaseBudget = 50 * time.Millisecond
+
+func (iso *Isolate) pollPlugins() (int, time.Duration) {
 	if iso == nil {
-		return 0
+		return 0, 0
 	}
 	iso.lastJob = ""
 	if iso.pluginCh != nil {
@@ -329,15 +334,30 @@ func (iso *Isolate) pollPlugins() int {
 	}
 run:
 	if len(iso.jobQ) == 0 {
-		return 0
+		return 0, 0
 	}
-	job := iso.jobQ[0]
-	iso.jobQ = iso.jobQ[1:]
-	iso.lastJob = job.name
-	if job.fn != nil {
-		job.fn()
+	t0 := iso.now()
+	n := 0
+	var slow string
+	for len(iso.jobQ) > 0 {
+		job := iso.jobQ[0]
+		iso.jobQ = iso.jobQ[1:]
+		j0 := iso.now()
+		if job.fn != nil {
+			job.fn()
+		}
+		n++
+		took := iso.now().Sub(j0)
+		if took >= 10*time.Millisecond && job.name != "" {
+			slow = job.name
+			iso.trace("loop #%d job %s used=%s", iso.loopN, job.name, took.Round(time.Millisecond))
+		}
+		if iso.now().Sub(t0) >= jobPhaseBudget {
+			break
+		}
 	}
-	return 1
+	iso.lastJob = slow
+	return n, iso.now().Sub(t0)
 }
 
 func (iso *Isolate) runOnIsolate(fn func()) {

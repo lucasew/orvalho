@@ -211,33 +211,6 @@ func exportPromise(v goja.Value) (*goja.Promise, bool) {
 	return p, ok
 }
 
-// runOneDueTimerLocked fires at most one due timer. Pump uses this so a
-// long guest callback is one loop turn, not a batch with other work.
-func (iso *Isolate) runOneDueTimerLocked(ctx context.Context) (int, error) {
-	if err := ctx.Err(); err != nil {
-		return 0, err
-	}
-	stopWatch := iso.watchInterrupt(ctx)
-	defer stopWatch()
-	now := iso.now()
-	t := iso.timers.popDue(now)
-	if t == nil {
-		_, err := iso.vm.RunString("")
-		if err != nil {
-			return 0, mapJSError(ctx, err)
-		}
-		return 0, nil
-	}
-	_, err := t.callback(goja.Undefined(), t.args...)
-	if err != nil {
-		return 1, mapJSError(ctx, err)
-	}
-	if t.interval > 0 {
-		iso.timers.rescheduleInterval(t, now)
-	}
-	return 1, nil
-}
-
 // drainOneTickLocked runs due timers for one step without re-taking mu.
 // Mirrors Tick's timer phase (script already initialized).
 func (iso *Isolate) drainOneTickLocked(ctx context.Context) (int, error) {
