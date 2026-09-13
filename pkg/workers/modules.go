@@ -380,11 +380,14 @@ func wrapCJS(source string) string {
 
 func wrapCJSFn(source string, async bool) string {
 	var b strings.Builder
-	b.Grow(len(source) + 160)
+	b.Grow(len(source) + 180)
 	if async {
 		b.WriteString("(async function (require, module, exports, __orvalhoFilename, __orvalhoDirname) {\n")
 	} else {
 		b.WriteString("(function (require, module, exports, __orvalhoFilename, __orvalhoDirname) {\n")
+	}
+	if sourceHasUseStrict(source) {
+		b.WriteString("'use strict';\n")
 	}
 	found := map[string]bool{}
 	if strings.Contains(source, "__filename") || strings.Contains(source, "__dirname") {
@@ -403,6 +406,11 @@ func wrapCJSFn(source string, async bool) string {
 	b.WriteString(source)
 	b.WriteString("\n})")
 	return b.String()
+}
+
+func sourceHasUseStrict(src string) bool {
+	s := strings.TrimLeft(src, " \t\r\n")
+	return strings.HasPrefix(s, `"use strict"`) || strings.HasPrefix(s, `'use strict'`)
 }
 
 func (iso *Isolate) jsImport(call goja.FunctionCall) goja.Value {

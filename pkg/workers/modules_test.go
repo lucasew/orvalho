@@ -165,6 +165,25 @@ func TestWrapCJSNoPerFileHelpers(t *testing.T) {
 	}
 }
 
+func TestWrapCJSStrictWhenSourceIs(t *testing.T) {
+	got := wrapCJS("\"use strict\";\nmodule.exports = 1;\n")
+	open := strings.Index(got, "{\n")
+	if open < 0 {
+		t.Fatalf("wrap:\n%s", got)
+	}
+	rest := got[open+2:]
+	if !strings.HasPrefix(rest, "'use strict';\n") {
+		t.Fatalf("strict source wrap missing directive:\n%s", got)
+	}
+}
+
+func TestWrapCJSSloppyWhenSourceIs(t *testing.T) {
+	got := wrapCJS("module.exports = 1;\n")
+	if strings.Contains(got, "use strict") {
+		t.Fatalf("sloppy CJS wrap became strict:\n%s", got)
+	}
+}
+
 func TestDynamicImportResolvesFromCaller(t *testing.T) {
 	fsys := fstest.MapFS{
 		"app/pkg/lib.js": {Data: []byte(`exports.n = 42;`)},

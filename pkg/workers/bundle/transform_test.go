@@ -161,6 +161,35 @@ func TestTransformCJSCapturesArrowArguments(t *testing.T) {
 	}
 }
 
+func TestTransformCJSArgumentsCaptureOnlyInnermost(t *testing.T) {
+	src := "export function wrap(fn) { return function () { return Promise.resolve(fn).then((f) => f.apply(this, arguments)); }; }\nexport function other() { return 1; }\n"
+	out, err := bundle.TransformCJS(src, "mod.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(out, "var __orvalhoArguments = arguments;"); n != 1 {
+		t.Fatalf("expected 1 arguments capture, got %d:\n%s", n, out)
+	}
+	if strings.Contains(out, ".apply(this, arguments)") {
+		t.Fatalf("apply arguments survived:\n%s", out)
+	}
+	// other() must not be tagged — that was the shotgun that allocated
+	// a mapped arguments object on every unrelated call.
+	i := strings.Index(out, "function other")
+	if i < 0 {
+		i = strings.Index(out, "other =")
+	}
+	if i >= 0 {
+		window := out[i:]
+		if len(window) > 160 {
+			window = window[:160]
+		}
+		if strings.Contains(window, "__orvalhoArguments") {
+			t.Fatalf("other() was tagged:\n%s", window)
+		}
+	}
+}
+
 func TestTransformCJSDropsRegexpDFlag(t *testing.T) {
 	out, err := bundle.TransformCJS("export const r = new RegExp('x', 'dg');\nexport const s = /w/dgs;\n", "mod.mjs")
 	if err != nil {

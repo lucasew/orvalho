@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -420,27 +421,303 @@ func rewriteESMLexer(src string) string {
 	return prelude + strings.Replace(src, esmLexerWait, repl, 1)
 }
 
-// funcOpen matches esbuild's function heads. Arrows are skipped so we
-// do not invent an arguments object they do not have.
-var funcOpen = regexp.MustCompile(`\bfunction(?:\s+[A-Za-z_$][\w$]*)?\s*\([^)]*\)\s*\{`)
+var applyArgumentsPhrases = []string{
+	".apply(this, arguments)",
+	".apply(null, arguments)",
+	".apply(void 0, arguments)",
+}
 
 // rewriteArgumentsCapture lets goja arrows see the enclosing arguments.
 // goja does not implement lexical arguments, so CJS→ESM proxies such as
 // `() => fn.apply(this, arguments)` would call fn with no args.
+// Only the innermost function that contains an apply is patched;
+// tagging every function in the file made goja allocate a mapped
+// arguments object on every call.
 func rewriteArgumentsCapture(src string) string {
 	if !strings.Contains(src, "arguments") || !strings.Contains(src, ".apply(") {
 		return src
 	}
-	if !strings.Contains(src, ".apply(this, arguments)") &&
-		!strings.Contains(src, ".apply(null, arguments)") &&
-		!strings.Contains(src, ".apply(void 0, arguments)") {
+	applies := findApplyArguments(src)
+	if len(applies) == 0 {
 		return src
 	}
-	src = funcOpen.ReplaceAllString(src, "${0}var __orvalhoArguments = arguments;")
-	src = strings.ReplaceAll(src, ".apply(this, arguments)", ".apply(this, __orvalhoArguments)")
-	src = strings.ReplaceAll(src, ".apply(null, arguments)", ".apply(null, __orvalhoArguments)")
-	src = strings.ReplaceAll(src, ".apply(void 0, arguments)", ".apply(void 0, __orvalhoArguments)")
-	return src
+	funcs := findFuncBodies(src)
+	inject := make(map[int]struct{})
+	var edits []srcEdit
+	for _, ap := range applies {
+		inner := -1
+		for _, f := range funcs {
+			if f.open < ap.at && ap.at < f.close && f.open > inner {
+				inner = f.open
+			}
+		}
+		if inner < 0 {
+			continue
+		}
+		if _, ok := inject[inner]; !ok {
+			inject[inner] = struct{}{}
+			edits = append(edits, srcEdit{at: inner + 1, n: 0, ins: "var __orvalhoArguments = arguments;"})
+		}
+		edits = append(edits, srcEdit{at: ap.at, n: len(ap.old), ins: strings.Replace(ap.old, "arguments", "__orvalhoArguments", 1)})
+	}
+	if len(edits) == 0 {
+		return src
+	}
+	return applySrcEdits(src, edits)
+}
+
+type srcEdit struct {
+	at, n int
+	ins   string
+}
+
+type applySite struct {
+	at  int
+	old string
+}
+
+type funcBody struct {
+	open, close int
+}
+
+func findApplyArguments(src string) []applySite {
+	var out []applySite
+	for _, phrase := range applyArgumentsPhrases {
+		from := 0
+		for {
+			i := strings.Index(src[from:], phrase)
+			if i < 0 {
+				break
+			}
+			out = append(out, applySite{at: from + i, old: phrase})
+			from += i + len(phrase)
+		}
+	}
+	return out
+}
+
+func findFuncBodies(src string) []funcBody {
+	var out []funcBody
+	for i := 0; i < len(src); {
+		j := indexFunctionKw(src, i)
+		if j < 0 {
+			break
+		}
+		open := skipFuncHead(src, j)
+		if open < 0 {
+			i = j + 8
+			continue
+		}
+		close := matchBrace(src, open)
+		if close < 0 {
+			break
+		}
+		out = append(out, funcBody{open: open, close: close})
+		i = open + 1
+	}
+	return out
+}
+
+func applySrcEdits(src string, edits []srcEdit) string {
+	sort.Slice(edits, func(i, j int) bool { return edits[i].at < edits[j].at })
+	var b strings.Builder
+	b.Grow(len(src) + len(edits)*40)
+	last := 0
+	for _, e := range edits {
+		if e.at < last {
+			continue
+		}
+		b.WriteString(src[last:e.at])
+		b.WriteString(e.ins)
+		last = e.at + e.n
+	}
+	b.WriteString(src[last:])
+	return b.String()
+}
+
+func indexFunctionKw(src string, from int) int {
+	for from < len(src) {
+		j := strings.Index(src[from:], "function")
+		if j < 0 {
+			return -1
+		}
+		j += from
+		if j > 0 && isIdentCont(src[j-1]) {
+			from = j + 8
+			continue
+		}
+		if j+8 < len(src) && isIdentCont(src[j+8]) {
+			from = j + 8
+			continue
+		}
+		return j
+	}
+	return -1
+}
+
+func skipFuncHead(src string, fnAt int) int {
+	i := skipSpace(src, fnAt+8)
+	if i < len(src) && src[i] == '*' {
+		i = skipSpace(src, i+1)
+	}
+	if i < len(src) && isIdentStart(src[i]) {
+		i++
+		for i < len(src) && isIdentCont(src[i]) {
+			i++
+		}
+		i = skipSpace(src, i)
+	}
+	if i >= len(src) || src[i] != '(' {
+		return -1
+	}
+	i = skipParen(src, i)
+	if i < 0 {
+		return -1
+	}
+	i = skipSpace(src, i)
+	if i >= len(src) || src[i] != '{' {
+		return -1
+	}
+	return i
+}
+
+func skipSpace(src string, i int) int {
+	for i < len(src) {
+		switch src[i] {
+		case ' ', '\t', '\n', '\r', '\f', '\v':
+			i++
+		default:
+			return i
+		}
+	}
+	return i
+}
+
+func skipParen(src string, open int) int {
+	depth := 0
+	for i := open; i < len(src); {
+		switch src[i] {
+		case '(':
+			depth++
+			i++
+		case ')':
+			depth--
+			i++
+			if depth == 0 {
+				return i
+			}
+		case '"', '\'', '`':
+			i = skipString(src, i)
+		case '/':
+			i = skipSlash(src, i)
+		default:
+			i++
+		}
+	}
+	return -1
+}
+
+func matchBrace(src string, open int) int {
+	depth := 0
+	for i := open; i < len(src); {
+		switch src[i] {
+		case '{':
+			depth++
+			i++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+			i++
+		case '"', '\'', '`':
+			i = skipString(src, i)
+		case '/':
+			i = skipSlash(src, i)
+		default:
+			i++
+		}
+	}
+	return -1
+}
+
+func skipString(src string, i int) int {
+	q := src[i]
+	i++
+	for i < len(src) {
+		if src[i] == '\\' {
+			i += 2
+			continue
+		}
+		if q == '`' && src[i] == '$' && i+1 < len(src) && src[i+1] == '{' {
+			end := matchBrace(src, i+1)
+			if end < 0 {
+				return len(src)
+			}
+			i = end + 1
+			continue
+		}
+		if src[i] == q {
+			return i + 1
+		}
+		i++
+	}
+	return len(src)
+}
+
+func skipSlash(src string, i int) int {
+	if i+1 < len(src) && src[i+1] == '/' {
+		for i < len(src) && src[i] != '\n' {
+			i++
+		}
+		return i
+	}
+	if i+1 < len(src) && src[i+1] == '*' {
+		j := strings.Index(src[i+2:], "*/")
+		if j < 0 {
+			return len(src)
+		}
+		return i + 2 + j + 2
+	}
+	if looksLikeRegexp(src, i) {
+		i++
+		for i < len(src) {
+			if src[i] == '\\' {
+				i += 2
+				continue
+			}
+			if src[i] == '/' {
+				i++
+				break
+			}
+			if src[i] == '\n' {
+				break
+			}
+			i++
+		}
+		for i < len(src) && (src[i] == 'g' || src[i] == 'i' || src[i] == 'm' || src[i] == 's' || src[i] == 'u' || src[i] == 'y' || src[i] == 'd') {
+			i++
+		}
+		return i
+	}
+	return i + 1
+}
+
+func looksLikeRegexp(src string, slash int) bool {
+	j := slash - 1
+	for j >= 0 && (src[j] == ' ' || src[j] == '\t' || src[j] == '\n' || src[j] == '\r') {
+		j--
+	}
+	if j < 0 {
+		return true
+	}
+	switch src[j] {
+	case '(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '~', '^', '%', '<', '>', '+', '-':
+		return true
+	case '*':
+		return true
+	}
+	return false
 }
 
 // rewriteCopyProps replaces esbuild's for-of __copyProps with an index
