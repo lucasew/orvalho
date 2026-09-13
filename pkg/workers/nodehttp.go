@@ -704,12 +704,12 @@ func (n *nodeHTTP) bindConn(conn net.Conn) *goja.Object {
 			if nr > 0 {
 				cp := make([]byte, nr)
 				copy(cp, buf[:nr])
-				n.iso.postJob(func() {
+				n.iso.postJob("socket.data", func() {
 					_ = n.emit(sock, "data", jsBytes(n.iso, cp))
 				})
 			}
 			if err != nil {
-				n.iso.postJob(func() {
+				n.iso.postJob("socket.end", func() {
 					finish(true)
 				})
 				return

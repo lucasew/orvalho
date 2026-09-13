@@ -281,7 +281,7 @@ func (n *nodeFS) jsReadFile(call goja.FunctionCall) goja.Value {
 	n.iso.ioBusy++
 	go func() {
 		data, err := n.readFile(p)
-		n.iso.postJob(func() {
+		n.iso.postJob("readFile "+p, func() {
 			n.iso.ioBusy--
 			if err != nil {
 				_, _ = cb(goja.Undefined(), n.sysMapped("open", p, err), goja.Undefined())
@@ -456,7 +456,7 @@ func (n *nodeFS) jsReaddir(call goja.FunctionCall) goja.Value {
 	n.iso.ioBusy++
 	go func() {
 		ents, err := n.readDir(p)
-		n.iso.postJob(func() {
+		n.iso.postJob("readdir "+p, func() {
 			n.iso.ioBusy--
 			if err != nil {
 				_, _ = cb(goja.Undefined(), n.sysMapped("scandir", p, err), goja.Undefined())

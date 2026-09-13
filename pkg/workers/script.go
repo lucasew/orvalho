@@ -174,11 +174,20 @@ func (iso *Isolate) pumpLocked(ctx context.Context) (bool, time.Duration, error)
 	}
 	httpN := iso.pollHTTP()
 	jobN := iso.pollPlugins()
-	timerN, err := iso.drainOneTickLocked(ctx)
+	timerN := 0
+	var err error
+	if jobN == 0 {
+		timerN, err = iso.runOneDueTimerLocked(ctx)
+	}
 	used := iso.now().Sub(t0)
 	if httpN > 0 || jobN > 0 || timerN > 0 || err != nil {
-		iso.trace("loop #%d pump http=%d jobs=%d timers=%d hold=%s used=%s",
-			n, httpN, jobN, timerN, iso.loopHoldLabel(), used.Round(time.Millisecond))
+		if jobN > 0 && iso.lastJob != "" {
+			iso.trace("loop #%d pump http=%d jobs=%d job=%s timers=%d hold=%s used=%s",
+				n, httpN, jobN, iso.lastJob, timerN, iso.loopHoldLabel(), used.Round(time.Millisecond))
+		} else {
+			iso.trace("loop #%d pump http=%d jobs=%d timers=%d hold=%s used=%s",
+				n, httpN, jobN, timerN, iso.loopHoldLabel(), used.Round(time.Millisecond))
+		}
 	}
 	if err != nil {
 		return false, used, err
@@ -253,13 +262,13 @@ func (iso *Isolate) waitForWorkLocked(ctx context.Context, wait time.Duration) e
 		why = "timer"
 	case <-iso.wake:
 		why = "kick"
-	case fn := <-iso.pluginCh:
+	case job := <-iso.pluginCh:
 		iso.mu.Lock()
-		iso.jobQ = append(iso.jobQ, fn)
+		iso.jobQ = append(iso.jobQ, job)
 		for {
 			select {
-			case fn := <-iso.pluginCh:
-				iso.jobQ = append(iso.jobQ, fn)
+			case job := <-iso.pluginCh:
+				iso.jobQ = append(iso.jobQ, job)
 			default:
 				iso.trace("loop #%d wake job hold=%s", iso.loopN, iso.loopHoldLabel())
 				return nil
@@ -286,13 +295,20 @@ func (iso *Isolate) kick() {
 	}
 }
 
+// loopJob is one isolate-thread continuation (readFile cb, socket data).
+type loopJob struct {
+	name string
+	fn   func()
+}
+
 // postJob queues fn on the isolate thread and wakes the loop. It does
 // not wait. I/O completions use this; runOnIsolate waits for a result.
-func (iso *Isolate) postJob(fn func()) {
+// name is the hot-path label on the next pump line.
+func (iso *Isolate) postJob(name string, fn func()) {
 	if iso == nil || fn == nil || iso.pluginCh == nil {
 		return
 	}
-	iso.pluginCh <- fn
+	iso.pluginCh <- loopJob{name: name, fn: fn}
 	iso.kick()
 }
 
@@ -300,26 +316,28 @@ func (iso *Isolate) pollPlugins() int {
 	if iso == nil {
 		return 0
 	}
+	iso.lastJob = ""
 	if iso.pluginCh != nil {
 		for {
 			select {
-			case fn := <-iso.pluginCh:
-				iso.jobQ = append(iso.jobQ, fn)
+			case job := <-iso.pluginCh:
+				iso.jobQ = append(iso.jobQ, job)
 			default:
 				goto run
 			}
 		}
 	}
 run:
-	n := len(iso.jobQ)
-	jobs := iso.jobQ
-	iso.jobQ = nil
-	for _, fn := range jobs {
-		if fn != nil {
-			fn()
-		}
+	if len(iso.jobQ) == 0 {
+		return 0
 	}
-	return n
+	job := iso.jobQ[0]
+	iso.jobQ = iso.jobQ[1:]
+	iso.lastJob = job.name
+	if job.fn != nil {
+		job.fn()
+	}
+	return 1
 }
 
 func (iso *Isolate) runOnIsolate(fn func()) {
@@ -331,10 +349,10 @@ func (iso *Isolate) runOnIsolate(fn func()) {
 		return
 	}
 	done := make(chan struct{})
-	iso.pluginCh <- func() {
+	iso.pluginCh <- loopJob{name: "host", fn: func() {
 		fn()
 		close(done)
-	}
+	}}
 	iso.kick()
 	<-done
 }

@@ -1,6 +1,7 @@
 package workers
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -41,7 +42,7 @@ func TestWaitDoesNotRunJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	ran := false
-	iso.postJob(func() { ran = true })
+	iso.postJob("t", func() { ran = true })
 	iso.mu.Lock()
 	if err := iso.waitForWorkLocked(t.Context(), time.Second); err != nil {
 		iso.mu.Unlock()
@@ -55,6 +56,37 @@ func TestWaitDoesNotRunJobs(t *testing.T) {
 	iso.mu.Unlock()
 	if n != 1 || !ran {
 		t.Fatalf("pollPlugins n=%d ran=%v", n, ran)
+	}
+}
+
+func TestPumpRunsOneJobPerTurn(t *testing.T) {
+	iso := New("", Options{})
+	if err := iso.ScriptStart(t.Context(), `setInterval(function () {}, 60000);`, "t.js"); err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	iso.postJob("a", func() { order = append(order, "a") })
+	iso.postJob("b", func() { order = append(order, "b") })
+	iso.mu.Lock()
+	if _, _, err := iso.pumpLocked(t.Context()); err != nil {
+		iso.mu.Unlock()
+		t.Fatal(err)
+	}
+	if got := strings.Join(order, ","); got != "a" {
+		iso.mu.Unlock()
+		t.Fatalf("first pump jobs=%q want a", got)
+	}
+	if iso.lastJob != "a" {
+		iso.mu.Unlock()
+		t.Fatalf("lastJob=%q", iso.lastJob)
+	}
+	if _, _, err := iso.pumpLocked(t.Context()); err != nil {
+		iso.mu.Unlock()
+		t.Fatal(err)
+	}
+	iso.mu.Unlock()
+	if got := strings.Join(order, ","); got != "a,b" {
+		t.Fatalf("second pump jobs=%q want a,b", got)
 	}
 }
 
