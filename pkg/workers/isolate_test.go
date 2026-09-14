@@ -74,6 +74,45 @@ func TestSetTimeoutFiresUnderHostControl(t *testing.T) {
 	}
 }
 
+func TestSetImmediatePassesArgs(t *testing.T) {
+	iso := New(`
+		var got = null;
+		setImmediate(function(a, b) { got = a + b; }, 2, 3);
+	`, Options{})
+	base := time.Unix(0, 0)
+	iso.now = func() time.Time { return base }
+
+	if _, err := iso.Tick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := iso.Tick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := iso.vm.Get("got").ToInteger(); got != 5 {
+		t.Fatalf("got %d, want 5", got)
+	}
+}
+
+func TestClearImmediate(t *testing.T) {
+	iso := New(`
+		var ran = false;
+		var id = setImmediate(function() { ran = true; });
+		clearImmediate(id);
+	`, Options{})
+	base := time.Unix(0, 0)
+	iso.now = func() time.Time { return base }
+
+	if _, err := iso.Tick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := iso.Tick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if iso.vm.Get("ran").ToBoolean() {
+		t.Fatal("cleared setImmediate ran")
+	}
+}
+
 func TestSetTimeoutPassesArgs(t *testing.T) {
 	iso := New(`
 		var got = null;

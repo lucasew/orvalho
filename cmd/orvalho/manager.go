@@ -1,16 +1,9 @@
 package main
 
-import (
-	"github.com/spf13/cobra"
-)
+import "context"
 
-var managerCmd = &cobra.Command{
-	Use:   "manager",
-	Short: "Manager role (pair, sign, deploy, daemon)",
-	Long: `Manager commands for the owner's primary machine.
+type managerCmd struct{}
 
-Skeleton: no daemon or deploy yet. Use global --data-dir for host state.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return ErrManagerSkeleton
-	},
+func (managerCmd) Run(context.Context) error {
+	return ErrManagerSkeleton
 }

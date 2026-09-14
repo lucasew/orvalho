@@ -187,12 +187,19 @@ func (o Options) materialize(ctx context.Context, g *Graph) error {
 	if err := os.MkdirAll(st.Dir, 0o755); err != nil {
 		return err
 	}
-	for _, n := range g.Nodes {
+	for i := range g.Nodes {
+		n := g.Nodes[i]
 		if n.Optional && !keepOptional(n.CPU) {
 			continue
 		}
-		if n.Integrity == "" || n.Resolved == "" {
-			continue
+		if err := o.ensureDist(&n); err != nil {
+			return err
+		}
+		g.Nodes[i] = n
+		if ent, ok := g.Packages[n.LockPath]; ok {
+			ent.Resolved = n.Resolved
+			ent.Integrity = n.Integrity
+			g.Packages[n.LockPath] = ent
 		}
 		algo, hash, err := ParseIntegrity(n.Integrity)
 		if err != nil {
@@ -218,4 +225,33 @@ func (o Options) materialize(ctx context.Context, g *Graph) error {
 		}
 	}
 	return (linker{root: o.project(), g: g}).run()
+}
+
+// ensureDist fills Resolved and Integrity from the registry when the Lockfile
+// entry has a version but no dist (npm packages keys sometimes omit them).
+func (o Options) ensureDist(n *Node) error {
+	if n.Resolved != "" && n.Integrity != "" {
+		return nil
+	}
+	if n.Name == "" || n.Version == "" {
+		return fmt.Errorf("%w: %s: missing resolved", ErrLockfile, n.LockPath)
+	}
+	pm, err := o.registry().packument(n.Name)
+	if err != nil {
+		return err
+	}
+	pv, ok := pm.Versions[n.Version]
+	if !ok {
+		return fmt.Errorf("%w: %s@%s", ErrNotFound, n.Name, n.Version)
+	}
+	if n.Resolved == "" {
+		n.Resolved = pv.Dist.Tarball
+	}
+	if n.Integrity == "" {
+		n.Integrity = pv.Dist.Integrity
+	}
+	if n.Resolved == "" || n.Integrity == "" {
+		return fmt.Errorf("%w: %s@%s: missing dist", ErrRegistry, n.Name, n.Version)
+	}
+	return nil
 }

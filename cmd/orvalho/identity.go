@@ -1,54 +1,36 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 
-	"github.com/spf13/cobra"
+	lewcmd "github.com/lewtec/lewkit/x/cmd"
 
 	"github.com/lucasew/orvalho/pkg/cuex"
 	"github.com/lucasew/orvalho/pkg/identity"
 )
 
-var (
-	identityPath  string
-	identityForce bool
-)
-
-var identityCmd = &cobra.Command{
-	Use:   "identity",
-	Short: "Manage manager identity key material",
-	Long: `Generate and inspect the manager Ed25519 identity.
-
-Requires --data-dir. Key path comes from host CUE identity.keyPath when set,
-or --path flag (Cobra), which overrides for this invocation.`,
+type identityCmd struct {
+	Generate *identityGenerateCmd `cmd:"generate" help:"create and persist a new manager identity"`
+	Show     *identityShowCmd     `cmd:"show" help:"load a manager identity and print its public id"`
 }
 
-var identityGenerateCmd = &cobra.Command{
-	Use:   "generate",
-	Short: "Create and persist a new manager identity",
-	RunE:  runIdentityGenerate,
+type identityGenerateCmd struct {
+	Path  lewcmd.StringArg `long:"path" help:"path to write manager private key PEM"`
+	Force lewcmd.Flag      `long:"force" help:"overwrite existing key file"`
 }
 
-var identityShowCmd = &cobra.Command{
-	Use:   "show",
-	Short: "Load a manager identity and print its public id",
-	RunE:  runIdentityShow,
+type identityShowCmd struct {
+	Path lewcmd.StringArg `long:"path" help:"path to manager private key PEM"`
 }
 
-func init() {
-	identityCmd.AddCommand(identityGenerateCmd, identityShowCmd)
-	identityGenerateCmd.Flags().StringVar(&identityPath, "path", "", "path to write manager private key PEM (overrides CUE identity.keyPath)")
-	identityGenerateCmd.Flags().BoolVar(&identityForce, "force", false, "overwrite existing key file")
-	identityShowCmd.Flags().StringVar(&identityPath, "path", "", "path to manager private key PEM (overrides CUE identity.keyPath)")
-}
-
-func resolveKeyPath() (string, error) {
+func resolveKeyPath(flagPath string) (string, error) {
 	if err := requireDataDir(); err != nil {
 		return "", err
 	}
-	if identityPath != "" {
-		return filepath.Abs(identityPath)
+	if flagPath != "" {
+		return filepath.Abs(flagPath)
 	}
 	cfg, err := loadHostConfig()
 	if err != nil {
@@ -68,8 +50,8 @@ func resolveKeyPath() (string, error) {
 	return filepath.Abs(filepath.Join(dataDir, p))
 }
 
-func runIdentityGenerate(cmd *cobra.Command, args []string) error {
-	abs, err := resolveKeyPath()
+func (c *identityGenerateCmd) Run(context.Context) error {
+	abs, err := resolveKeyPath(c.Path.Value())
 	if err != nil {
 		return err
 	}
@@ -77,7 +59,7 @@ func runIdentityGenerate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := m.Save(abs, identityForce); err != nil {
+	if err := m.Save(abs, c.Force.Value()); err != nil {
 		return err
 	}
 	fmt.Printf("wrote manager key: %s\n", abs)
@@ -85,8 +67,8 @@ func runIdentityGenerate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runIdentityShow(cmd *cobra.Command, args []string) error {
-	abs, err := resolveKeyPath()
+func (c *identityShowCmd) Run(context.Context) error {
+	abs, err := resolveKeyPath(c.Path.Value())
 	if err != nil {
 		return err
 	}

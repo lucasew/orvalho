@@ -2,6 +2,7 @@ package workers
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/dop251/goja"
@@ -51,6 +52,33 @@ func TestHeadersGetSetHasDeleteCaseInsensitive(t *testing.T) {
 	}
 	if !goja.IsNull(iso.vm.Get("afterDel")) {
 		t.Fatalf("after delete: %v", iso.vm.Get("afterDel"))
+	}
+}
+
+func TestHeadersEntriesAndFromEntries(t *testing.T) {
+	iso := New(``, Options{})
+	if _, err := iso.Tick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	v, err := iso.vm.RunString(`
+		var h = new Headers({"X-A": "1"});
+		h.append("X-B", "2");
+		var from = Object.fromEntries(h.entries());
+		var seq = new Headers([["X-C", "3"], ["X-D", "4"]]);
+		JSON.stringify({
+			a: from["x-a"],
+			b: from["x-b"],
+			c: seq.get("x-c"),
+			d: seq.get("x-d"),
+			iter: [...h][0][0]
+		});
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := v.String()
+	if !strings.Contains(got, `"a":"1"`) || !strings.Contains(got, `"c":"3"`) {
+		t.Fatalf("headers %s", got)
 	}
 }
 
@@ -204,6 +232,25 @@ func TestHostMakeRequestReadableByJS(t *testing.T) {
 	}
 	if got := obj.Get("auth").String(); got != "Bearer z" {
 		t.Fatalf("auth=%q", got)
+	}
+}
+
+func TestResponseBodyGetReader(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var res = new Response("<html>ok</html>", {status: 200, headers: {"Content-Type": "text/html"}});
+		if (!res.body || typeof res.body.getReader !== "function") throw new Error("body");
+		var got = "";
+		res.body.getReader().read().then(function (r) {
+			if (r.done) throw new Error("done");
+			var v = r.value;
+			if (typeof Buffer !== "undefined") got = Buffer.from(v).toString();
+			else got = String.fromCharCode.apply(null, v);
+			if (got.indexOf("<html>") < 0) throw new Error("chunk " + got);
+		});
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

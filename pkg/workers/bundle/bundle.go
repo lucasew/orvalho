@@ -129,6 +129,10 @@ if (typeof globalThis.__orvalhoDynamicImport !== "function") {
 // A blind ReplaceAll corrupts Astro island hydration runtime embedded as
 // string literals in the SSR bundle (browser then sees __orvalhoDynamicImport).
 func rewriteDynamicImport(src string) string {
+	return rewriteImportCalls(src, "__orvalhoDynamicImport(")
+}
+
+func rewriteImportCalls(src, repl string) string {
 	var b strings.Builder
 	b.Grow(len(src) + 64)
 	i := 0
@@ -178,13 +182,13 @@ func rewriteDynamicImport(src string) string {
 		// Template literal: leave quasi-literals alone; rewrite only ${...} code.
 		if src[i] == '`' {
 			end := scanTemplateLiteral(src, i)
-			b.WriteString(rewriteTemplateLiteral(src[i:end]))
+			b.WriteString(rewriteTemplateLiteral(src[i:end], repl))
 			i = end
 			continue
 		}
 		// Dynamic import( — keyword import followed by (
 		if n := importCallLen(src, i); n > 0 {
-			b.WriteString("__orvalhoDynamicImport(")
+			b.WriteString(repl)
 			i += n
 			continue
 		}
@@ -201,7 +205,7 @@ func importCallLen(src string, i int) int {
 	if i+len(kw) > len(src) || src[i:i+len(kw)] != kw {
 		return 0
 	}
-	if i > 0 && isIdentByte(src[i-1]) {
+	if i > 0 && (src[i-1] == '.' || isIdentByte(src[i-1])) {
 		return 0
 	}
 	j := i + len(kw)
@@ -211,7 +215,55 @@ func importCallLen(src string, i int) int {
 	if j >= len(src) || src[j] != '(' {
 		return 0
 	}
+	if importMethodDef(src, j) {
+		return 0
+	}
 	return j + 1 - i // consume through '('
+}
+
+func importMethodDef(src string, open int) bool {
+	close := skipBalancedParen(src, open)
+	if close < 0 {
+		return false
+	}
+	k := close + 1
+	for k < len(src) && (src[k] == ' ' || src[k] == '\t' || src[k] == '\n' || src[k] == '\r') {
+		k++
+	}
+	return k < len(src) && src[k] == '{'
+}
+
+func skipBalancedParen(src string, i int) int {
+	if i >= len(src) || src[i] != '(' {
+		return -1
+	}
+	depth := 0
+	for i < len(src) {
+		switch src[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		case '\'', '"', '`':
+			q := src[i]
+			i++
+			for i < len(src) {
+				if src[i] == '\\' && i+1 < len(src) {
+					i += 2
+					continue
+				}
+				if src[i] == q {
+					break
+				}
+				i++
+			}
+		}
+		i++
+	}
+	return -1
 }
 
 func isIdentByte(c byte) bool {
@@ -280,7 +332,7 @@ func scanTemplateLiteral(src string, i int) int {
 }
 
 // rewriteTemplateLiteral rewrites import( only inside ${...} expressions.
-func rewriteTemplateLiteral(tmpl string) string {
+func rewriteTemplateLiteral(tmpl, repl string) string {
 	if len(tmpl) < 2 || tmpl[0] != '`' {
 		return tmpl
 	}
@@ -337,7 +389,7 @@ func rewriteTemplateLiteral(tmpl string) string {
 				// ${ expr }
 				b.WriteString("${")
 				expr := tmpl[start+2 : j]
-				b.WriteString(rewriteDynamicImport(expr))
+				b.WriteString(rewriteImportCalls(expr, repl))
 				b.WriteByte('}')
 				i = j + 1
 				continue

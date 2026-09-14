@@ -131,6 +131,18 @@ func TestFetchGlobalAbsentWithoutDI(t *testing.T) {
 	}
 }
 
+func TestFetchIdentifierDeclaredWithoutDI(t *testing.T) {
+	iso := New("", Options{Imports: NodeScriptImports()})
+	err := iso.ScriptMain(t.Context(), `
+		var _fetch;
+		try { _fetch = fetch; } catch (e) { throw new Error("ref " + e); }
+		if (typeof _fetch !== "undefined") throw new Error("cap " + typeof _fetch);
+	`, "t.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFetchGlobalIsFunctionWhenInjected(t *testing.T) {
 	iso := New(``, Options{Fetch: HTTPFetch(EgressList{"*"}, nil, 0)})
 	if _, err := iso.Tick(t.Context()); err != nil {

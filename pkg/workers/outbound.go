@@ -64,6 +64,9 @@ func HTTPFetch(egress EgressList, client *http.Client, timeout time.Duration) Fe
 
 func (iso *Isolate) installOutboundFetch() {
 	if iso.opts.Fetch == nil {
+		// Identifier exists so bare `fetch` is not a ReferenceError
+		// (cloudflare/shims/web). Nil still means no outbound capability.
+		iso.vm.Set("fetch", goja.Undefined())
 		return
 	}
 	iso.vm.Set("fetch", iso.jsFetch)

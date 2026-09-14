@@ -61,6 +61,13 @@ func newTimerTable() *timerTable {
 
 func (tt *timerTable) len() int { return len(tt.byID) }
 
+func (tt *timerTable) nextDeadline() (time.Time, bool) {
+	if len(tt.queue) == 0 {
+		return time.Time{}, false
+	}
+	return tt.queue[0].deadline, true
+}
+
 func (tt *timerTable) schedule(cb goja.Callable, args []goja.Value, delay, interval time.Duration, now time.Time) int64 {
 	t := &timer{
 		id:       tt.nextID,

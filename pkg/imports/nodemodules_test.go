@@ -80,6 +80,43 @@ func TestNodeModulesExportsRequire(t *testing.T) {
 	}), "pkg", "pkg/cjs.js")
 }
 
+func TestNodeModulesExportsArrayFallback(t *testing.T) {
+	t.Parallel()
+	lookupOK(t, tree(map[string]string{
+		"pkg/package.json": `{"exports":{".":[{"import":"./esm.js"},"./cjs.js"]}}`,
+		"pkg/cjs.js":       `exports.n=1`,
+		"pkg/esm.js":       `export const n=2`,
+	}), "pkg", "pkg/cjs.js")
+}
+
+func TestNodeModulesExportsImportOnly(t *testing.T) {
+	t.Parallel()
+	lookupOK(t, tree(map[string]string{
+		"ultrahtml/package.json":  `{"exports":{".":{"types":"./dist/index.d.ts","import":"./dist/index.js"}}}`,
+		"ultrahtml/dist/index.js": `export default 1`,
+	}), "ultrahtml", "ultrahtml/dist/index.js")
+}
+
+func TestNodeModulesExportsStarSubpath(t *testing.T) {
+	t.Parallel()
+	lookupOK(t, tree(map[string]string{
+		"unstorage/package.json":        `{"exports":{"./drivers/*":{"import":"./drivers/*.mjs","require":"./drivers/*.cjs"}}}`,
+		"unstorage/drivers/fs-lite.cjs": `exports.n=1`,
+		"unstorage/drivers/fs-lite.mjs": `export const n=2`,
+	}), "unstorage/drivers/fs-lite", "unstorage/drivers/fs-lite.cjs")
+}
+
+func TestNodeModulesExportsStarMiss(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"pkg/package.json": `{"exports":{"./drivers/*":"./drivers/*.js"}}`,
+		"pkg/secret.js":    `exports.n=1`,
+	})
+	if _, ok := (NodeModules{FS: fsys}).Lookup("pkg/secret"); ok {
+		t.Fatal("star exports must not leak secret")
+	}
+}
+
 func TestNodeModulesExportsSubpathClosed(t *testing.T) {
 	t.Parallel()
 	fsys := tree(map[string]string{
@@ -108,6 +145,121 @@ func TestNodeModulesClimbFromNested(t *testing.T) {
 	}
 	if got != "node_modules/.orvalho/foo@1.0.0/node_modules/bar/index.js" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestNodeModulesExtensionlessPath(t *testing.T) {
+	t.Parallel()
+	lookupOK(t, tree(map[string]string{
+		"debug/src/common.js": `module.exports = function () {};`,
+	}), "debug/src/common", "debug/src/common.js")
+}
+
+func TestNodeModulesOrvalhoStoreFallback(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"app.js": `require("prismjs/components.js")`,
+		"node_modules/.orvalho/prismjs@1.30.0/node_modules/prismjs/package.json":  `{}`,
+		"node_modules/.orvalho/prismjs@1.30.0/node_modules/prismjs/components.js": `exports.n=1`,
+	})
+	got, ok := (NodeModules{FS: fsys, From: "app.js"}).Lookup("prismjs/components.js")
+	if !ok {
+		t.Fatal("miss")
+	}
+	want := "node_modules/.orvalho/prismjs@1.30.0/node_modules/prismjs/components.js"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestNodeModulesOrvalhoStoreScoped(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"node_modules/.orvalho/@astrojs/prism@4.0.2/node_modules/@astrojs/prism/package.json": `{"main":"index.js"}`,
+		"node_modules/.orvalho/@astrojs/prism@4.0.2/node_modules/@astrojs/prism/index.js":     `exports.n=1`,
+	})
+	lookupOK(t, fsys, "@astrojs/prism", "node_modules/.orvalho/@astrojs/prism@4.0.2/node_modules/@astrojs/prism/index.js")
+}
+
+func TestNodeModulesOrvalhoStorePicksHighestSemver(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"node_modules/.orvalho/prismjs@1.9.0/node_modules/prismjs/index.js":  `exports.n=9`,
+		"node_modules/.orvalho/prismjs@1.30.0/node_modules/prismjs/index.js": `exports.n=30`,
+	})
+	lookupOK(t, fsys, "prismjs", "node_modules/.orvalho/prismjs@1.30.0/node_modules/prismjs/index.js")
+}
+
+func TestNodeModulesOrvalhoStorePrefersHoisted(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"node_modules/prismjs/index.js":                                     `exports.n=1`,
+		"node_modules/.orvalho/prismjs@9.9.9/node_modules/prismjs/index.js": `exports.n=2`,
+	})
+	lookupOK(t, fsys, "prismjs", "node_modules/prismjs/index.js")
+}
+
+func TestNodeModulesHashImportDefault(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"pkg/package.json": `{"imports":{"#flag":{"module-sync":"./true.js","default":"./false.js"}}}`,
+		"pkg/true.js":      `export default true`,
+		"pkg/false.js":     `export default false`,
+		"pkg/lib/a.js":     `require("#flag")`,
+	})
+	got, ok := (NodeModules{FS: fsys, From: "pkg/lib/a.js"}).Lookup("#flag")
+	if !ok {
+		t.Fatal("miss")
+	}
+	if got != "pkg/false.js" {
+		t.Fatalf("Lookup(#flag)=%q want pkg/false.js (default, not module-sync)", got)
+	}
+}
+
+func TestNodeModulesHashImportNearestOnly(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"package.json":        `{"imports":{"#flag":"./root.js"}}`,
+		"root.js":             `exports.n=1`,
+		"nested/package.json": `{}`,
+		"nested/index.js":     `require("#flag")`,
+	})
+	if _, ok := (NodeModules{FS: fsys, From: "nested/index.js"}).Lookup("#flag"); ok {
+		t.Fatal("nearest package.json without the key must miss")
+	}
+}
+
+func TestNodeModulesHashImportPattern(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"pkg/package.json":   `{"imports":{"#types/*":"./types/*.d.ts"}}`,
+		"pkg/types/foo.d.ts": `export {}`,
+		"pkg/index.js":       `require("#types/foo")`,
+	})
+	got, ok := (NodeModules{FS: fsys, From: "pkg/index.js"}).Lookup("#types/foo")
+	if !ok {
+		t.Fatal("miss")
+	}
+	if got != "pkg/types/foo.d.ts" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestNodeModulesHashImportInvalid(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"package.json": `{"imports":{"#flag":"./x.js"}}`,
+		"x.js":         `exports.n=1`,
+	})
+	n := NodeModules{FS: fsys, From: "x.js"}
+	if _, ok := n.Lookup("#"); ok {
+		t.Fatal("# alone")
+	}
+	if _, ok := n.Lookup("#/x"); ok {
+		t.Fatal("#/")
+	}
+	if _, ok := n.Lookup("#missing"); ok {
+		t.Fatal("missing key")
 	}
 }
 

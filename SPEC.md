@@ -58,7 +58,7 @@ Inherited C (cite the file):
 | TEC-18 | package `bin` field | Symlink `node_modules/.bin/<name>` to the package file. When Script run executes a bin or a `package.json` script, prepend a directory whose `node` entry is this CLI | Process with Orvalho as `node` |
 | TEC-07 | Package tree | Write a ZIP with root `orvalho.cue`. Do not enroll a Device | Package ZIP |
 | TEC-08 | WinterTC entrypoint | Host maps HTTP to `default.fetch(request, env, ctx)` | HTTP response |
-| TEC-09 | Script entrypoint | Host evaluates the Script target (file path, `package.json` script name) as main. `default.fetch` is not required | Process exit |
+| TEC-09 | Script entrypoint | Host compiles the target in memory to CommonJS ES2015 (TEC-05, ADR-0017), then evaluates it as main. `default.fetch` is not required | Process exit |
 | TEC-10 | Primitive host ops | Go exposes a small Binding table. A JavaScript dispatcher implements WinterTC and claimed Node.js modules | Guest API surface |
 | TEC-11 | Overlay Dial/Listen | Userspace driver. Addresses are not host LAN addresses. This SPEC’s driver is loopback | Overlay connection |
 | TEC-12 | Public identifier | Full word from the glossary. Short form only if that table lists it | Name |
@@ -83,7 +83,7 @@ Inherited C (cite the file):
 | TEC-18 | scoped `PATH` `node` trampoline | implement | rewrite store shebangs. Install a global `node` | none |
 | TEC-07 | `archive/zip` | wrap | a second archive format | path:pkg/ovpkg, stdlib:archive/zip |
 | TEC-08 | `net/http` | adopt | a second HTTP stack | path:pkg/workers, stdlib:net/http |
-| TEC-09 | Isolate | implement | require `default.fetch` on Script | path:pkg/workers |
+| TEC-09 | Isolate | implement | require `default.fetch` on Script. Teach goja new syntax | path:pkg/workers |
 | TEC-10 | JS dispatcher + Go primitives | implement | WinterTC as a Go function bag | lewtec/tailgopher (shape) |
 | TEC-11 | loopback | implement | host LAN membership | stdlib:net |
 | TEC-12 | this glossary | implement | unlisted shortenings | this document |
@@ -393,3 +393,4 @@ Residual risk: goja defects, side channels, Operator compromise of `--data-dir`.
 - ADR-0014: Peer Dependencies are satisfied from the existing graph. Rejected: npm 7 auto-fetch of a missing peer.
 - ADR-0015: Durable writes wrap lewkit `x/io/atomic`. Language is Go 1.27. Rejected: a second stage+rename helper beside that primitive.
 - ADR-0016: Default content store is `<user cache>/orvalho` (`os.UserCacheDir`). Rejected: project-local `.orvalho/store`. Sharing across machines is still `FETCHURL_SERVER`.
+- ADR-0017: `script run` compiles guest source in memory with esbuild `pkg/api` before goja evaluates it. Rejected: extending goja to parse newer syntax. Rejected: a `NeedsBundle` skip when `import`/`from` are absent.

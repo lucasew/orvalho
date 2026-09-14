@@ -2,10 +2,9 @@ package main
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"path/filepath"
-
-	"github.com/spf13/cobra"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/format"
@@ -13,50 +12,40 @@ import (
 	"github.com/lucasew/orvalho/pkg/cuex"
 )
 
-var configCmd = &cobra.Command{
-	Use:   "config",
-	Short: "Host CUE configuration",
-	Long:  `Validate and show host orvalho.cue unified with embedded host preludes.`,
+type configCmd struct {
+	Validate *configValidateCmd `cmd:"validate" help:"validate host orvalho.cue against preludes"`
+	Show     *configShowCmd     `cmd:"show" help:"print unified host config"`
 }
 
-var configValidateCmd = &cobra.Command{
-	Use:   "validate",
-	Short: "Validate host orvalho.cue against preludes",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if _, err := loadHostConfig(); err != nil {
-			return err
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "ok: host config valid (%s)\n", configDisplayPath())
+type configValidateCmd struct{}
+
+type configShowCmd struct{}
+
+func (c *configValidateCmd) Run(context.Context) error {
+	if _, err := loadHostConfig(); err != nil {
+		return err
+	}
+	fmt.Printf("ok: host config valid (%s)\n", configDisplayPath())
+	return nil
+}
+
+func (c *configShowCmd) Run(context.Context) error {
+	cfg, err := loadHostConfig()
+	if err != nil {
+		return err
+	}
+	v := cfg.Value
+	node := v.Syntax(cue.Final(), cue.Concrete(true))
+	b, err := format.Node(node)
+	if err != nil {
+		fmt.Printf("%v\n", v)
 		return nil
-	},
-}
-
-var configShowCmd = &cobra.Command{
-	Use:   "show",
-	Short: "Print unified host config (concrete fields)",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := loadHostConfig()
-		if err != nil {
-			return err
-		}
-		// Emit only the concrete instance side (Final + Concrete).
-		v := cfg.Value
-		node := v.Syntax(cue.Final(), cue.Concrete(true))
-		b, err := format.Node(node)
-		if err != nil {
-			fmt.Fprintf(cmd.OutOrStdout(), "%v\n", v)
-			return nil
-		}
-		fmt.Fprint(cmd.OutOrStdout(), string(b))
-		if len(b) == 0 || b[len(b)-1] != '\n' {
-			fmt.Fprintln(cmd.OutOrStdout())
-		}
-		return nil
-	},
-}
-
-func init() {
-	configCmd.AddCommand(configValidateCmd, configShowCmd)
+	}
+	fmt.Print(string(b))
+	if len(b) == 0 || b[len(b)-1] != '\n' {
+		fmt.Println()
+	}
+	return nil
 }
 
 func configDisplayPath() string {
