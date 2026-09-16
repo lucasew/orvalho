@@ -9,15 +9,16 @@ require (
 	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9
 	github.com/evanw/esbuild v0.28.2
 	github.com/fetchurl/fetchurl v0.0.0-20260824103541-49881a25d469
-	github.com/lewtec/lewkit v0.0.0-20260910013007-48dd615c43ee
+	github.com/lewtec/lewkit v0.0.0-20260915170120-677a4bdd878c
 	github.com/stellar/go v0.0.0-20251023205731-8cd5ab33bcdd
-	github.com/tetratelabs/wazero v1.9.0
+	github.com/tetratelabs/wazero v1.11.0
 	github.com/tyler-smith/go-bip39 v1.1.0
 	golang.org/x/crypto v0.56.0
 )
 
 require (
 	filippo.io/hpke v0.4.0 // indirect
+	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/cockroachdb/apd/v3 v3.2.1 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/emicklei/proto v1.14.2 // indirect
@@ -28,6 +29,8 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/protocolbuffers/txtpbfmt v0.0.0-20250627152318-f293424e46b5 // indirect
 	github.com/shogo82148/go-sfv v0.3.3 // indirect
+	github.com/stretchr/testify v1.12.1 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
