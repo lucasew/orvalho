@@ -6,7 +6,7 @@ require (
 	cuelang.org/go v0.14.1
 	filippo.io/age v1.3.1
 	github.com/btcsuite/btcd/btcutil v1.1.6
-	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9
+	github.com/dop251/goja v0.0.0-20260917113740-793a2a65c13b
 	github.com/evanw/esbuild v0.28.2
 	github.com/fetchurl/fetchurl v0.0.0-20260824103541-49881a25d469
 	github.com/lewtec/lewkit v0.0.0-20260910013007-48dd615c43ee
@@ -19,7 +19,7 @@ require (
 require (
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/cockroachdb/apd/v3 v3.2.1 // indirect
-	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
+	github.com/dlclark/regexp2/v2 v2.5.2 // indirect
 	github.com/emicklei/proto v1.14.2 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
