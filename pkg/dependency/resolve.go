@@ -65,7 +65,7 @@ func resolveGraph(reg registry, m *Manifest) (*Graph, error) {
 		}
 		pv := pm.Versions[ver]
 
-		if optOf(j) && !keepOptional(pv.CPU, pv.OS, pv.Libc) {
+		if optOf(j) && !keepOptional(pv.CPU) {
 			continue
 		}
 

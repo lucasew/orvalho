@@ -206,7 +206,7 @@ func (o Options) materializeSession(ctx context.Context, g *Graph) error {
 	}
 	var jobs []pkgJob
 	for i, n := range g.Nodes {
-		if n.Optional && !keepOptional(n.CPU, n.OS, n.Libc) {
+		if n.Optional && !keepOptional(n.CPU) {
 			continue
 		}
 		jobs = append(jobs, pkgJob{idx: i, n: n})

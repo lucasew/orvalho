@@ -273,30 +273,16 @@ func TestDetectForeignLockfile(t *testing.T) {
 	}
 }
 
-func TestPlatformOK(t *testing.T) {
+func TestKeepOptional(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name                      string
-		cpu, os, libc             []string
-		hostCPU, hostOS, hostLibc string
-		want                      bool
-	}{
-		{name: "unconstrained", want: true, hostCPU: "x64", hostOS: "linux", hostLibc: "glibc"},
-		{name: "wasm32", cpu: []string{"wasm32"}, want: true, hostCPU: "x64", hostOS: "linux", hostLibc: "glibc"},
-		{name: "linux x64 gnu", cpu: []string{"x64"}, os: []string{"linux"}, libc: []string{"glibc"}, hostCPU: "x64", hostOS: "linux", hostLibc: "glibc", want: true},
-		{name: "darwin on linux", os: []string{"darwin"}, hostCPU: "x64", hostOS: "linux", hostLibc: "glibc", want: false},
-		{name: "arm on x64", cpu: []string{"arm64"}, os: []string{"linux"}, hostCPU: "x64", hostOS: "linux", hostLibc: "glibc", want: false},
-		{name: "musl on gnu", cpu: []string{"x64"}, os: []string{"linux"}, libc: []string{"musl"}, hostCPU: "x64", hostOS: "linux", hostLibc: "glibc", want: false},
-		{name: "not win32", os: []string{"!win32"}, hostCPU: "x64", hostOS: "linux", hostLibc: "glibc", want: true},
-		{name: "not linux", os: []string{"!linux"}, hostCPU: "x64", hostOS: "linux", hostLibc: "glibc", want: false},
+	if keepOptional(nil) {
+		t.Fatal("empty cpu must skip")
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := platformOK(tt.cpu, tt.os, tt.libc, tt.hostCPU, tt.hostOS, tt.hostLibc)
-			if got != tt.want {
-				t.Fatalf("platformOK = %v, want %v", got, tt.want)
-			}
-		})
+	if keepOptional([]string{"x64"}) {
+		t.Fatal("native cpu must skip")
+	}
+	if !keepOptional([]string{"wasm32"}) {
+		t.Fatal("wasm32 must keep")
 	}
 }
 

@@ -30,7 +30,7 @@ func (l linker) run() error {
 	}
 	slots := map[string]Node{}
 	for _, n := range l.g.Nodes {
-		if n.Optional && !keepOptional(n.CPU, n.OS, n.Libc) {
+		if n.Optional && !keepOptional(n.CPU) {
 			continue
 		}
 		if n.Integrity == "" && n.Resolved == "" {
@@ -55,7 +55,7 @@ func (l linker) run() error {
 			if target == nil {
 				continue
 			}
-			if target.Optional && !keepOptional(target.CPU, target.OS, target.Libc) {
+			if target.Optional && !keepOptional(target.CPU) {
 				continue
 			}
 			if err := l.linkDep(sib, n.LockPath, depName); err != nil {
@@ -81,7 +81,7 @@ func (l linker) run() error {
 		if n == nil {
 			continue
 		}
-		if n.Optional && !keepOptional(n.CPU, n.OS, n.Libc) {
+		if n.Optional && !keepOptional(n.CPU) {
 			continue
 		}
 		dest := filepath.Join(l.root, slotDir(n.Name, n.Version))
@@ -176,7 +176,7 @@ func (l linker) bins() error {
 		if n == nil || len(n.Bin) == 0 {
 			continue
 		}
-		if n.Optional && !keepOptional(n.CPU, n.OS, n.Libc) {
+		if n.Optional && !keepOptional(n.CPU) {
 			continue
 		}
 		pkgDir := filepath.Join(l.root, slotDir(n.Name, n.Version))
