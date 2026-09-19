@@ -73,7 +73,52 @@ func (o Options) Install(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := o.ensureRollupWasmNode(g); err != nil {
+		return err
+	}
 	return o.materialize(ctx, g)
+}
+
+func (o Options) ensureRollupWasmNode(g *Graph) error {
+	if g == nil {
+		return nil
+	}
+	var ver string
+	for _, n := range g.Nodes {
+		if n.Name == "rollup" {
+			ver = n.Version
+		}
+		if n.Name == "@rollup/wasm-node" {
+			return nil
+		}
+	}
+	if ver == "" {
+		return nil
+	}
+	pm, err := o.registry().packument("@rollup/wasm-node")
+	if err != nil {
+		return nil
+	}
+	pv, ok := pm.Versions[ver]
+	if !ok {
+		return nil
+	}
+	lockPath := npmLockPath("", "@rollup/wasm-node", g.Packages)
+	ent := lockPackage{
+		Name:      "@rollup/wasm-node",
+		Version:   ver,
+		Resolved:  pv.Dist.Tarball,
+		Integrity: integrityOf(pv),
+	}
+	g.Packages[lockPath] = ent
+	g.Nodes = append(g.Nodes, Node{
+		Name:      "@rollup/wasm-node",
+		Version:   ver,
+		Resolved:  ent.Resolved,
+		Integrity: ent.Integrity,
+		LockPath:  lockPath,
+	})
+	return nil
 }
 
 // Add puts name in dependencies, re-resolves, and materializes.

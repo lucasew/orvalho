@@ -112,6 +112,13 @@ func resolveGraph(reg registry, m *Manifest) (*Graph, error) {
 			for dep, rng := range pv.OptionalDependencies {
 				q = append(q, resolveJob{name: dep, rng: rng, parentPath: lockPath, dev: j.dev, optional: true})
 			}
+			if j.name == "rollup" {
+				if pm2, err := reg.packument("@rollup/wasm-node"); err == nil {
+					if _, ok := pm2.Versions[ver]; ok {
+						q = append(q, resolveJob{name: "@rollup/wasm-node", rng: ver, parentPath: lockPath})
+					}
+				}
+			}
 		}
 		_ = already
 	}

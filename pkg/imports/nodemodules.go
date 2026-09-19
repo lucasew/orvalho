@@ -37,6 +37,17 @@ func (n NodeModules) Lookup(spec string) (string, bool) {
 	if n.FS == nil {
 		return "", false
 	}
+	file, ok := n.lookup(spec)
+	if !ok {
+		return "", false
+	}
+	if alt, ok := n.rollupWasmNative(file); ok {
+		return alt, true
+	}
+	return file, true
+}
+
+func (n NodeModules) lookup(spec string) (string, bool) {
 	if strings.HasPrefix(spec, "#") {
 		return n.lookupImport(spec)
 	}
@@ -52,6 +63,26 @@ func (n NodeModules) Lookup(spec string) (string, bool) {
 		return "", false
 	}
 	return n.packageFile(pkgDir, sub)
+}
+
+// rollupWasmNative maps rollup's napi dist/native.js to @rollup/wasm-node
+// (the build Rollup documents for non-native guests).
+func (n NodeModules) rollupWasmNative(file string) (string, bool) {
+	if !strings.HasSuffix(file, "/dist/native.js") || strings.Contains(file, "wasm-node") {
+		return "", false
+	}
+	if !strings.Contains(file, "/rollup/") && !strings.HasSuffix(path.Dir(path.Dir(file)), "rollup") {
+		return "", false
+	}
+	dir, ok := n.packageDir("@rollup/wasm-node")
+	if !ok {
+		return "", false
+	}
+	cand := path.Join(dir, "dist/native.js")
+	if n.isFile(cand) {
+		return cand, true
+	}
+	return "", false
 }
 
 func (n NodeModules) lookupImport(spec string) (string, bool) {

@@ -64,6 +64,24 @@ func TestNodeModulesScoped(t *testing.T) {
 	}), "@scope/pkg", "@scope/pkg/index.js")
 }
 
+func TestNodeModulesRollupNativeUsesWasmNode(t *testing.T) {
+	t.Parallel()
+	fsys := tree(map[string]string{
+		"node_modules/.orvalho/rollup@4.62.2/node_modules/rollup/dist/native.js":                       `throw new Error("napi")`,
+		"node_modules/.orvalho/@rollup/wasm-node@4.62.2/node_modules/@rollup/wasm-node/dist/native.js": `exports.parse = function () {}`,
+		"node_modules/.orvalho/@rollup/wasm-node@4.62.2/node_modules/@rollup/wasm-node/package.json":   `{"main":"dist/rollup.js"}`,
+	})
+	from := "node_modules/.orvalho/rollup@4.62.2/node_modules/rollup/dist/parseAst.js"
+	got, ok := (NodeModules{FS: fsys, From: from}).Lookup("node_modules/.orvalho/rollup@4.62.2/node_modules/rollup/dist/native.js")
+	if !ok {
+		t.Fatal("miss")
+	}
+	want := "node_modules/.orvalho/@rollup/wasm-node@4.62.2/node_modules/@rollup/wasm-node/dist/native.js"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
 func TestNodeModulesExistingFilePath(t *testing.T) {
 	t.Parallel()
 	lookupOK(t, tree(map[string]string{
