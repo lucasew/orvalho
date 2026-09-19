@@ -110,12 +110,6 @@ func NodeScriptImports() []imports.Handler[any] {
 			if spec == "esbuild" || strings.HasPrefix(spec, "esbuild/") {
 				return nodeEsbuildBinding{}, nil
 			}
-			if spec == "rollup/parseAst" || isRollupParseAstFile(spec) {
-				return nodeRollupParseAstBinding{}, nil
-			}
-			if strings.HasPrefix(spec, "@rollup/rollup-") || strings.HasSuffix(spec, ".node") {
-				return nodeRollupNativeBinding{}, nil
-			}
 			if strings.HasPrefix(spec, "lightningcss-") {
 				return nodeLightningCSSBinding{}, nil
 			}
