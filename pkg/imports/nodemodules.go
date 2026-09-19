@@ -21,6 +21,9 @@ func (n NodeModules) Resolve(spec string, next Resolver[any]) (any, error) {
 	if !ok {
 		return next(spec)
 	}
+	if strings.HasSuffix(strings.ToLower(file), ".node") {
+		return next(spec)
+	}
 	data, err := fs.ReadFile(n.FS, file)
 	if err != nil {
 		return nil, err

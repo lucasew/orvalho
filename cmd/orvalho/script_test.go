@@ -180,6 +180,24 @@ func TestRunScriptFileWriteFS(t *testing.T) {
 	}
 }
 
+func TestRunScriptFileGuestPlatformIsWasi(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.js")
+	src := `
+		var p = require("node:process");
+		if (p.platform !== "wasi") throw new Error("platform " + p.platform);
+		if (p.arch !== "wasm32") throw new Error("arch " + p.arch);
+		if (require("os").platform() !== "wasi") throw new Error("os.platform");
+		if (require("os").arch() !== "wasm32") throw new Error("os.arch");
+	`
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runScriptFile(t.Context(), dir, path, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunScriptFileReaddirDirent(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {

@@ -112,6 +112,8 @@ func runScriptFile(ctx context.Context, dir, file string, extra []string) error 
 		Cwd:        dir,
 		PID:        os.Getpid(),
 		ExecPath:   exe,
+		Platform:   "wasi",
+		Arch:       "wasm32",
 		Spawn:      hostSpawn,
 		Dial:       hostDial,
 		Lookup:     hostLookup,
