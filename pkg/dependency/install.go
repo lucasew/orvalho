@@ -206,7 +206,7 @@ func (o Options) materializeSession(ctx context.Context, g *Graph) error {
 	}
 	var jobs []pkgJob
 	for i, n := range g.Nodes {
-		if n.Optional && !keepOptional(n.CPU) {
+		if n.Optional && !keepOptional(n.CPU, n.OS, n.Libc) {
 			continue
 		}
 		jobs = append(jobs, pkgJob{idx: i, n: n})
@@ -214,7 +214,7 @@ func (o Options) materializeSession(ctx context.Context, g *Graph) error {
 	out, err := taskgroup.Map[pkgJob, Node]{
 		Name:     "packages",
 		Items:    jobs,
-		PoolKind: taskgroup.Internet,
+		PoolKind: taskgroup.Control,
 		TaskName: func(_ int, j pkgJob) string {
 			if j.n.Name != "" && j.n.Version != "" {
 				return j.n.Name + "@" + j.n.Version
@@ -224,8 +224,20 @@ func (o Options) materializeSession(ctx context.Context, g *Graph) error {
 			}
 			return j.n.LockPath
 		},
-		Fn: func(ctx context.Context, s *taskgroup.Status, j pkgJob) (Node, error) {
-			return o.materializeOne(ctx, s, st, j.n)
+		Fn: func(ctx context.Context, _ *taskgroup.Status, j pkgJob) (Node, error) {
+			n := j.n
+			err := taskgroup.Isolate(ctx, func(ctx context.Context) error {
+				fetch := taskgroup.Go(ctx, "fetch", taskgroup.Internet, func(ctx context.Context, s *taskgroup.Status) error {
+					var err error
+					n, err = o.fetchOne(ctx, s, st, n)
+					return err
+				})
+				taskgroup.Go(ctx, "unpack", taskgroup.IO, func(_ context.Context, s *taskgroup.Status) error {
+					return o.unpackOne(s, st, n)
+				}, fetch)
+				return nil
+			})
+			return n, err
 		},
 	}.Run(ctx)
 	if err != nil {
@@ -242,7 +254,7 @@ func (o Options) materializeSession(ctx context.Context, g *Graph) error {
 	return (linker{root: o.project(), g: g}).run()
 }
 
-func (o Options) materializeOne(ctx context.Context, s *taskgroup.Status, st Store, n Node) (Node, error) {
+func (o Options) fetchOne(ctx context.Context, s *taskgroup.Status, st Store, n Node) (Node, error) {
 	if err := o.ensureDist(&n); err != nil {
 		return n, err
 	}
@@ -252,29 +264,34 @@ func (o Options) materializeOne(ctx context.Context, s *taskgroup.Status, st Sto
 	}
 	if st.Has(algo, hash) {
 		s.Update("cached")
-	} else {
-		s.Update("fetch")
-		if err := st.Fetch(ctx, algo, hash, []string{n.Resolved}); err != nil {
-			return n, err
-		}
+		return n, nil
+	}
+	s.Update("fetch")
+	if err := st.Fetch(ctx, algo, hash, []string{n.Resolved}); err != nil {
+		return n, err
+	}
+	return n, nil
+}
+
+func (o Options) unpackOne(s *taskgroup.Status, st Store, n Node) error {
+	algo, hash, err := ParseIntegrity(n.Integrity)
+	if err != nil {
+		return err
 	}
 	s.Update("unpack")
 	dest := filepath.Join(o.project(), slotDir(n.Name, n.Version))
 	if err := os.MkdirAll(dest, 0o755); err != nil {
-		return n, err
+		return err
 	}
 	f, err := st.Open(algo, hash)
 	if err != nil {
-		return n, err
+		return err
 	}
 	err = unpackTarball(f, dest)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
-	if err != nil {
-		return n, err
-	}
-	return n, nil
+	return err
 }
 
 // ensureDist fills Resolved and Integrity from the registry when the Lockfile

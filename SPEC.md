@@ -258,7 +258,7 @@ Not interfaces: goja, esbuild, CUE, Cobra.
 | INV-15 | Only root Dependencies appear as `node_modules/<name>`. Transitive Dependencies live under the virtual store | isolated tree | hoist every transitive name to the project top level |
 | INV-16 | Script run and bin execution do not invoke host Node.js | Script, `.bin` | `#!/usr/bin/env node` reaching a host `node` |
 | INV-17 | Lifecycle scripts do not run. `.node` files are not loaded | Dependency | `postinstall`, `node-gyp`, `process.dlopen` |
-| INV-18 | An optional Dependency is installed only when its packument `cpu` list contains `wasm32` | Dependency | fetch `fsevents` or a platform `os`/`cpu` optional |
+| INV-18 | An optional Dependency is installed when packument `cpu` lists `wasm32`, or when `os`/`cpu`/`libc` match the host. Other optionals are skipped without failing install | Dependency | skip `fsevents` on Linux; keep `@rollup/rollup-linux-x64-gnu` on Linux x64 glibc |
 | INV-19 | An unrecognized Lockfile is refused. A second Lockfile is not written beside it | Lockfile | write `package-lock.json` next to `yarn.lock` |
 | INV-20 | A peer Dependency is linked when a node with that name is already in the graph. A missing peer is not fetched | isolated tree | auto-install a missing peer from the registry |
 
@@ -341,7 +341,7 @@ Residual risk: goja defects, side channels, Operator compromise of `--data-dir`.
 - [ ] `dependency install` on a `package.json` with one registry Dependency writes `package-lock.json`, a content-store object, and an isolated tree whose top level contains only that name.
 - [ ] `script run` of a file that `require`s that Dependency loads it through `exports` / `main` without host Node.js.
 - [ ] `package serve` of a Package that has `node_modules` still evaluates one IIFE and does not walk the isolated tree.
-- [ ] An optional Dependency whose packument `cpu` lacks `wasm32` is absent from the isolated tree and does not fail install.
+- [ ] An optional Dependency that does not match the host `os`/`cpu`/`libc` (and is not `wasm32`) is absent from the isolated tree and does not fail install.
 - [ ] A `yarn.lock` in the project directory makes `dependency install` exit 1 with the store and `node_modules` unchanged.
 
 ## Later work

@@ -28,6 +28,8 @@ type Node struct {
 	Dev                  bool
 	Optional             bool
 	CPU                  []string
+	OS                   []string
+	Libc                 []string
 	Dependencies         map[string]string
 	PeerDependencies     map[string]string
 	OptionalDependencies map[string]string
@@ -83,6 +85,7 @@ type lockPackage struct {
 	DevOptional          bool              `json:"devOptional,omitempty"`
 	CPU                  []string          `json:"cpu,omitempty"`
 	OS                   []string          `json:"os,omitempty"`
+	Libc                 []string          `json:"libc,omitempty"`
 	Dependencies         map[string]string `json:"dependencies,omitempty"`
 	DevDependencies      map[string]string `json:"devDependencies,omitempty"`
 	PeerDependencies     map[string]string `json:"peerDependencies,omitempty"`
@@ -159,6 +162,8 @@ func ReadLockfile(path string) (*Graph, error) {
 			Dev:                  ent.Dev,
 			Optional:             ent.Optional || ent.DevOptional,
 			CPU:                  ent.CPU,
+			OS:                   ent.OS,
+			Libc:                 ent.Libc,
 			Dependencies:         ent.Dependencies,
 			PeerDependencies:     ent.PeerDependencies,
 			OptionalDependencies: ent.OptionalDependencies,

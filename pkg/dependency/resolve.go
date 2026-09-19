@@ -25,13 +25,13 @@ func resolveGraph(reg registry, m *Manifest) (*Graph, error) {
 
 	var q []resolveJob
 	for n, r := range m.Dependencies {
-		q = append(q, resolveJob{n, r, "", false})
+		q = append(q, resolveJob{name: n, rng: r})
 	}
 	for n, r := range m.DevDependencies {
-		q = append(q, resolveJob{n, r, "", true})
+		q = append(q, resolveJob{name: n, rng: r, dev: true})
 	}
 	for n, r := range m.OptionalDependencies {
-		q = append(q, resolveJob{n, r, "", false})
+		q = append(q, resolveJob{name: n, rng: r, optional: true})
 	}
 
 	placed := map[string]string{} // name@version -> lock path
@@ -65,7 +65,7 @@ func resolveGraph(reg registry, m *Manifest) (*Graph, error) {
 		}
 		pv := pm.Versions[ver]
 
-		if optOf(j, m) && !keepOptional(pv.CPU) {
+		if optOf(j) && !keepOptional(pv.CPU, pv.OS, pv.Libc) {
 			continue
 		}
 
@@ -80,9 +80,10 @@ func resolveGraph(reg registry, m *Manifest) (*Graph, error) {
 				Resolved:             pv.Dist.Tarball,
 				Integrity:            integrityOf(pv),
 				Dev:                  j.dev,
-				Optional:             optOf(j, m),
+				Optional:             optOf(j),
 				CPU:                  pv.CPU,
 				OS:                   pv.OS,
+				Libc:                 pv.Libc,
 				Dependencies:         maps.Clone(pv.Dependencies),
 				PeerDependencies:     maps.Clone(pv.PeerDependencies),
 				OptionalDependencies: maps.Clone(pv.OptionalDependencies),
@@ -97,6 +98,8 @@ func resolveGraph(reg registry, m *Manifest) (*Graph, error) {
 				Dev:                  j.dev,
 				Optional:             ent.Optional,
 				CPU:                  pv.CPU,
+				OS:                   pv.OS,
+				Libc:                 pv.Libc,
 				Dependencies:         maps.Clone(pv.Dependencies),
 				PeerDependencies:     maps.Clone(pv.PeerDependencies),
 				OptionalDependencies: maps.Clone(pv.OptionalDependencies),
@@ -104,10 +107,10 @@ func resolveGraph(reg registry, m *Manifest) (*Graph, error) {
 				LockPath:             lockPath,
 			})
 			for dep, rng := range pv.Dependencies {
-				q = append(q, resolveJob{dep, rng, lockPath, j.dev})
+				q = append(q, resolveJob{name: dep, rng: rng, parentPath: lockPath, dev: j.dev})
 			}
 			for dep, rng := range pv.OptionalDependencies {
-				q = append(q, resolveJob{dep, rng, lockPath, j.dev})
+				q = append(q, resolveJob{name: dep, rng: rng, parentPath: lockPath, dev: j.dev, optional: true})
 			}
 		}
 		_ = already
@@ -117,15 +120,11 @@ func resolveGraph(reg registry, m *Manifest) (*Graph, error) {
 
 type resolveJob struct {
 	name, rng, parentPath string
-	dev                   bool
+	dev, optional         bool
 }
 
-func optOf(j resolveJob, m *Manifest) bool {
-	if j.parentPath == "" {
-		_, ok := m.OptionalDependencies[j.name]
-		return ok
-	}
-	return false
+func optOf(j resolveJob) bool {
+	return j.optional
 }
 
 func pickFromPackument(p *packument, rng string) (string, bool) {
