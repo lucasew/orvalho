@@ -1,8 +1,14 @@
 package main
 
-import "context"
+import (
+	"context"
 
-type workerCmd struct{}
+	lewcmd "github.com/lewtec/lewkit/x/cmd"
+)
+
+type workerCmd struct {
+	DataDir lewcmd.DataDirArg `long:"data-dir" help:"host data directory"`
+}
 
 func (workerCmd) Run(context.Context) error {
 	return ErrWorkerSkeleton

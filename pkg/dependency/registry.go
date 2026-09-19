@@ -26,6 +26,7 @@ type packumentVersion struct {
 	OptionalDependencies map[string]string `json:"optionalDependencies"`
 	CPU                  []string          `json:"cpu"`
 	OS                   []string          `json:"os"`
+	Libc                 []string          `json:"libc"`
 	Bin                  any               `json:"bin"`
 	Dist                 struct {
 		Tarball   string `json:"tarball"`

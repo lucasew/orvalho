@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,8 +21,8 @@ import (
 )
 
 type serveCmd struct {
-	Addr    lewcmd.StringArg   `long:"addr" help:"listen address (default :8787, or :PORT from package)"`
-	EnvFile lewcmd.StringArg   `long:"env-file" help:"path to .env / .dev.vars for runtime.env"`
+	Addr    lewcmd.AddrArg     `long:"addr" help:"listen address" default:":8787"`
+	EnvFile lewcmd.StringArg   `long:"env-file" help:"path to .env / .dev.vars for runtime.env" default:""`
 	Var     []lewcmd.StringArg `long:"var" help:"runtime.env NAME=value (repeatable)"`
 	Path    lewcmd.StringArg
 }
@@ -76,13 +77,15 @@ func (s *serveCmd) Run(ctx context.Context) error {
 	})
 
 	addr := s.Addr.Value()
-	if addr == "" {
-		if port, err := pkg.Port(); err != nil {
+	if port, err := pkg.Port(); err != nil {
+		return err
+	} else if port > 0 {
+		host, p, err := net.SplitHostPort(addr)
+		if err != nil {
 			return err
-		} else if port > 0 {
-			addr = fmt.Sprintf(":%d", port)
-		} else {
-			addr = ":8787"
+		}
+		if p == "8787" {
+			addr = net.JoinHostPort(host, strconv.Itoa(port))
 		}
 	}
 

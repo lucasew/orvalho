@@ -46,14 +46,19 @@ func (l linker) run() error {
 		}
 		sib := filepath.Join(l.root, slotNodeModules(n.Name, n.Version))
 		for depName := range n.Dependencies {
+			if err := l.linkDep(sib, n.LockPath, depName); err != nil {
+				return err
+			}
+		}
+		for depName := range n.OptionalDependencies {
 			target := l.visible(n.LockPath, depName)
 			if target == nil {
 				continue
 			}
-			if err := symlinkRel(
-				filepath.Join(sib, filepath.FromSlash(depName)),
-				filepath.Join(l.root, slotDir(target.Name, target.Version)),
-			); err != nil {
+			if target.Optional && !keepOptional(target.CPU) {
+				continue
+			}
+			if err := l.linkDep(sib, n.LockPath, depName); err != nil {
 				return err
 			}
 		}
@@ -94,6 +99,17 @@ func (l linker) run() error {
 	return l.bins()
 }
 
+func (l linker) linkDep(sib, fromPath, depName string) error {
+	target := l.visible(fromPath, depName)
+	if target == nil {
+		return nil
+	}
+	return symlinkRel(
+		filepath.Join(sib, filepath.FromSlash(depName)),
+		filepath.Join(l.root, slotDir(target.Name, target.Version)),
+	)
+}
+
 func (l linker) nodeAt(lockPath string) *Node {
 	ent, ok := l.g.Packages[lockPath]
 	if !ok || ent.Link {
@@ -104,16 +120,19 @@ func (l linker) nodeAt(lockPath string) *Node {
 		name = packageNameFromPath(lockPath)
 	}
 	n := Node{
-		Name:             name,
-		Version:          ent.Version,
-		Resolved:         ent.Resolved,
-		Integrity:        ent.Integrity,
-		Optional:         ent.Optional || ent.DevOptional,
-		CPU:              ent.CPU,
-		Dependencies:     ent.Dependencies,
-		PeerDependencies: ent.PeerDependencies,
-		Bin:              parseBin(ent.Bin),
-		LockPath:         lockPath,
+		Name:                 name,
+		Version:              ent.Version,
+		Resolved:             ent.Resolved,
+		Integrity:            ent.Integrity,
+		Optional:             ent.Optional || ent.DevOptional,
+		CPU:                  ent.CPU,
+		OS:                   ent.OS,
+		Libc:                 ent.Libc,
+		Dependencies:         ent.Dependencies,
+		PeerDependencies:     ent.PeerDependencies,
+		OptionalDependencies: ent.OptionalDependencies,
+		Bin:                  parseBin(ent.Bin),
+		LockPath:             lockPath,
 	}
 	return &n
 }

@@ -28,6 +28,21 @@ var (
 	ErrScriptMissing     = errors.New("script: missing file")
 )
 
+func hostDataDir(cli orvalhoCLI) string {
+	switch {
+	case cli.Identity != nil:
+		return cli.Identity.DataDir.Value()
+	case cli.ConfigCmd != nil:
+		return cli.ConfigCmd.DataDir.Value()
+	case cli.Manager != nil:
+		return cli.Manager.DataDir.Value()
+	case cli.Worker != nil:
+		return cli.Worker.DataDir.Value()
+	default:
+		return ""
+	}
+}
+
 func requireDataDir() error {
 	if dataDir == "" {
 		return ErrDataDirRequired

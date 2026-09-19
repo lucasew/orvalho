@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/lewtec/lewkit/x/taskgroup"
 )
 
 // Options configure Install, Add, and Remove.
@@ -71,7 +73,52 @@ func (o Options) Install(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := o.ensureRollupWasmNode(g); err != nil {
+		return err
+	}
 	return o.materialize(ctx, g)
+}
+
+func (o Options) ensureRollupWasmNode(g *Graph) error {
+	if g == nil {
+		return nil
+	}
+	var ver string
+	for _, n := range g.Nodes {
+		if n.Name == "rollup" {
+			ver = n.Version
+		}
+		if n.Name == "@rollup/wasm-node" {
+			return nil
+		}
+	}
+	if ver == "" {
+		return nil
+	}
+	pm, err := o.registry().packument("@rollup/wasm-node")
+	if err != nil {
+		return nil
+	}
+	pv, ok := pm.Versions[ver]
+	if !ok {
+		return nil
+	}
+	lockPath := npmLockPath("", "@rollup/wasm-node", g.Packages)
+	ent := lockPackage{
+		Name:      "@rollup/wasm-node",
+		Version:   ver,
+		Resolved:  pv.Dist.Tarball,
+		Integrity: integrityOf(pv),
+	}
+	g.Packages[lockPath] = ent
+	g.Nodes = append(g.Nodes, Node{
+		Name:      "@rollup/wasm-node",
+		Version:   ver,
+		Resolved:  ent.Resolved,
+		Integrity: ent.Integrity,
+		LockPath:  lockPath,
+	})
+	return nil
 }
 
 // Add puts name in dependencies, re-resolves, and materializes.
@@ -180,6 +227,21 @@ func splitNameRange(spec string) (name, rng string, ok bool) {
 }
 
 func (o Options) materialize(ctx context.Context, g *Graph) error {
+	work := func(ctx context.Context) error {
+		return o.materializeSession(ctx, g)
+	}
+	if taskgroup.FromContext(ctx) != nil {
+		return work(ctx)
+	}
+	return taskgroup.WithSession(ctx, work)
+}
+
+type pkgJob struct {
+	idx int
+	n   Node
+}
+
+func (o Options) materializeSession(ctx context.Context, g *Graph) error {
 	st, err := o.store()
 	if err != nil {
 		return err
@@ -187,44 +249,94 @@ func (o Options) materialize(ctx context.Context, g *Graph) error {
 	if err := os.MkdirAll(st.Dir, 0o755); err != nil {
 		return err
 	}
-	for i := range g.Nodes {
-		n := g.Nodes[i]
+	var jobs []pkgJob
+	for i, n := range g.Nodes {
 		if n.Optional && !keepOptional(n.CPU) {
 			continue
 		}
-		if err := o.ensureDist(&n); err != nil {
-			return err
-		}
-		g.Nodes[i] = n
+		jobs = append(jobs, pkgJob{idx: i, n: n})
+	}
+	out, err := taskgroup.Map[pkgJob, Node]{
+		Name:     "packages",
+		Items:    jobs,
+		PoolKind: taskgroup.Control,
+		TaskName: func(_ int, j pkgJob) string {
+			if j.n.Name != "" && j.n.Version != "" {
+				return j.n.Name + "@" + j.n.Version
+			}
+			if j.n.Name != "" {
+				return j.n.Name
+			}
+			return j.n.LockPath
+		},
+		Fn: func(ctx context.Context, _ *taskgroup.Status, j pkgJob) (Node, error) {
+			n := j.n
+			err := taskgroup.Isolate(ctx, func(ctx context.Context) error {
+				fetch := taskgroup.Go(ctx, "fetch", taskgroup.Internet, func(ctx context.Context, s *taskgroup.Status) error {
+					var err error
+					n, err = o.fetchOne(ctx, s, st, n)
+					return err
+				})
+				taskgroup.Go(ctx, "unpack", taskgroup.IO, func(_ context.Context, s *taskgroup.Status) error {
+					return o.unpackOne(s, st, n)
+				}, fetch)
+				return nil
+			})
+			return n, err
+		},
+	}.Run(ctx)
+	if err != nil {
+		return err
+	}
+	for i, n := range out {
+		g.Nodes[jobs[i].idx] = n
 		if ent, ok := g.Packages[n.LockPath]; ok {
 			ent.Resolved = n.Resolved
 			ent.Integrity = n.Integrity
 			g.Packages[n.LockPath] = ent
 		}
-		algo, hash, err := ParseIntegrity(n.Integrity)
-		if err != nil {
-			return err
-		}
-		if err := st.Fetch(ctx, algo, hash, []string{n.Resolved}); err != nil {
-			return err
-		}
-		dest := filepath.Join(o.project(), slotDir(n.Name, n.Version))
-		if err := os.MkdirAll(dest, 0o755); err != nil {
-			return err
-		}
-		f, err := st.Open(algo, hash)
-		if err != nil {
-			return err
-		}
-		err = unpackTarball(f, dest)
-		if cerr := f.Close(); err == nil {
-			err = cerr
-		}
-		if err != nil {
-			return err
-		}
 	}
 	return (linker{root: o.project(), g: g}).run()
+}
+
+func (o Options) fetchOne(ctx context.Context, s *taskgroup.Status, st Store, n Node) (Node, error) {
+	if err := o.ensureDist(&n); err != nil {
+		return n, err
+	}
+	algo, hash, err := ParseIntegrity(n.Integrity)
+	if err != nil {
+		return n, err
+	}
+	if st.Has(algo, hash) {
+		s.Update("cached")
+		return n, nil
+	}
+	s.Update("fetch")
+	if err := st.Fetch(ctx, algo, hash, []string{n.Resolved}); err != nil {
+		return n, err
+	}
+	return n, nil
+}
+
+func (o Options) unpackOne(s *taskgroup.Status, st Store, n Node) error {
+	algo, hash, err := ParseIntegrity(n.Integrity)
+	if err != nil {
+		return err
+	}
+	s.Update("unpack")
+	dest := filepath.Join(o.project(), slotDir(n.Name, n.Version))
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return err
+	}
+	f, err := st.Open(algo, hash)
+	if err != nil {
+		return err
+	}
+	err = unpackTarball(f, dest)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // ensureDist fills Resolved and Integrity from the registry when the Lockfile

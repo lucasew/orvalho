@@ -2,6 +2,7 @@ package bundle
 
 import (
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,9 @@ import (
 
 	"github.com/evanw/esbuild/pkg/api"
 )
+
+// ErrNativeAddon is INV-17: .node / ELF is not JavaScript.
+var ErrNativeAddon = errors.New("native addon")
 
 //go:embed es_module_lexer.asm.js
 var esmLexerASM string
@@ -62,7 +66,14 @@ var pAtom = map[string]string{
 
 // CompileCJS compiles source to CommonJS ES2015 in memory (ADR-0017).
 // On-disk files are bundled so imports resolve. Other sources are transformed.
+func isELF(source string) bool {
+	return len(source) >= 4 && source[0] == '\x7f' && source[1] == 'E' && source[2] == 'L' && source[3] == 'F'
+}
+
 func CompileCJS(source, file string) (string, error) {
+	if strings.EqualFold(filepath.Ext(file), ".node") || isELF(source) {
+		return "", fmt.Errorf("%w: %s", ErrNativeAddon, file)
+	}
 	if dir, ok := resolveDir(file); ok {
 		return buildCJS(source, file, dir)
 	}
@@ -81,6 +92,9 @@ func TransformEvalCJS(source, file string) (string, error) {
 }
 
 func transformCJS(source, file string, allowTLA bool) (string, error) {
+	if strings.EqualFold(filepath.Ext(file), ".node") || isELF(source) {
+		return "", fmt.Errorf("%w: %s", ErrNativeAddon, file)
+	}
 	if !needsCJSTransform(source, file) {
 		return rewritePlainCJS(source), nil
 	}

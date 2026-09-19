@@ -12,17 +12,18 @@ import (
 )
 
 type identityCmd struct {
+	DataDir  lewcmd.DataDirArg    `long:"data-dir" help:"host data directory"`
 	Generate *identityGenerateCmd `cmd:"generate" help:"create and persist a new manager identity"`
 	Show     *identityShowCmd     `cmd:"show" help:"load a manager identity and print its public id"`
 }
 
 type identityGenerateCmd struct {
-	Path  lewcmd.StringArg `long:"path" help:"path to write manager private key PEM"`
+	Path  lewcmd.StringArg `long:"path" help:"path to write manager private key PEM" default:""`
 	Force lewcmd.Flag      `long:"force" help:"overwrite existing key file"`
 }
 
 type identityShowCmd struct {
-	Path lewcmd.StringArg `long:"path" help:"path to manager private key PEM"`
+	Path lewcmd.StringArg `long:"path" help:"path to manager private key PEM" default:""`
 }
 
 func resolveKeyPath(flagPath string) (string, error) {

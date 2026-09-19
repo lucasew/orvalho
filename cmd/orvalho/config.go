@@ -9,10 +9,13 @@ import (
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/format"
 
+	lewcmd "github.com/lewtec/lewkit/x/cmd"
+
 	"github.com/lucasew/orvalho/pkg/cuex"
 )
 
 type configCmd struct {
+	DataDir  lewcmd.DataDirArg  `long:"data-dir" help:"host data directory"`
 	Validate *configValidateCmd `cmd:"validate" help:"validate host orvalho.cue against preludes"`
 	Show     *configShowCmd     `cmd:"show" help:"print unified host config"`
 }
