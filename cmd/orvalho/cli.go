@@ -14,15 +14,16 @@ import (
 // orvalhoCLI is the product command tree under lewkit App
 // (which already owns -v, --profile-dir, --help, version).
 type orvalhoCLI struct {
-	DataDir    lewcmd.StringArg `long:"data-dir" help:"host data directory (required for host commands)"`
-	Config     lewcmd.StringArg `long:"config" help:"host orvalho.cue path (default: <data-dir>/orvalho.cue)"`
-	Script     *scriptCmd       `cmd:"script" help:"run a Script as main (Node-compatible)"`
-	Serve      *serveCmd        `cmd:"serve" help:"serve one package over local HTTP"`
-	Identity   *identityCmd     `cmd:"identity" help:"manage manager identity key material"`
-	ConfigCmd  *configCmd       `cmd:"config" help:"host CUE configuration"`
-	Dependency *dependencyCmd   `cmd:"dependency" help:"resolve and install registry Dependencies"`
-	Manager    *managerCmd      `cmd:"manager" help:"manager role (pair, sign, deploy, daemon)"`
-	Worker     *workerCmd       `cmd:"worker" help:"worker role (actor host on device)"`
+	DataDir    lewcmd.StringArg   `long:"data-dir" help:"host data directory (required for host commands)" default:""`
+	Config     lewcmd.StringArg   `long:"config" help:"host orvalho.cue path (default: <data-dir>/orvalho.cue)" default:""`
+	Version    *lewcmd.VersionCmd `cmd:"version" help:"print version"`
+	Script     *scriptCmd         `cmd:"script" help:"run a Script as main (Node-compatible)"`
+	Serve      *serveCmd          `cmd:"serve" help:"serve one package over local HTTP"`
+	Identity   *identityCmd       `cmd:"identity" help:"manage manager identity key material"`
+	ConfigCmd  *configCmd         `cmd:"config" help:"host CUE configuration"`
+	Dependency *dependencyCmd     `cmd:"dependency" help:"resolve and install registry Dependencies"`
+	Manager    *managerCmd        `cmd:"manager" help:"manager role (pair, sign, deploy, daemon)"`
+	Worker     *workerCmd         `cmd:"worker" help:"worker role (actor host on device)"`
 }
 
 func Execute() error {

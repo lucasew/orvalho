@@ -20,8 +20,8 @@ import (
 )
 
 type serveCmd struct {
-	Addr    lewcmd.StringArg   `long:"addr" help:"listen address (default :8787, or :PORT from package)"`
-	EnvFile lewcmd.StringArg   `long:"env-file" help:"path to .env / .dev.vars for runtime.env"`
+	Addr    lewcmd.StringArg   `long:"addr" help:"listen address (default :8787, or :PORT from package)" default:""`
+	EnvFile lewcmd.StringArg   `long:"env-file" help:"path to .env / .dev.vars for runtime.env" default:""`
 	Var     []lewcmd.StringArg `long:"var" help:"runtime.env NAME=value (repeatable)"`
 	Path    lewcmd.StringArg
 }

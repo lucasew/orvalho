@@ -17,12 +17,12 @@ type identityCmd struct {
 }
 
 type identityGenerateCmd struct {
-	Path  lewcmd.StringArg `long:"path" help:"path to write manager private key PEM"`
+	Path  lewcmd.StringArg `long:"path" help:"path to write manager private key PEM" default:""`
 	Force lewcmd.Flag      `long:"force" help:"overwrite existing key file"`
 }
 
 type identityShowCmd struct {
-	Path lewcmd.StringArg `long:"path" help:"path to manager private key PEM"`
+	Path lewcmd.StringArg `long:"path" help:"path to manager private key PEM" default:""`
 }
 
 func resolveKeyPath(flagPath string) (string, error) {

@@ -17,24 +17,21 @@ type dependencyCmd struct {
 }
 
 type depInstallCmd struct {
-	StoreDir lewcmd.StringArg `long:"store-dir" help:"content store directory"`
-	Dir      lewcmd.StringArg
+	StoreDir lewcmd.StringArg  `long:"store-dir" help:"content store directory" default:""`
+	Dir      lewcmd.WorkDirArg `help:"project directory"`
 }
 
 type depAddCmd struct {
-	StoreDir lewcmd.StringArg `long:"store-dir" help:"content store directory"`
+	StoreDir lewcmd.StringArg `long:"store-dir" help:"content store directory" default:""`
 	Name     lewcmd.StringArg
 }
 
 type depRemoveCmd struct {
-	StoreDir lewcmd.StringArg `long:"store-dir" help:"content store directory"`
+	StoreDir lewcmd.StringArg `long:"store-dir" help:"content store directory" default:""`
 	Name     lewcmd.StringArg
 }
 
 func dependencyOptions(dir, store string) dependency.Options {
-	if dir == "" {
-		dir = "."
-	}
 	return dependency.Options{Dir: dir, StoreDir: store}
 }
 
