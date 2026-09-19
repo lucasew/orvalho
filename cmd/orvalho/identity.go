@@ -12,6 +12,7 @@ import (
 )
 
 type identityCmd struct {
+	DataDir  lewcmd.DataDirArg    `long:"data-dir" help:"host data directory"`
 	Generate *identityGenerateCmd `cmd:"generate" help:"create and persist a new manager identity"`
 	Show     *identityShowCmd     `cmd:"show" help:"load a manager identity and print its public id"`
 }

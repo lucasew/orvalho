@@ -22,16 +22,16 @@ Product vision and constraints: [`SPEC.md`](./SPEC.md).
 
 ### CLI
 
-All parsing is Cobra. **`--data-dir` is always required** for host commands (no implicit path).
+**`--data-dir` is required** for host commands (identity, config, manager, worker). It must already exist. No implicit path. `serve`, `script`, and `dependency` do not take it.
 
 ```bash
 go build -o bin/orvalho ./cmd/orvalho
 
 orvalho version
-orvalho --data-dir /path/to/data config validate
-orvalho --data-dir /path/to/data config show
-orvalho --data-dir /path/to/data identity generate
-orvalho --data-dir /path/to/data identity show
+orvalho config validate --data-dir /path/to/data
+orvalho config show --data-dir /path/to/data
+orvalho identity generate --data-dir /path/to/data
+orvalho identity show --data-dir /path/to/data
 
 # Dev: serve one package (zip or directory) on loopback — no mesh/signing
 orvalho serve ./pkg/ovpkg/testdata/minimal

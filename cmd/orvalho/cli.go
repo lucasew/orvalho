@@ -14,7 +14,6 @@ import (
 // orvalhoCLI is the product command tree under lewkit App
 // (which already owns -v, --profile-dir, --help, version).
 type orvalhoCLI struct {
-	DataDir    lewcmd.StringArg   `long:"data-dir" help:"host data directory (required for host commands)" default:""`
 	Config     lewcmd.StringArg   `long:"config" help:"host orvalho.cue path (default: <data-dir>/orvalho.cue)" default:""`
 	Version    *lewcmd.VersionCmd `cmd:"version" help:"print version"`
 	Script     *scriptCmd         `cmd:"script" help:"run a Script as main (Node-compatible)"`
@@ -34,7 +33,7 @@ func Execute() error {
 	if err != nil {
 		return err
 	}
-	dataDir = app.Args.DataDir.Value()
+	dataDir = hostDataDir(app.Args)
 	configPath = app.Args.Config.Value()
 	if app.LogLevel() < slog.LevelInfo {
 		verbose = true
