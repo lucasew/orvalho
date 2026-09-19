@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -46,20 +45,4 @@ func Execute() error {
 	// App.Setup's profile.Run follows ctx; wait for StopCPUProfile.
 	time.Sleep(400 * time.Millisecond)
 	return err
-}
-
-func (s *scriptCmd) Run(context.Context) error {
-	return fmt.Errorf("script: use script run")
-}
-
-func (c *configCmd) Run(context.Context) error {
-	return fmt.Errorf("config: use config validate or config show")
-}
-
-func (d *dependencyCmd) Run(context.Context) error {
-	return fmt.Errorf("dependency: use install, add, or remove")
-}
-
-func (i *identityCmd) Run(context.Context) error {
-	return fmt.Errorf("identity: use generate or show")
 }

@@ -38,6 +38,16 @@ func TestDepInstallWorkDirDefault(t *testing.T) {
 	}
 }
 
+func TestScriptWithoutSubcommandIsUsage(t *testing.T) {
+	app, err := lewcmd.Parse[lewcmd.App[orvalhoCLI]]("script")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := app.Run(t.Context()); err != nil {
+		t.Fatalf("Run: %v (missing Run should print usage and succeed)", err)
+	}
+}
+
 func TestServeDoesNotRequireDataDir(t *testing.T) {
 	got, err := lewcmd.Parse[lewcmd.App[orvalhoCLI]]("serve", ".")
 	if err != nil {
