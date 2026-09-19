@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/lewtec/lewkit/x/io/atomic"
 )
 
 const (
@@ -128,7 +130,7 @@ func ParsePrivatePEM(pemBytes []byte) (*Manager, error) {
 // Save writes the private key PEM to path with mode 0600.
 // Parent directories are created with mode 0700 when missing.
 // Refuses to overwrite an existing file unless overwrite is true.
-func (m *Manager) Save(path string, overwrite bool) error {
+func (m *Manager) Save(path string, overwrite bool) (err error) {
 	if path == "" {
 		return ErrEmptyPath
 	}
@@ -152,39 +154,19 @@ func (m *Manager) Save(path string, overwrite bool) error {
 		}
 	}
 
-	// Write via temp file in the same directory for atomic replace.
-	tmp, err := os.CreateTemp(dir, ".manager-key-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp key file: %w", err)
-	}
-	tmpName := tmp.Name()
-	cleanup := true
+	op := atomic.NewOperation(path, overwrite)
 	defer func() {
-		if cleanup {
-			if remErr := os.Remove(tmpName); remErr != nil && !errors.Is(remErr, os.ErrNotExist) {
-				// Best-effort cleanup after a failed install.
-			}
+		if rerr := op.Rollback(); rerr != nil && err == nil {
+			err = rerr
 		}
 	}()
-
-	if err := tmp.Chmod(0o600); err != nil {
-		closeErr := tmp.Close()
-		return errors.Join(fmt.Errorf("chmod temp key file: %w", err), closeErr)
+	if err = os.WriteFile(op.StagingPath(), pemBytes, 0o600); err != nil {
+		return fmt.Errorf("write temp key file: %w", err)
 	}
-	if _, err := tmp.Write(pemBytes); err != nil {
-		closeErr := tmp.Close()
-		return errors.Join(fmt.Errorf("write temp key file: %w", err), closeErr)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp key file: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err = op.Commit(); err != nil {
 		return fmt.Errorf("install key file: %w", err)
 	}
-	cleanup = false
-
-	// Best-effort: ensure final mode is 0600 even if umask interfered on some platforms.
-	if err := os.Chmod(path, 0o600); err != nil {
+	if err = os.Chmod(path, 0o600); err != nil {
 		return fmt.Errorf("chmod key file: %w", err)
 	}
 	return nil
