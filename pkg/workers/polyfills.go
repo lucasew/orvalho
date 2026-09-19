@@ -51,6 +51,56 @@ func (iso *Isolate) bindConsole() {
 // hostPolyfillScript is injected into every isolate (before guest code).
 const hostPolyfillScript = `
 (function () {
+  if (typeof String.prototype.isWellFormed !== "function") {
+    Object.defineProperty(String.prototype, "isWellFormed", {
+      configurable: true,
+      writable: true,
+      value: function () {
+        var s = String(this);
+        for (var i = 0; i < s.length; i++) {
+          var c = s.charCodeAt(i);
+          if (c >= 0xD800 && c <= 0xDBFF) {
+            if (i + 1 >= s.length) return false;
+            var d = s.charCodeAt(i + 1);
+            if (d < 0xDC00 || d > 0xDFFF) return false;
+            i++;
+          } else if (c >= 0xDC00 && c <= 0xDFFF) {
+            return false;
+          }
+        }
+        return true;
+      }
+    });
+  }
+  if (typeof String.prototype.toWellFormed !== "function") {
+    Object.defineProperty(String.prototype, "toWellFormed", {
+      configurable: true,
+      writable: true,
+      value: function () {
+        var s = String(this);
+        var out = "";
+        for (var i = 0; i < s.length; i++) {
+          var c = s.charCodeAt(i);
+          if (c >= 0xD800 && c <= 0xDBFF) {
+            if (i + 1 < s.length) {
+              var d = s.charCodeAt(i + 1);
+              if (d >= 0xDC00 && d <= 0xDFFF) {
+                out += s.charAt(i) + s.charAt(i + 1);
+                i++;
+                continue;
+              }
+            }
+            out += "\uFFFD";
+          } else if (c >= 0xDC00 && c <= 0xDFFF) {
+            out += "\uFFFD";
+          } else {
+            out += s.charAt(i);
+          }
+        }
+        return out;
+      }
+    });
+  }
   // Always install URLSearchParams: goja has none, and a stub get() that
   // returns null breaks Astro.url.searchParams (e.g. /search?query=…).
   function OrvalhoURLSearchParams(init) {
