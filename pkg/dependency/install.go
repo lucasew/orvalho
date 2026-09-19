@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/lewtec/lewkit/x/taskgroup"
 )
 
 // Options configure Install, Add, and Remove.
@@ -180,6 +182,21 @@ func splitNameRange(spec string) (name, rng string, ok bool) {
 }
 
 func (o Options) materialize(ctx context.Context, g *Graph) error {
+	work := func(ctx context.Context) error {
+		return o.materializeSession(ctx, g)
+	}
+	if taskgroup.FromContext(ctx) != nil {
+		return work(ctx)
+	}
+	return taskgroup.WithSession(ctx, work)
+}
+
+type pkgJob struct {
+	idx int
+	n   Node
+}
+
+func (o Options) materializeSession(ctx context.Context, g *Graph) error {
 	st, err := o.store()
 	if err != nil {
 		return err
@@ -187,44 +204,77 @@ func (o Options) materialize(ctx context.Context, g *Graph) error {
 	if err := os.MkdirAll(st.Dir, 0o755); err != nil {
 		return err
 	}
-	for i := range g.Nodes {
-		n := g.Nodes[i]
+	var jobs []pkgJob
+	for i, n := range g.Nodes {
 		if n.Optional && !keepOptional(n.CPU) {
 			continue
 		}
-		if err := o.ensureDist(&n); err != nil {
-			return err
-		}
-		g.Nodes[i] = n
+		jobs = append(jobs, pkgJob{idx: i, n: n})
+	}
+	out, err := taskgroup.Map[pkgJob, Node]{
+		Name:     "packages",
+		Items:    jobs,
+		PoolKind: taskgroup.Internet,
+		TaskName: func(_ int, j pkgJob) string {
+			if j.n.Name != "" && j.n.Version != "" {
+				return j.n.Name + "@" + j.n.Version
+			}
+			if j.n.Name != "" {
+				return j.n.Name
+			}
+			return j.n.LockPath
+		},
+		Fn: func(ctx context.Context, s *taskgroup.Status, j pkgJob) (Node, error) {
+			return o.materializeOne(ctx, s, st, j.n)
+		},
+	}.Run(ctx)
+	if err != nil {
+		return err
+	}
+	for i, n := range out {
+		g.Nodes[jobs[i].idx] = n
 		if ent, ok := g.Packages[n.LockPath]; ok {
 			ent.Resolved = n.Resolved
 			ent.Integrity = n.Integrity
 			g.Packages[n.LockPath] = ent
 		}
-		algo, hash, err := ParseIntegrity(n.Integrity)
-		if err != nil {
-			return err
-		}
-		if err := st.Fetch(ctx, algo, hash, []string{n.Resolved}); err != nil {
-			return err
-		}
-		dest := filepath.Join(o.project(), slotDir(n.Name, n.Version))
-		if err := os.MkdirAll(dest, 0o755); err != nil {
-			return err
-		}
-		f, err := st.Open(algo, hash)
-		if err != nil {
-			return err
-		}
-		err = unpackTarball(f, dest)
-		if cerr := f.Close(); err == nil {
-			err = cerr
-		}
-		if err != nil {
-			return err
-		}
 	}
 	return (linker{root: o.project(), g: g}).run()
+}
+
+func (o Options) materializeOne(ctx context.Context, s *taskgroup.Status, st Store, n Node) (Node, error) {
+	if err := o.ensureDist(&n); err != nil {
+		return n, err
+	}
+	algo, hash, err := ParseIntegrity(n.Integrity)
+	if err != nil {
+		return n, err
+	}
+	if st.Has(algo, hash) {
+		s.Update("cached")
+	} else {
+		s.Update("fetch")
+		if err := st.Fetch(ctx, algo, hash, []string{n.Resolved}); err != nil {
+			return n, err
+		}
+	}
+	s.Update("unpack")
+	dest := filepath.Join(o.project(), slotDir(n.Name, n.Version))
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return n, err
+	}
+	f, err := st.Open(algo, hash)
+	if err != nil {
+		return n, err
+	}
+	err = unpackTarball(f, dest)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return n, err
+	}
+	return n, nil
 }
 
 // ensureDist fills Resolved and Integrity from the registry when the Lockfile

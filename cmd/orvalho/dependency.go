@@ -6,14 +6,17 @@ import (
 	"fmt"
 
 	lewcmd "github.com/lewtec/lewkit/x/cmd"
+	"github.com/lewtec/lewkit/x/taskgroup"
+	"github.com/lewtec/lewkit/x/taskgroup/progress"
 
 	"github.com/lucasew/orvalho/pkg/dependency"
 )
 
 type dependencyCmd struct {
-	Install *depInstallCmd `cmd:"install" help:"resolve the declared tree into the store"`
-	Add     *depAddCmd     `cmd:"add" help:"add a Dependency, resolve, and install"`
-	Remove  *depRemoveCmd  `cmd:"remove" help:"drop a Dependency, resolve, and install"`
+	taskgroup.Arg `flatten:"" ctx:"taskgroup"`
+	Install       *depInstallCmd `cmd:"install" help:"resolve the declared tree into the store"`
+	Add           *depAddCmd     `cmd:"add" help:"add a Dependency, resolve, and install"`
+	Remove        *depRemoveCmd  `cmd:"remove" help:"drop a Dependency, resolve, and install"`
 }
 
 type depInstallCmd struct {
@@ -35,16 +38,32 @@ func dependencyOptions(dir, store string) dependency.Options {
 	return dependency.Options{Dir: dir, StoreDir: store}
 }
 
+func runDepProgress(ctx context.Context, fn func(context.Context) error) error {
+	var s *taskgroup.Session
+	if arg, ok := lewcmd.Lookup[taskgroup.Arg](ctx, "taskgroup"); ok {
+		s, ctx = arg.Enter(ctx, taskgroup.DefaultLimits())
+	} else {
+		s, ctx = taskgroup.New(ctx, taskgroup.DefaultLimits())
+	}
+	return progress.Run(s, ctx, fn)
+}
+
 func (c *depInstallCmd) Run(ctx context.Context) error {
-	return wrapDepErr(dependencyOptions(c.Dir.Value(), c.StoreDir.Value()).Install(ctx))
+	return runDepProgress(ctx, func(ctx context.Context) error {
+		return wrapDepErr(dependencyOptions(c.Dir.Value(), c.StoreDir.Value()).Install(ctx))
+	})
 }
 
 func (c *depAddCmd) Run(ctx context.Context) error {
-	return wrapDepErr(dependencyOptions(".", c.StoreDir.Value()).Add(ctx, c.Name.Value()))
+	return runDepProgress(ctx, func(ctx context.Context) error {
+		return wrapDepErr(dependencyOptions(".", c.StoreDir.Value()).Add(ctx, c.Name.Value()))
+	})
 }
 
 func (c *depRemoveCmd) Run(ctx context.Context) error {
-	return wrapDepErr(dependencyOptions(".", c.StoreDir.Value()).Remove(ctx, c.Name.Value()))
+	return runDepProgress(ctx, func(ctx context.Context) error {
+		return wrapDepErr(dependencyOptions(".", c.StoreDir.Value()).Remove(ctx, c.Name.Value()))
+	})
 }
 
 func wrapDepErr(err error) error {
