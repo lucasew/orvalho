@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	cuelang.org/go v0.17.1
-	filippo.io/age v1.3.1
+	filippo.io/age v1.3.2
 	github.com/btcsuite/btcd/btcutil v1.1.6
 	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9
 	github.com/evanw/esbuild v0.28.2
