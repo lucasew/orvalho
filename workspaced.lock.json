@@ -11,7 +11,7 @@
       "kind": "tool",
       "ref": "github:golangci/golangci-lint",
       "depName": "golangci/golangci-lint",
-      "currentValue": "v2.13.2",
+      "currentValue": "v2.14.0",
       "datasource": "github-releases"
     },
     {
