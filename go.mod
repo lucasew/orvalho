@@ -9,11 +9,11 @@ require (
 	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9
 	github.com/evanw/esbuild v0.28.2
 	github.com/fetchurl/fetchurl v0.0.0-20260824103541-49881a25d469
-	github.com/lewtec/lewkit v0.0.0-20260919021727-9afff96741ba
+	github.com/lewtec/lewkit v0.0.0-20260926004721-11710eb97853
 	github.com/stellar/go v0.0.0-20251023205731-8cd5ab33bcdd
 	github.com/tetratelabs/wazero v1.12.0
 	github.com/tyler-smith/go-bip39 v1.1.0
-	golang.org/x/crypto v0.56.0
+	golang.org/x/crypto v0.57.0
 )
 
 require (
@@ -46,9 +46,10 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
-	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/image v0.42.0 // indirect
+	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
