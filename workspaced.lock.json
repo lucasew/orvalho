@@ -19,8 +19,8 @@
       "ref": "github:nodejs/node",
       "depName": "nodejs/node",
       "packageName": "https://github.com/nodejs/node",
-      "currentValue": "v24.11.0",
-      "currentDigest": "3a6b2fa5cf599ae579eb07f4d2977592b4d64ce0",
+      "currentValue": "v26.12.1",
+      "currentDigest": "bc2e01dcf6acd5cf7d169b5f26cf89abaaeb41f1",
       "datasource": "git-refs"
     },
     {
