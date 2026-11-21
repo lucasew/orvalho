@@ -8,7 +8,7 @@ require (
 	github.com/btcsuite/btcd/btcutil v1.2.0
 	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9
 	github.com/evanw/esbuild v0.28.2
-	github.com/fetchurl/fetchurl v0.0.0-20260824103541-49881a25d469
+	github.com/fetchurl/fetchurl v0.0.0-20261118141047-28c2ace880da
 	github.com/lewtec/lewkit v0.0.0-20260919021727-9afff96741ba
 	github.com/stellar/go v0.0.0-20251023205731-8cd5ab33bcdd
 	github.com/tetratelabs/wazero v1.12.0
